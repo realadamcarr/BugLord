@@ -1,7 +1,7 @@
+import { ThemeMode, useTheme } from '@/contexts/ThemeContext';
 import React from 'react';
 import { StyleSheet, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from './ThemedText';
-import { useTheme, ThemeMode } from '@/contexts/ThemeContext';
 
 export const ThemeToggle: React.FC = () => {
   const { theme, themeMode, setThemeMode } = useTheme();

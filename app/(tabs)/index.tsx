@@ -1,3 +1,4 @@
+import { AdminPanel } from '@/components/AdminPanel';
 import { Character, getNextUnlock } from '@/components/Character';
 import { EnhancedNoteCard } from '@/components/EnhancedNoteCard';
 import { LevelUpNotification } from '@/components/LevelUpNotification';
@@ -5,7 +6,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
 import { useTheme } from '@/contexts/ThemeContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useUserProgress } from '@/contexts/UserProgressContext';
 import React, { useEffect, useState } from 'react';
 import { Alert, FlatList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
@@ -13,7 +14,7 @@ interface Note {
   id: string;
   title: string;
   content: string;
-  createdAt: Date;
+  createdAt: Date | string; // Can be string when loaded from AsyncStorage
   isCompleted: boolean;
   xpReward: number;
 }
@@ -26,49 +27,40 @@ interface UserProgress {
 
 export default function HomeScreen() {
   const { theme } = useTheme();
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [userProgress, setUserProgress] = useState<UserProgress>({ level: 1, xp: 0, totalXp: 0 });
+  const { notes, userProgress, updateBoth } = useUserProgress();
   const [newNoteTitle, setNewNoteTitle] = useState('');
   const [newNoteContent, setNewNoteContent] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [showLevelUp, setShowLevelUp] = useState(false);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [adminTapCount, setAdminTapCount] = useState(0);
   const [levelUpData, setLevelUpData] = useState({ newLevel: 1, xpGained: 0, nextUnlock: null as any });
 
   const styles = createStyles(theme);
 
+  // Reset admin tap count after 3 seconds of inactivity
   useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    try {
-      const savedNotes = await AsyncStorage.getItem('notes');
-      const savedProgress = await AsyncStorage.getItem('userProgress');
-      
-      if (savedNotes) {
-        setNotes(JSON.parse(savedNotes));
-      }
-      
-      if (savedProgress) {
-        setUserProgress(JSON.parse(savedProgress));
-      }
-    } catch (error) {
-      console.error('Error loading data:', error);
+    if (adminTapCount > 0) {
+      const timeout = setTimeout(() => {
+        setAdminTapCount(0);
+      }, 3000);
+      return () => clearTimeout(timeout);
     }
-  };
+  }, [adminTapCount]);
 
-  const saveData = async (newNotes: Note[], newProgress: UserProgress) => {
-    try {
-      await AsyncStorage.setItem('notes', JSON.stringify(newNotes));
-      await AsyncStorage.setItem('userProgress', JSON.stringify(newProgress));
-    } catch (error) {
-      console.error('Error saving data:', error);
+  const handleAdminTap = () => {
+    const newCount = adminTapCount + 1;
+    setAdminTapCount(newCount);
+    
+    if (newCount >= 5) {
+      setShowAdminPanel(true);
+      setAdminTapCount(0);
     }
   };
 
   const calculateXpForNextLevel = (level: number) => level * 100;
 
-  const addNote = () => {
+  const addNote = async () => {
     if (!newNoteTitle.trim()) {
       Alert.alert('Error', 'Please enter a note title');
       return;
@@ -90,8 +82,7 @@ export default function HomeScreen() {
     };
 
     const updatedNotes = [...notes, newNote];
-    setNotes(updatedNotes);
-    saveData(updatedNotes, userProgress);
+    await updateBoth(updatedNotes, userProgress);
     
     setNewNoteTitle('');
     setNewNoteContent('');
@@ -101,7 +92,7 @@ export default function HomeScreen() {
     Alert.alert('Note Created!', `"${newNote.title}" is ready to complete for ${newNote.xpReward} XP!`);
   };
 
-  const completeTask = (noteId: string) => {
+  const completeTask = async (noteId: string) => {
     const noteIndex = notes.findIndex(note => note.id === noteId);
     if (noteIndex === -1 || notes[noteIndex].isCompleted) return;
 
@@ -125,9 +116,7 @@ export default function HomeScreen() {
 
     const newProgress = { level: newLevel, xp: newXp, totalXp: newTotalXp };
     
-    setNotes(updatedNotes);
-    setUserProgress(newProgress);
-    saveData(updatedNotes, newProgress);
+    await updateBoth(updatedNotes, newProgress);
 
     // Enhanced feedback with level up modal
     if (leveledUp) {
@@ -148,6 +137,11 @@ export default function HomeScreen() {
   };
 
   const deleteNote = (noteId: string) => {
+    const handleDelete = async () => {
+      const updatedNotes = notes.filter(note => note.id !== noteId);
+      await updateBoth(updatedNotes, userProgress);
+    };
+
     Alert.alert(
       'Delete Note',
       'Are you sure you want to delete this note?',
@@ -156,11 +150,7 @@ export default function HomeScreen() {
         { 
           text: 'Delete', 
           style: 'destructive',
-          onPress: () => {
-            const updatedNotes = notes.filter(note => note.id !== noteId);
-            setNotes(updatedNotes);
-            saveData(updatedNotes, userProgress);
-          }
+          onPress: () => { handleDelete(); }
         }
       ]
     );
@@ -210,7 +200,9 @@ export default function HomeScreen() {
         <View style={styles.headerContent}>
           <Character level={userProgress.level} size="medium" />
           <View style={styles.progressInfo}>
-            <ThemedText style={styles.levelText}>Level {userProgress.level}</ThemedText>
+            <TouchableOpacity onPress={handleAdminTap} activeOpacity={0.7}>
+              <ThemedText style={styles.levelText}>Level {userProgress.level}</ThemedText>
+            </TouchableOpacity>
             <XPProgressBar
               currentXP={userProgress.xp}
               maxXP={xpForNextLevel}
@@ -277,6 +269,12 @@ export default function HomeScreen() {
             </ThemedText>
           </ThemedView>
         }
+      />
+
+      {/* Admin Panel */}
+      <AdminPanel 
+        visible={showAdminPanel} 
+        onClose={() => setShowAdminPanel(false)} 
       />
     </ThemedView>
   );

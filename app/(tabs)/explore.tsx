@@ -1,3 +1,4 @@
+import { AdminPanel } from '@/components/AdminPanel';
 import { Character } from '@/components/Character';
 import { CosmeticsShowcase } from '@/components/CosmeticsShowcase';
 import { EnhancedStatCard } from '@/components/EnhancedStatCard';
@@ -6,9 +7,9 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
 import { useTheme } from '@/contexts/ThemeContext';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useUserProgress } from '@/contexts/UserProgressContext';
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 
 interface Note {
   id: string;
@@ -27,9 +28,10 @@ interface UserProgress {
 
 export default function StatsScreen() {
   const { theme } = useTheme();
-  const [userProgress, setUserProgress] = useState<UserProgress>({ level: 1, xp: 0, totalXp: 0 });
-  const [notes, setNotes] = useState<Note[]>([]);
+  const { userProgress, notes } = useUserProgress();
   const [activeTab, setActiveTab] = useState<'stats' | 'cosmetics'>('stats');
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [adminTapCount, setAdminTapCount] = useState(0);
   const [stats, setStats] = useState({
     totalNotes: 0,
     completedNotes: 0,
@@ -41,29 +43,32 @@ export default function StatsScreen() {
   const styles = createStyles(theme);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    calculateStats();
+  }, [notes, userProgress]);
+
+  // Reset admin tap count after 3 seconds of inactivity
+  useEffect(() => {
+    if (adminTapCount > 0) {
+      const timeout = setTimeout(() => {
+        setAdminTapCount(0);
+      }, 3000);
+      return () => clearTimeout(timeout);
+    }
+  }, [adminTapCount]);
+
+  const handleAdminTap = () => {
+    const newCount = adminTapCount + 1;
+    setAdminTapCount(newCount);
+    
+    if (newCount >= 5) {
+      setShowAdminPanel(true);
+      setAdminTapCount(0);
+    }
+  };
 
   useEffect(() => {
     calculateStats();
   }, [notes, userProgress]);
-
-  const loadData = async () => {
-    try {
-      const savedNotes = await AsyncStorage.getItem('notes');
-      const savedProgress = await AsyncStorage.getItem('userProgress');
-      
-      if (savedNotes) {
-        setNotes(JSON.parse(savedNotes));
-      }
-      
-      if (savedProgress) {
-        setUserProgress(JSON.parse(savedProgress));
-      }
-    } catch (error) {
-      console.error('Error loading data:', error);
-    }
-  };
 
   const calculateStats = () => {
     const totalNotes = notes.length;
@@ -130,7 +135,9 @@ export default function StatsScreen() {
             <View style={styles.levelHeader}>
               <ThemedText style={styles.levelEmoji}>⭐</ThemedText>
               <View style={styles.levelInfo}>
-                <ThemedText style={styles.levelText}>Level {userProgress.level}</ThemedText>
+                <TouchableOpacity onPress={handleAdminTap} activeOpacity={0.7}>
+                  <ThemedText style={styles.levelText}>Level {userProgress.level}</ThemedText>
+                </TouchableOpacity>
                 <ThemedText style={styles.xpText}>Progress to next level</ThemedText>
               </View>
             </View>
@@ -229,6 +236,12 @@ export default function StatsScreen() {
       ) : (
         <CosmeticsShowcase level={userProgress.level} />
       )}
+
+      {/* Admin Panel */}
+      <AdminPanel 
+        visible={showAdminPanel} 
+        onClose={() => setShowAdminPanel(false)} 
+      />
     </View>
   );
 }

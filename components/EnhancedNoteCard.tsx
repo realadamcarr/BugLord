@@ -1,14 +1,14 @@
+import { useTheme } from '@/contexts/ThemeContext';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { ThemedText } from './ThemedText';
 import { ThemedView } from './ThemedView';
-import { useTheme } from '@/contexts/ThemeContext';
 
 interface Note {
   id: string;
   title: string;
   content: string;
-  createdAt: Date;
+  createdAt: Date | string; // Can be string when loaded from AsyncStorage
   isCompleted: boolean;
   xpReward: number;
 }
@@ -26,9 +26,11 @@ const getXPTierInfo = (xp: number, theme: any) => {
   return { icon: '📝', color: theme.colors.tierBasic, tier: 'Basic' };
 };
 
-const formatTimeAgo = (date: Date): string => {
+const formatTimeAgo = (date: Date | string): string => {
   const now = new Date();
-  const diff = now.getTime() - date.getTime();
+  // Handle both Date objects and date strings from AsyncStorage
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  const diff = now.getTime() - dateObj.getTime();
   const minutes = Math.floor(diff / 60000);
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);

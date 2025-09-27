@@ -13,32 +13,32 @@ export const SPRITE_ASSETS = {
   
   // Hats
   hats: {
-    // hat_cap: require('@/assets/sprites/hats/baseball_cap.png'),
-    // hat_crown: require('@/assets/sprites/hats/crown.png'), 
-    // hat_wizard: require('@/assets/sprites/hats/wizard_hat.png'),
-    // hat_party: require('@/assets/sprites/hats/party_hat.png'),
+    hat_cap: require('@/assets/sprites/characters/hats/baseball_cap.png'),
+    hat_crown: require('@/assets/sprites/characters/hats/crown.png'), 
+    hat_wizard: require('@/assets/sprites/characters/hats/wizard_hat.png'),
+    hat_party: require('@/assets/sprites/characters/hats/party_hat.png'),
   },
   
   // Outfits
   outfits: {
-    // outfit_casual: require('@/assets/sprites/outfits/casual.png'),
-    // outfit_formal: require('@/assets/sprites/outfits/formal.png'),
-    // outfit_superhero: require('@/assets/sprites/outfits/superhero.png'),
-    // outfit_ninja: require('@/assets/sprites/outfits/ninja.png'),
+    outfit_casual: require('@/assets/sprites/characters/outfits/casual.png'),
+    outfit_formal: require('@/assets/sprites/characters/outfits/formal.png'),
+    outfit_superhero: require('@/assets/sprites/characters/outfits/superhero.png'),
+    outfit_ninja: require('@/assets/sprites/characters/outfits/ninja.png'),
   },
   
   // Accessories
   accessories: {
-    // acc_sunglasses: require('@/assets/sprites/accessories/sunglasses.png'),
-    // acc_briefcase: require('@/assets/sprites/accessories/briefcase.png'),
-    // acc_trophy: require('@/assets/sprites/accessories/trophy.png'),
+    acc_sunglasses: require('@/assets/sprites/characters/accessories/sunglasses.png'),
+    acc_briefcase: require('@/assets/sprites/characters/accessories/briefcase.png'),
+    acc_trophy: require('@/assets/sprites/characters/accessories/trophy.png'),
   },
   
   // Backgrounds
   backgrounds: {
-    // bg_forest: require('@/assets/sprites/backgrounds/forest.png'),
-    // bg_city: require('@/assets/sprites/backgrounds/city.png'),
-    // bg_space: require('@/assets/sprites/backgrounds/space.png'),
+    bg_forest: require('@/assets/sprites/characters/backgrounds/forest.png'),
+    bg_city: require('@/assets/sprites/characters/backgrounds/city.png'),
+    bg_space: require('@/assets/sprites/characters/backgrounds/space.png'),
   },
 };
 

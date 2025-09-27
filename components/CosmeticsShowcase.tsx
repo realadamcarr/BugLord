@@ -1,17 +1,22 @@
 import { COSMETICS, getNextUnlock, getUnlockedCosmetics, type Cosmetic } from '@/components/Character';
+import { CharacterCustomizationModal } from '@/components/CharacterCustomizationModal';
 import { SPRITE_ASSETS } from '@/components/SpriteAssets';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import React from 'react';
-import { Image, ScrollView, StyleSheet, View } from 'react-native';
+import { useTheme } from '@/contexts/ThemeContext';
+import React, { useState } from 'react';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface CosmeticsShowcaseProps {
   level: number;
 }
 
 export const CosmeticsShowcase: React.FC<CosmeticsShowcaseProps> = ({ level }) => {
+  const { theme } = useTheme();
+  const [showCustomization, setShowCustomization] = useState(false);
   const unlockedCosmetics = getUnlockedCosmetics(level);
   const nextUnlock = getNextUnlock(level);
+  const styles = createStyles(theme);
   
   const groupedCosmetics = COSMETICS.reduce((acc, cosmetic) => {
     if (!acc[cosmetic.type]) {
@@ -59,7 +64,11 @@ export const CosmeticsShowcase: React.FC<CosmeticsShowcaseProps> = ({ level }) =
         );
       }
     } catch (error) {
-      console.log(`Sprite not found for ${cosmetic.spriteKey}, using emoji fallback`);
+      if (error instanceof Error) {
+        console.log(`Sprite not found for ${cosmetic.spriteKey}, using emoji fallback:`, error.message);
+      } else {
+        console.log(`Sprite not found for ${cosmetic.spriteKey}, using emoji fallback`);
+      }
     }
 
     // Fallback to emoji
@@ -111,7 +120,7 @@ export const CosmeticsShowcase: React.FC<CosmeticsShowcaseProps> = ({ level }) =
         </ThemedText>
         <View style={styles.cosmeticsGrid}>
           {cosmetics
-            .sort((a, b) => a.unlockLevel - b.unlockLevel)
+            .toSorted((a, b) => a.unlockLevel - b.unlockLevel)
             .map(renderCosmeticItem)}
         </View>
       </ThemedView>
@@ -125,9 +134,19 @@ export const CosmeticsShowcase: React.FC<CosmeticsShowcaseProps> = ({ level }) =
         <ThemedText style={styles.headerSubtitle}>
           Unlock new cosmetics by leveling up!
         </ThemedText>
-        <ThemedText style={styles.unlockedCount}>
-          {unlockedCosmetics.length}/{COSMETICS.length} Unlocked
-        </ThemedText>
+        <View style={styles.headerActions}>
+          <ThemedText style={styles.unlockedCount}>
+            {unlockedCosmetics.length}/{COSMETICS.length} Unlocked
+          </ThemedText>
+          {unlockedCosmetics.length > 0 && (
+            <TouchableOpacity 
+              style={styles.customizeButton} 
+              onPress={() => setShowCustomization(true)}
+            >
+              <Text style={styles.customizeButtonText}>✨ Customize</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </ThemedView>
 
       {nextUnlock && (
@@ -153,11 +172,17 @@ export const CosmeticsShowcase: React.FC<CosmeticsShowcaseProps> = ({ level }) =
       {Object.entries(groupedCosmetics).map(([type, cosmetics]) =>
         renderCosmeticCategory(type, cosmetics)
       )}
+
+      <CharacterCustomizationModal
+        visible={showCustomization}
+        onClose={() => setShowCustomization(false)}
+        level={level}
+      />
     </ScrollView>
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: any) => StyleSheet.create({
   container: {
     flex: 1,
     padding: 16,
@@ -167,7 +192,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     padding: 16,
     borderRadius: 12,
-    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    backgroundColor: theme.isDark ? 'rgba(10, 132, 255, 0.15)' : 'rgba(0, 122, 255, 0.1)',
   },
   headerTitle: {
     fontSize: 24,
@@ -182,15 +207,33 @@ const styles = StyleSheet.create({
   unlockedCount: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#4CAF50',
+    color: theme.colors.success,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 8,
+  },
+  customizeButton: {
+    backgroundColor: theme.colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  customizeButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
   },
   nextUnlockSection: {
     padding: 16,
     marginBottom: 24,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 215, 0, 0.1)',
+    backgroundColor: theme.isDark ? 'rgba(255, 215, 0, 0.15)' : 'rgba(255, 215, 0, 0.1)',
     borderWidth: 2,
-    borderColor: 'rgba(255, 215, 0, 0.3)',
+    borderColor: theme.isDark ? 'rgba(255, 215, 0, 0.4)' : 'rgba(255, 215, 0, 0.3)',
   },
   nextUnlockTitle: {
     fontSize: 18,
@@ -250,9 +293,9 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
     borderRadius: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.02)',
+    backgroundColor: theme.isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: theme.colors.border,
     alignItems: 'center',
   },
   cosmeticIconContainer: {
@@ -262,11 +305,11 @@ const styles = StyleSheet.create({
     height: 40,
   },
   unlockedItem: {
-    backgroundColor: 'rgba(76, 175, 80, 0.1)',
-    borderColor: '#4CAF50',
+    backgroundColor: theme.isDark ? 'rgba(50, 215, 75, 0.15)' : 'rgba(76, 175, 80, 0.1)',
+    borderColor: theme.colors.success,
   },
   cosmeticItemHighlight: {
-    backgroundColor: 'rgba(255, 215, 0, 0.1)',
+    backgroundColor: theme.isDark ? 'rgba(255, 215, 0, 0.15)' : 'rgba(255, 215, 0, 0.1)',
     borderColor: '#FFD700',
     borderWidth: 2,
   },
@@ -289,7 +332,7 @@ const styles = StyleSheet.create({
   unlockLevel: {
     fontSize: 12,
     textAlign: 'center',
-    color: '#666',
+    color: theme.colors.textSecondary,
   },
   nextUnlockText: {
     color: '#FF8C00',
