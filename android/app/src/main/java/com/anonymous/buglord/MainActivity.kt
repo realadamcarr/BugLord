@@ -1,4 +1,4 @@
-package com.anonymous.notequest
+package com.anonymous.buglord
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

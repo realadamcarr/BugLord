@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "BugLord",
-    "slug": "buglord",
+    "slug": "note-quest",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -54,6 +54,7 @@
       "eas": {
         "projectId": "af4e786a-105a-4d73-8ba5-26832e7561ed"
       }
-    }
+    },
+    "owner": "stackzilla"
   }
 }

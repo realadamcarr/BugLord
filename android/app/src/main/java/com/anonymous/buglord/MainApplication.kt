@@ -1,4 +1,4 @@
-package com.anonymous.notequest
+package com.anonymous.buglord
 
 import android.app.Application
 import android.content.res.Configuration
