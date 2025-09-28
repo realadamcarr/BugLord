@@ -7,10 +7,10 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import TabBarBackground from '@/components/ui/TabBarBackground';
 
 // Icon components moved outside for better performance
-const HuntIcon = ({ color, focused }: { color: string; focused: boolean }) => (
+const TrainIcon = ({ color, focused }: { color: string; focused: boolean }) => (
   <IconSymbol 
     size={focused ? 32 : 28} 
-    name="camera" 
+    name="dumbbell" 
     color={focused ? '#5c715e' : color}
     style={{
       transform: [{ scale: focused ? 1.1 : 1 }],
@@ -18,10 +18,21 @@ const HuntIcon = ({ color, focused }: { color: string; focused: boolean }) => (
   />
 );
 
-const CollectionIcon = ({ color, focused }: { color: string; focused: boolean }) => (
+const CaptureIcon = ({ color, focused }: { color: string; focused: boolean }) => (
+  <IconSymbol 
+    size={focused ? 36 : 32} 
+    name="camera" 
+    color={focused ? '#5c715e' : color}
+    style={{
+      transform: [{ scale: focused ? 1.2 : 1 }],
+    }}
+  />
+);
+
+const PlayerIcon = ({ color, focused }: { color: string; focused: boolean }) => (
   <IconSymbol 
     size={focused ? 32 : 28} 
-    name="book.closed" 
+    name="person.circle" 
     color={focused ? '#5c715e' : color}
     style={{
       transform: [{ scale: focused ? 1.1 : 1 }],
@@ -73,17 +84,27 @@ export default function TabLayout() {
         },
       }}>
       <Tabs.Screen
-        name="index"
+        name="train"
         options={{
-          title: 'Hunt',
-          tabBarIcon: HuntIcon,
+          title: 'Train',
+          tabBarIcon: TrainIcon,
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="index"
         options={{
-          title: 'Collection',
-          tabBarIcon: CollectionIcon,
+          title: 'Capture',
+          tabBarIcon: CaptureIcon,
+          tabBarIconStyle: {
+            marginBottom: -4, // Extra margin for larger capture icon
+          },
+        }}
+      />
+      <Tabs.Screen
+        name="player"
+        options={{
+          title: 'Player',
+          tabBarIcon: PlayerIcon,
         }}
       />
     </Tabs>

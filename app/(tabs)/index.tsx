@@ -1,59 +1,140 @@
 import { BugCamera } from '@/components/BugCamera';
+import { BugInfoModal } from '@/components/BugInfoModal';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { Bug, RARITY_CONFIG, SAMPLE_BUGS } from '@/types/Bug';
+import { BugIdentificationResult, bugIdentificationService } from '@/services/BugIdentificationService';
+import { Bug, RARITY_CONFIG } from '@/types/Bug';
 import React, { useState } from 'react';
-import { Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
 
-export default function BugHubScreen() {
+export default function CaptureScreen() {
   const { theme } = useTheme();
   const { collection, addBugToCollection, addBugToParty, loading } = useBugCollection();
   const [showCamera, setShowCamera] = useState(false);
   const [showBugIdentification, setShowBugIdentification] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
+  const [isIdentifying, setIsIdentifying] = useState(false);
+  const [identificationResult, setIdentificationResult] = useState<BugIdentificationResult | null>(null);
+  const [identifiedBug, setIdentifiedBug] = useState<Bug | null>(null);
 
   const styles = createStyles(theme);
 
-  const handleCameraCapture = (photoUri: string) => {
+  const handleCameraCapture = async (photoUri: string) => {
     setCapturedPhoto(photoUri);
     setShowCamera(false);
     setShowBugIdentification(true);
+    setIsIdentifying(true);
+    
+    try {
+      // Process the image: crop insect and create pixelated icon
+      console.log('🖼️ Processing insect photo...');
+      
+      // Import the image processing service
+      const { imageProcessingService } = await import('@/services/ImageProcessingService');
+      
+      // Process the image to detect, crop and pixelate the insect
+      const processedImage = await imageProcessingService.processInsectPhoto(photoUri, {
+        pixelSize: 8,
+        iconSize: 64,
+        quality: 0.8,
+        detectObjects: true
+      });
+      
+      console.log('📸 Image processed:', processedImage);
+      
+      // Call the bug identification API with the cropped image
+      const result = await bugIdentificationService.identifyBug(processedImage.croppedImage);
+      
+      // Add the pixelated icon to the result for later use
+      result.pixelatedIcon = processedImage.pixelatedIcon;
+      
+      setIdentificationResult(result);
+      
+      // Create a Bug object for the modal
+      const bugData: Partial<Bug> = {
+        name: result.name,
+        species: result.species,
+        description: result.description,
+        rarity: result.rarity,
+        biome: result.biome,
+        photo: capturedPhoto || undefined,
+        pixelArt: result.pixelatedIcon,
+        traits: result.traits,
+        size: result.size,
+        xpValue: RARITY_CONFIG[result.rarity].xpRange[0],
+        level: 1,
+        xp: 0,
+        maxXp: 100,
+        caughtAt: new Date(),
+      };
+      
+      setIdentifiedBug(bugData as Bug);
+      
+      console.log('🐛 Bug identified:', result);
+    } catch (error) {
+      console.error('Bug identification failed:', error);
+      Alert.alert(
+        'Processing Error', 
+        'Could not process the image automatically. You can still add the bug manually!'
+      );
+    } finally {
+      setIsIdentifying(false);
+    }
   };
 
-  const handleBugIdentification = async (bugName?: string) => {
-    if (!capturedPhoto) return;
+  const handleBugInfoConfirm = async (nickname?: string, addToParty?: boolean, replaceBugId?: string) => {
+    if (!identifiedBug) return;
 
-    // For MVP, we'll use a random bug from our sample data
-    const randomBug = SAMPLE_BUGS[Math.floor(Math.random() * SAMPLE_BUGS.length)];
-    
-    const newBug = await addBugToCollection({
-      name: bugName || randomBug.name,
-      species: randomBug.species,
-      description: randomBug.description,
-      rarity: randomBug.rarity,
-      biome: randomBug.biome,
-      photo: capturedPhoto,
-      traits: randomBug.traits,
-      size: randomBug.size,
-      xpValue: RARITY_CONFIG[randomBug.rarity].xpRange[0],
-    });
+    try {
+      // Add nickname if provided
+      if (nickname) {
+        identifiedBug.nickname = nickname;
+      }
 
-    // Try to add to party automatically
-    const addedToParty = addBugToParty(newBug);
-    
-    Alert.alert(
-      '🐛 Bug Captured!',
-      `You caught a ${newBug.rarity} ${newBug.name}!\n+${newBug.xpValue} XP${addedToParty ? '\n\nAdded to your party!' : '\n\nParty is full - check your collection!'}`,
-      [{ text: 'Awesome!', style: 'default' }]
-    );
+      // Add the bug to collection
+      const newBug = await addBugToCollection(identifiedBug);
 
+      if (addToParty) {
+        if (replaceBugId) {
+          // TODO: Implement party swap functionality
+          console.log('TODO: Replace party bug', replaceBugId, 'with', newBug.id);
+        } else {
+          // Add to party if there's space
+          addBugToParty(newBug);
+        }
+      }
+
+      const confidenceText = identificationResult?.isFromAPI 
+        ? `\nConfidence: ${Math.round((identificationResult.confidence || 0) * 100)}%` 
+        : '';
+      
+      Alert.alert(
+        '🐛 Bug Captured!',
+        `You caught a ${newBug.rarity} ${newBug.name}!${confidenceText}\n+${newBug.xpValue} XP${addToParty ? '\n\nAdded to your party!' : '\n\nAdded to your collection!'}`,
+        [{ text: 'Awesome!', style: 'default' }]
+      );
+
+      // Reset state
+      setShowBugIdentification(false);
+      setCapturedPhoto(null);
+      setIdentificationResult(null);
+      setIdentifiedBug(null);
+    } catch (error) {
+      console.error('Error adding bug to collection:', error);
+      Alert.alert('Error', 'Failed to add bug to collection. Please try again.');
+    }
+  };
+
+  const handleBugInfoClose = () => {
     setShowBugIdentification(false);
     setCapturedPhoto(null);
+    setIdentificationResult(null);
+    setIdentifiedBug(null);
   };
 
   const renderPartySlot = (bug: Bug | null, index: number) => (
@@ -157,7 +238,9 @@ export default function BugHubScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.recentList}>
               {collection.bugs.slice(-5).reverse().map((bug) => (
                 <View key={bug.id} style={styles.recentBugCard}>
-                  {bug.photo ? (
+                  {bug.pixelArt ? (
+                    <Image source={{ uri: bug.pixelArt }} style={styles.recentBugPhoto} />
+                  ) : bug.photo ? (
                     <Image source={{ uri: bug.photo }} style={styles.recentBugPhoto} />
                   ) : (
                     <View style={styles.recentBugPlaceholder}>
@@ -189,41 +272,40 @@ export default function BugHubScreen() {
         />
       </Modal>
 
-      {/* Bug Identification Modal */}
-      <Modal
-        visible={showBugIdentification}
-        animationType="slide"
-        transparent={true}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.identificationModal}>
-            <ThemedText style={styles.modalTitle}>🔍 Bug Identified!</ThemedText>
-            {capturedPhoto && (
-              <Image source={{ uri: capturedPhoto }} style={styles.capturedPhotoPreview} />
-            )}
-            <ThemedText style={styles.modalText}>
-              Great catch! This looks like a new species for your collection.
-            </ThemedText>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={() => handleBugIdentification()}
-              >
-                <ThemedText style={styles.modalButtonText}>Add to Collection</ThemedText>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.secondaryButton]}
-                onPress={() => {
-                  setShowBugIdentification(false);
-                  setCapturedPhoto(null);
-                }}
-              >
-                <ThemedText style={styles.secondaryButtonText}>Discard</ThemedText>
-              </TouchableOpacity>
+      {/* Loading Modal for AI Processing */}
+      {isIdentifying && (
+        <Modal
+          visible={isIdentifying}
+          animationType="fade"
+          transparent={true}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.loadingModal}>
+              <ThemedText style={styles.modalTitle}>🤖 AI Analyzing...</ThemedText>
+              {capturedPhoto && (
+                <Image source={{ uri: capturedPhoto }} style={styles.capturedPhotoPreview} />
+              )}
+              <ActivityIndicator 
+                size="large" 
+                color={theme.colors.primary} 
+                style={styles.loadingIndicator}
+              />
+              <ThemedText style={styles.modalText}>
+                Using advanced AI to identify your bug...
+              </ThemedText>
             </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
+      )}
+
+      {/* Bug Information Modal */}
+      <BugInfoModal
+        visible={showBugIdentification && !isIdentifying}
+        bug={identifiedBug}
+        onClose={handleBugInfoClose}
+        onConfirm={handleBugInfoConfirm}
+        isNewCatch={true}
+      />
     </ThemedView>
   );
 }
@@ -453,7 +535,7 @@ const createStyles = (theme: any) => StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  identificationModal: {
+  loadingModal: {
     backgroundColor: theme.colors.surface,
     borderRadius: 20,
     padding: 24,
@@ -501,5 +583,55 @@ const createStyles = (theme: any) => StyleSheet.create({
     color: theme.colors.text,
     fontSize: 16,
     fontWeight: '600',
+  },
+  loadingIndicator: {
+    marginVertical: 20,
+  },
+  resultContainer: {
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  bugName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 5,
+  },
+  bugSpecies: {
+    fontSize: 18,
+    fontStyle: 'italic',
+    marginBottom: 10,
+    color: '#666',
+  },
+  bugDescription: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 15,
+    paddingHorizontal: 10,
+  },
+  detailsContainer: {
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 15,
+  },
+
+  detailText: {
+    fontSize: 14,
+  },
+  confidenceText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    color: '#888',
+  },
+  alternateButton: {
+    backgroundColor: '#666',
+  },
+  alternateButtonText: {
+    color: '#fff',
+    fontSize: 16,
   },
 });

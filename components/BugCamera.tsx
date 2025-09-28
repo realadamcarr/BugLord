@@ -181,8 +181,8 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
     try {
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.8,
-        base64: false,
-        exif: false,
+        base64: true, // Enable base64 for API calls
+        exif: true, // Include EXIF data for better analysis
       });
 
       if (photo?.uri) {
