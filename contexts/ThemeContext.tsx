@@ -45,31 +45,31 @@ const lightTheme: Theme = {
   mode: 'light',
   isDark: false,
   colors: {
-    background: '#F5F5F7',
-    surface: '#FFFFFF',
-    card: '#FFFFFF',
+    background: '#f2f9f1',     // Very light nature green
+    surface: '#ddeedf',        // Light sage green
+    card: '#ddeedf',           // Light sage green
     
-    text: '#1D1D1F',
-    textSecondary: '#86868B',
-    textMuted: '#C7C7CC',
+    text: '#2c3e2d',           // Dark forest text
+    textSecondary: '#5c715e',  // Deep forest green
+    textMuted: '#8a9c8d',      // Muted sage
     
-    primary: '#007AFF',
-    primaryLight: 'rgba(0, 122, 255, 0.1)',
-    success: '#4CAF50',
-    warning: '#FF9800',
-    error: '#FF6B6B',
+    primary: '#5c715e',        // Deep forest green
+    primaryLight: 'rgba(92, 113, 94, 0.1)',
+    success: '#4a7c59',        // Success green
+    warning: '#b8860b',        // Natural gold
+    error: '#8b4513',          // Earth brown for errors
     
-    border: '#E0E0E0',
-    separator: 'rgba(0, 0, 0, 0.1)',
-    shadow: '#000000',
+    border: '#b6cdbd',         // Medium green border
+    separator: 'rgba(92, 113, 94, 0.1)',
+    shadow: '#5c715e',
     
-    tierBasic: '#4CAF50',
-    tierGood: '#2196F3',
-    tierRare: '#FF9800',
-    tierEpic: '#9C27B0',
+    tierBasic: '#4a7c59',      // Forest success green
+    tierGood: '#5c715e',       // Deep forest
+    tierRare: '#b8860b',       // Natural gold
+    tierEpic: '#704214',       // Rich earth brown
     
-    xpFill: '#4CAF50',
-    xpBackground: '#E5E5EA',
+    xpFill: '#5c715e',         // Deep forest green
+    xpBackground: '#b6cdbd',   // Medium sage
   },
 };
 
@@ -77,31 +77,31 @@ const darkTheme: Theme = {
   mode: 'dark',
   isDark: true,
   colors: {
-    background: '#000000',
-    surface: '#1C1C1E',
-    card: '#2C2C2E',
+    background: '#1a2e1d',     // Dark forest background
+    surface: '#2d4a32',        // Dark forest card background  
+    card: '#2d4a32',           // Dark forest card background
     
-    text: '#FFFFFF',
-    textSecondary: '#8E8E93',
-    textMuted: '#48484A',
+    text: '#e8f5e8',           // Very light green text
+    textSecondary: '#b6cdbd',  // Medium sage green
+    textMuted: '#6b8471',      // Dark muted sage
     
-    primary: '#0A84FF',
-    primaryLight: 'rgba(10, 132, 255, 0.15)',
-    success: '#32D74B',
-    warning: '#FF9F0A',
-    error: '#FF453A',
+    primary: '#b6cdbd',        // Light sage accent
+    primaryLight: 'rgba(182, 205, 189, 0.15)',
+    success: '#7fb069',        // Brighter success green
+    warning: '#d4af37',        // Brighter natural gold
+    error: '#cd853f',          // Lighter earth brown
     
-    border: '#38383A',
-    separator: 'rgba(255, 255, 255, 0.1)',
+    border: '#5c715e',         // Deep forest border
+    separator: 'rgba(182, 205, 189, 0.1)',
     shadow: '#000000',
     
-    tierBasic: '#32D74B',
-    tierGood: '#007AFF',
-    tierRare: '#FF9F0A',
-    tierEpic: '#BF5AF2',
+    tierBasic: '#7fb069',      // Bright forest green
+    tierGood: '#b6cdbd',       // Light sage
+    tierRare: '#d4af37',       // Bright gold
+    tierEpic: '#daa520',       // Rich gold
     
-    xpFill: '#32D74B',
-    xpBackground: '#3A3A3C',
+    xpFill: '#b6cdbd',         // Light sage green
+    xpBackground: '#5c715e',   // Deep forest
   },
 };
 

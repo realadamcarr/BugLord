@@ -2,7 +2,7 @@
 # Run these after creating your GitHub repository
 
 # Add GitHub remote (replace 'yourusername' with your GitHub username)
-git remote add origin https://github.com/yourusername/note-quest.git
+git remote add origin https://github.com/yourusername/buglord.git
 
 # Push to GitHub
 git branch -M main

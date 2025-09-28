@@ -7,22 +7,22 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import TabBarBackground from '@/components/ui/TabBarBackground';
 
 // Icon components moved outside for better performance
-const NotesIcon = ({ color, focused }: { color: string; focused: boolean }) => (
+const HuntIcon = ({ color, focused }: { color: string; focused: boolean }) => (
   <IconSymbol 
     size={focused ? 32 : 28} 
-    name="doc.text" 
-    color={focused ? '#007AFF' : color}
+    name="camera" 
+    color={focused ? '#5c715e' : color}
     style={{
       transform: [{ scale: focused ? 1.1 : 1 }],
     }}
   />
 );
 
-const CharacterIcon = ({ color, focused }: { color: string; focused: boolean }) => (
+const CollectionIcon = ({ color, focused }: { color: string; focused: boolean }) => (
   <IconSymbol 
     size={focused ? 32 : 28} 
-    name="person.circle" 
-    color={focused ? '#007AFF' : color}
+    name="book.closed" 
+    color={focused ? '#5c715e' : color}
     style={{
       transform: [{ scale: focused ? 1.1 : 1 }],
     }}
@@ -33,30 +33,30 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#007AFF',
-        tabBarInactiveTintColor: '#8E8E93',
+        tabBarActiveTintColor: '#5c715e',
+        tabBarInactiveTintColor: '#8a9c8d',
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
         tabBarStyle: Platform.select({
           ios: {
             position: 'absolute',
-            backgroundColor: 'rgba(255, 255, 255, 0.95)',
+            backgroundColor: 'rgba(242, 249, 241, 0.95)',
             borderTopWidth: 1,
-            borderTopColor: 'rgba(0, 122, 255, 0.2)',
+            borderTopColor: 'rgba(92, 113, 94, 0.2)',
             paddingTop: 8,
             paddingBottom: 20,
             height: 90,
           },
           default: {
-            backgroundColor: '#FFFFFF',
+            backgroundColor: '#f2f9f1',
             borderTopWidth: 2,
-            borderTopColor: 'rgba(0, 122, 255, 0.3)',
+            borderTopColor: 'rgba(92, 113, 94, 0.3)',
             paddingTop: 8,
             paddingBottom: 8,
             height: 80,
             elevation: 8,
-            shadowColor: '#007AFF',
+            shadowColor: '#5c715e',
             shadowOffset: { width: 0, height: -2 },
             shadowOpacity: 0.1,
             shadowRadius: 4,
@@ -75,15 +75,15 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Notes',
-          tabBarIcon: NotesIcon,
+          title: 'Hunt',
+          tabBarIcon: HuntIcon,
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
-          title: 'Character',
-          tabBarIcon: CharacterIcon,
+          title: 'Collection',
+          tabBarIcon: CollectionIcon,
         }}
       />
     </Tabs>

@@ -92,7 +92,7 @@ export default function BugHubScreen() {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Header with XP Progress */}
         <View style={styles.header}>
-          <ThemedText style={styles.title}>🐛 BugLord</ThemedText>
+          <ThemedText style={styles.title}>🐛 Bug Collector</ThemedText>
           <ThemedText style={styles.subtitle}>Level {collection.level} Explorer</ThemedText>
           <XPProgressBar
             currentXP={collection.xp}

@@ -1,6 +1,28 @@
-# 🎮 Note Quest
+# 🐛## ✨ Features
 
-A gamified note-taking app built with React Native and Expo. Turn your daily tasks into an RPG adventure where completing notes earns you XP, levels, and unlocks character cosmetics!
+### 📸 **Bug Photography & Identification**
+- Real-time camera with targeting reticle for bug capture
+- AI-powered bug identification (species, rarity, traits)
+- Photo storage and gallery integration
+- Smart species recognition with confidence scoring
+
+### 🐛 **Bug Collection System**
+- **Rarity System**: Common, Uncommon, Rare, Epic, Legendary bugs
+- **Biome Classification**: Forest, Garden, Wetland, Desert, Urban, Mountain, Meadow
+- **Detailed Bug Cards**: Name, species, description, traits, catch location
+- **Persistent Collection**: All discoveries saved with AsyncStorage
+
+### 🏆 **Party Management**
+- **Active Party**: Maximum 6 bugs in your active lineup
+- **Strategic Selection**: Choose your best bugs for your party
+- **Quick Swap**: Easy party management interface
+- **Visual Display**: See your party bugs on the main hub
+
+### 🎮 **RPG Progression System**
+- **XP & Leveling**: Earn XP based on bug rarity (10-120 XP per catch)
+- **Explorer Levels**: Level up every 100 XP as a bug explorer
+- **Achievement System**: Track your collection milestones
+- **Visual Progress**: Beautiful XP bars and level displaysive bug collecting app built with React Native and Expo. Capture real-world insects with your camera, build your collection, and become the ultimate BugLord! Use AI-powered identification to discover species, manage your 6-bug party, and level up as you explore the insect kingdom.
 
 ## ✨ Features
 
@@ -41,8 +63,8 @@ A gamified note-taking app built with React Native and Expo. Turn your daily tas
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/note-quest.git
-   cd note-quest
+   git clone https://github.com/yourusername/buglord.git
+   cd buglord
    ```
 
 2. **Install dependencies**
@@ -97,7 +119,7 @@ The app supports custom character sprites! See [`SPRITE_GUIDE.md`](SPRITE_GUIDE.
 ## 🛠️ Project Structure
 
 ```
-note-quest/
+buglord/
 ├── app/                    # Main app screens
 │   ├── (tabs)/            # Tab navigation screens
 │   │   ├── index.tsx      # Notes screen (main)

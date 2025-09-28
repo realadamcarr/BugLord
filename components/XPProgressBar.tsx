@@ -1,3 +1,4 @@
+import { useTheme } from '@/contexts/ThemeContext';
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import { ThemedText } from './ThemedText';
@@ -17,11 +18,73 @@ export const XPProgressBar: React.FC<XPProgressBarProps> = ({
   animated = true,
   showTooltip = true,
 }) => {
+  const { theme } = useTheme();
   const progressAnim = useRef(new Animated.Value(0)).current;
   const glowAnim = useRef(new Animated.Value(0)).current;
   
   const progressPercentage = Math.min((currentXP / maxXP) * 100, 100);
   const xpToNext = maxXP - currentXP;
+
+  const styles = StyleSheet.create({
+    container: {
+      marginVertical: 8,
+    },
+    tooltip: {
+      backgroundColor: theme.colors.primary + 'E6', // Add alpha for transparency
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 16,
+      alignSelf: 'center',
+      marginBottom: 8,
+    },
+    tooltipText: {
+      color: theme.colors.text,
+      fontSize: 12,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+    xpBarContainer: {
+      position: 'relative',
+    },
+    xpBarBackground: {
+      width: '100%',
+      height: 12,
+      backgroundColor: theme.colors.xpBackground,
+      borderRadius: 6,
+      overflow: 'hidden',
+      marginBottom: 6,
+    },
+    xpBarFill: {
+      height: '100%',
+      backgroundColor: theme.colors.xpFill,
+      borderRadius: 6,
+      shadowColor: theme.colors.xpFill,
+      shadowOffset: { width: 0, height: 0 },
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    xpTextContainer: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    xpText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.primary,
+    },
+    levelBadge: {
+      backgroundColor: theme.colors.primary,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 10,
+    },
+    levelBadgeText: {
+      color: theme.colors.background,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+  });
 
   useEffect(() => {
     if (animated) {
@@ -93,64 +156,3 @@ export const XPProgressBar: React.FC<XPProgressBarProps> = ({
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    marginVertical: 8,
-  },
-  tooltip: {
-    backgroundColor: 'rgba(0, 122, 255, 0.9)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    alignSelf: 'center',
-    marginBottom: 8,
-  },
-  tooltipText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  xpBarContainer: {
-    position: 'relative',
-  },
-  xpBarBackground: {
-    width: '100%',
-    height: 12,
-    backgroundColor: '#E5E5EA',
-    borderRadius: 6,
-    overflow: 'hidden',
-    marginBottom: 6,
-  },
-  xpBarFill: {
-    height: '100%',
-    backgroundColor: '#4CAF50',
-    borderRadius: 6,
-    shadowColor: '#4CAF50',
-    shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  xpTextContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  xpText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4CAF50',
-  },
-  levelBadge: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  levelBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-});
