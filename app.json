@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#4CAF50"
     },
     "ios": {
       "supportsTablet": true
@@ -20,7 +20,7 @@
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#4CAF50"
       },
       "permissions": [
         "android.permission.WRITE_EXTERNAL_STORAGE",
@@ -42,7 +42,7 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#4CAF50"
         }
       ]
     ],
