@@ -17,6 +17,7 @@ export interface ProcessingOptions {
   iconSize?: number;
   quality?: number;
   detectObjects?: boolean;
+  maxEdge?: number; // long-edge resize for identification
 }
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -34,7 +35,8 @@ class ImageProcessingService {
       pixelSize = 8,
       iconSize = 64,
       quality = 0.8,
-      detectObjects = true
+      detectObjects = true,
+      maxEdge = 1280
     } = options;
 
     console.log('🖼️ Starting insect photo processing:', photoUri);
@@ -52,8 +54,11 @@ class ImageProcessingService {
         boundingBox = this.getCenterCropBoundingBox();
       }
       
-      // Crop the insect from the original image
-      const croppedImage = await this.cropImage(photoUri, boundingBox, quality);
+      // Resize original before crop to reduce noise/latency
+      const resizedForId = await this.resizeLongestEdge(photoUri, maxEdge, quality);
+
+      // Crop the insect from the resized image
+      const croppedImage = await this.cropImage(resizedForId, boundingBox, quality);
       
       // Create pixelated icon version
       const pixelatedIcon = await this.pixelateImage(croppedImage, pixelSize, iconSize);
@@ -171,6 +176,26 @@ class ImageProcessingService {
     } catch (error) {
       console.error('Image cropping failed:', error);
       return photoUri; // Return original if cropping fails
+    }
+  }
+
+  /**
+   * Resize so the long edge equals maxEdge (maintains aspect ratio)
+   */
+  async resizeLongestEdge(imageUri: string, maxEdge: number = 1280, compress: number = 0.8): Promise<string> {
+    try {
+      // First pass to get dimensions by resizing to maxEdge either width or height
+      const resized = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [
+          { resize: { width: maxEdge, height: maxEdge } },
+        ],
+        { compress, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      return resized.uri;
+    } catch (e) {
+      console.warn('resizeLongestEdge failed, returning original', e);
+      return imageUri;
     }
   }
   

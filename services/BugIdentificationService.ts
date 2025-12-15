@@ -1,18 +1,5 @@
 // Bug Identification API Service
-import { BiomeType, BugRarity, SAMPLE_BUGS } from '../types/Bug';
-
-export interface BugIdentificationResult {
-  confidence: number;
-  name: string;
-  species: string;
-  description: string;
-  rarity: BugRarity;
-  biome: BiomeType;
-  traits: string[];
-  size: 'tiny' | 'small' | 'medium' | 'large' | 'huge';
-  isFromAPI: boolean;
-  pixelatedIcon?: string; // Processed pixelated icon for the bug
-}
+import { BugIdentificationResult, BugRarity, IdentificationCandidate, SAMPLE_BUGS } from '../types/Bug';
 
 export interface APIError {
   code: string;
@@ -45,7 +32,7 @@ class BugIdentificationService {
   /**
    * Main identification method - tries multiple APIs in order of preference
    */
-  async identifyBug(photoUri: string): Promise<BugIdentificationResult> {
+  async identify(photoUri: string): Promise<BugIdentificationResult> {
     console.log('🔍 Starting bug identification for photo:', photoUri);
     
     try {
@@ -53,7 +40,7 @@ class BugIdentificationService {
       if (API_CONFIG.INATURALIST.ENABLED) {
         const result = await this.identifyWithiNaturalist(photoUri);
         if (result) {
-          console.log('✅ iNaturalist identification successful:', result.name);
+          console.log('✅ iNaturalist identification returned candidates');
           return result;
         }
       }
@@ -62,14 +49,14 @@ class BugIdentificationService {
       if (API_CONFIG.GOOGLE_VISION.ENABLED && API_CONFIG.GOOGLE_VISION.API_KEY) {
         const result = await this.identifyWithGoogleVision(photoUri);
         if (result) {
-          console.log('✅ Google Vision identification successful:', result.name);
+          console.log('✅ Google Vision identification returned candidates');
           return result;
         }
       }
 
       // Fallback to local ML/pattern recognition
       const result = await this.identifyWithLocalAnalysis(photoUri);
-      console.log('📱 Using local analysis:', result.name);
+      console.log('📱 Using local analysis (fallback candidates)');
       return result;
 
     } catch (error) {
@@ -191,16 +178,12 @@ class BugIdentificationService {
       ? suitableBugs[Math.floor(Math.random() * suitableBugs.length)]
       : SAMPLE_BUGS[Math.floor(Math.random() * SAMPLE_BUGS.length)];
     
+    const candidates: IdentificationCandidate[] = this.pickCandidates(selectedBug);
+
     return {
-      confidence: 0.75 + (Math.random() * 0.2), // 75-95% confidence
-      name: selectedBug.name,
-      species: selectedBug.species,
-      description: selectedBug.description,
-      rarity: selectedBug.rarity,
-      biome: selectedBug.biome,
-      traits: selectedBug.traits,
-      size: selectedBug.size,
-      isFromAPI: false
+      candidates,
+      provider: 'Local',
+      isFromAPI: false,
     };
   }
 
@@ -209,25 +192,27 @@ class BugIdentificationService {
    */
   private processINaturalistResponse(data: any): BugIdentificationResult {
     // Process real iNaturalist data here
-    // For now, return a sample based on common observations
+    // For now, return multiple candidates based on common observations
     const commonInsects = [
-      { name: 'House Fly', species: 'Musca domestica', biome: 'urban' as BiomeType, rarity: 'common' as BugRarity },
-      { name: 'Honey Bee', species: 'Apis mellifera', biome: 'garden' as BiomeType, rarity: 'uncommon' as BugRarity },
-      { name: 'Ladybug', species: 'Coccinella septempunctata', biome: 'garden' as BiomeType, rarity: 'uncommon' as BugRarity },
+      { label: 'House Fly', species: 'Musca domestica' },
+      { label: 'Honey Bee', species: 'Apis mellifera' },
+      { label: 'Ladybug', species: 'Coccinella septempunctata' },
+      { label: 'Paper Wasp', species: 'Polistes' },
+      { label: 'Hoverfly', species: 'Syrphidae' },
     ];
-    
-    const selected = commonInsects[Math.floor(Math.random() * commonInsects.length)];
-    
+    const candidates: IdentificationCandidate[] = commonInsects
+      .slice(0, 5)
+      .map((c, idx) => ({
+        label: c.label,
+        species: c.species,
+        confidence: Math.max(0.5, 0.95 - idx * 0.1),
+        source: 'iNaturalist',
+      }));
+
     return {
-      confidence: 0.85 + (Math.random() * 0.1),
-      name: selected.name,
-      species: selected.species,
-      description: `A ${selected.rarity} insect commonly found in ${selected.biome} environments.`,
-      rarity: selected.rarity,
-      biome: selected.biome,
-      traits: ['Common species', 'Easy to identify'],
-      size: 'small',
-      isFromAPI: true
+      candidates,
+      provider: 'iNaturalist',
+      isFromAPI: true,
     };
   }
 
@@ -247,8 +232,19 @@ class BugIdentificationService {
     );
     
     if (insectLabels.length > 0) {
-      const bestMatch = insectLabels[0];
-      return this.createBugFromGoogleLabel(bestMatch);
+      const candidates: IdentificationCandidate[] = insectLabels
+        .slice(0, 5)
+        .map((label: any) => ({
+          label: this.formatBugName(label.description),
+          species: `${label.description} sp.`,
+          confidence: label.score,
+          source: 'GoogleVision',
+        }));
+      return {
+        candidates,
+        provider: 'GoogleVision',
+        isFromAPI: true,
+      };
     }
     
     return null;
@@ -272,26 +268,26 @@ class BugIdentificationService {
   /**
    * Create bug data from Google Vision label
    */
-  private createBugFromGoogleLabel(label: any): BugIdentificationResult {
-    const confidence = label.score || 0.8;
-    const name = this.formatBugName(label.description);
-    
-    // Determine rarity based on confidence and obscurity
-    let rarity: BugRarity = 'common';
-    if (confidence > 0.95) rarity = 'uncommon';
-    if (confidence > 0.98) rarity = 'rare';
-    
-    return {
-      confidence,
-      name,
-      species: `${label.description} sp.`,
-      description: `Identified using AI vision technology with ${Math.round(confidence * 100)}% confidence.`,
-      rarity,
-      biome: 'garden', // Default biome
-      traits: ['AI Identified', 'High Confidence'],
-      size: 'medium',
-      isFromAPI: true
+  private pickCandidates(seedBug: { name: string; species: string; }): IdentificationCandidate[] {
+    // Build a small candidate list around the seed bug + random samples
+    const base: IdentificationCandidate = {
+      label: seedBug.name,
+      species: seedBug.species,
+      confidence: 0.9,
+      source: 'Local',
     };
+    const others = SAMPLE_BUGS
+      .filter(b => b.name !== seedBug.name)
+      .slice(0, 8)
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 4)
+      .map((b, i) => ({
+        label: b.name,
+        species: b.species,
+        confidence: 0.6 - i * 0.05,
+        source: 'Local',
+      }));
+    return [base, ...others];
   }
 
   /**
@@ -331,17 +327,11 @@ class BugIdentificationService {
    */
   private getFallbackIdentification(): BugIdentificationResult {
     const fallbackBug = SAMPLE_BUGS[Math.floor(Math.random() * SAMPLE_BUGS.length)];
-    
+    const candidates = this.pickCandidates({ name: fallbackBug.name, species: fallbackBug.species });
     return {
-      confidence: 0.6 + (Math.random() * 0.2), // 60-80% confidence
-      name: fallbackBug.name,
-      species: fallbackBug.species,
-      description: fallbackBug.description,
-      rarity: fallbackBug.rarity,
-      biome: fallbackBug.biome,
-      traits: [...fallbackBug.traits, 'Manual Classification'],
-      size: fallbackBug.size,
-      isFromAPI: false
+      candidates,
+      provider: 'Local',
+      isFromAPI: false,
     };
   }
 }

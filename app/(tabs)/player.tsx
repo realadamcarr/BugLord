@@ -4,8 +4,9 @@ import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { clearScanLogs, getScanLogs, ScanLogEntry } from '@/services/ScanLogService';
 import { BIOME_CONFIG, RARITY_CONFIG } from '@/types/Bug';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -14,6 +15,14 @@ export default function PlayerScreen() {
   const { theme } = useTheme();
   const { collection } = useBugCollection();
   const [showCollection, setShowCollection] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const [logs, setLogs] = useState<ScanLogEntry[]>([]);
+
+  useEffect(() => {
+    if (showLogs) {
+      getScanLogs().then(setLogs);
+    }
+  }, [showLogs]);
 
   const styles = createStyles(theme);
 
@@ -114,6 +123,20 @@ export default function PlayerScreen() {
               <ThemedText style={styles.collectionButtonTitle}>View Collection</ThemedText>
               <ThemedText style={styles.collectionButtonSubtitle}>
                 {collection.bugs.length - collection.party.filter(Boolean).length} bugs in storage
+              </ThemedText>
+            </View>
+            <Text style={styles.collectionButtonArrow}>›</Text>
+          </TouchableOpacity>
+          <View style={{ height: 12 }} />
+          <TouchableOpacity 
+            style={styles.collectionButton}
+            onPress={() => setShowLogs(true)}
+          >
+            <Text style={styles.collectionButtonIcon}>🧪</Text>
+            <View>
+              <ThemedText style={styles.collectionButtonTitle}>Scan Logs</ThemedText>
+              <ThemedText style={styles.collectionButtonSubtitle}>
+                Inspect recent identifications
               </ThemedText>
             </View>
             <Text style={styles.collectionButtonArrow}>›</Text>
@@ -223,6 +246,51 @@ export default function PlayerScreen() {
             </TouchableOpacity>
           </View>
           <CollectionScreen />
+        </View>
+      </Modal>
+
+      {/* Scan Logs Modal */}
+      <Modal
+        visible={showLogs}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity
+              style={styles.modalCloseButton}
+              onPress={() => setShowLogs(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.modalCloseText}>✕</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.modalCloseButton, { position: 'absolute', right: 12 }]}
+              onPress={async () => { await clearScanLogs(); setLogs([]); }}
+            >
+              <Text style={styles.modalCloseText}>Clear</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
+            {logs.length === 0 ? (
+              <ThemedText style={{ textAlign: 'center', marginTop: 24 }}>No logs yet</ThemedText>
+            ) : (
+              logs.map((log) => (
+                <View key={log.id} style={{ paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
+                  <ThemedText style={{ fontWeight: '700' }}>{new Date(log.capturedAt).toLocaleString()}</ThemedText>
+                  <ThemedText>Provider: {log.provider}</ThemedText>
+                  {log.confirmedLabel && (
+                    <ThemedText>Confirmed: {log.confirmedLabel} ({log.confirmationMethod})</ThemedText>
+                  )}
+                  <View style={{ marginTop: 8 }}>
+                    {log.candidates.slice(0,5).map((c, idx) => (
+                      <ThemedText key={c.label + idx}>• {c.label} {typeof c.confidence==='number' ? `(${Math.round(c.confidence*100)}%)` : ''} [{c.source}]</ThemedText>
+                    ))}
+                  </View>
+                </View>
+              ))
+            )}
+          </ScrollView>
         </View>
       </Modal>
     </ThemedView>

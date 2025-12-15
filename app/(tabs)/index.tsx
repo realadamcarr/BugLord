@@ -5,8 +5,9 @@ import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { BugIdentificationResult, bugIdentificationService } from '@/services/BugIdentificationService';
-import { Bug, RARITY_CONFIG } from '@/types/Bug';
+import { bugIdentificationService } from '@/services/BugIdentificationService';
+import { appendScanLog } from '@/services/ScanLogService';
+import { Bug, BugIdentificationResult, ConfirmationMethod, RARITY_CONFIG } from '@/types/Bug';
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -47,33 +48,41 @@ export default function CaptureScreen() {
       
       console.log('📸 Image processed:', processedImage);
       
-      // Call the bug identification API with the cropped image
-      const result = await bugIdentificationService.identifyBug(processedImage.croppedImage);
-      
-      // Add the pixelated icon to the result for later use
-      result.pixelatedIcon = processedImage.pixelatedIcon;
-      
+      // Identify with multi-candidate pipeline
+      const result = await bugIdentificationService.identify(processedImage.croppedImage);
       setIdentificationResult(result);
-      
-      // Create a Bug object for the modal
+
+      // Use first candidate as default preview, derive sensible defaults
+      const top = result.candidates[0];
       const bugData: Partial<Bug> = {
-        name: result.name,
-        species: result.species,
-        description: result.description,
-        rarity: result.rarity,
-        biome: result.biome,
+        name: top?.label || 'Unknown bug',
+        species: top?.species || 'Unknown',
+        description: top ? `Identified from ${result.provider}` : 'Unknown insect captured',
+        rarity: 'common',
+        biome: 'garden',
         photo: capturedPhoto || undefined,
-        pixelArt: result.pixelatedIcon,
-        traits: result.traits,
-        size: result.size,
-        xpValue: RARITY_CONFIG[result.rarity].xpRange[0],
+        pixelArt: processedImage.pixelatedIcon,
+        traits: top ? ['AI Identified'] : ['Unknown'],
+        size: 'medium',
+        xpValue: RARITY_CONFIG['common'].xpRange[0],
         level: 1,
         xp: 0,
         maxXp: 100,
         caughtAt: new Date(),
+        predictedCandidates: result.candidates,
+        provider: result.provider,
       };
       
       setIdentifiedBug(bugData as Bug);
+
+      // Provisional log (pre-confirmation)
+      try {
+        await appendScanLog({
+          imageUri: capturedPhoto || undefined,
+          provider: result.provider,
+          candidates: result.candidates,
+        });
+      } catch {}
       
       console.log('🐛 Bug identified:', result);
     } catch (error) {
@@ -87,13 +96,20 @@ export default function CaptureScreen() {
     }
   };
 
-  const handleBugInfoConfirm = async (nickname?: string, addToParty?: boolean, replaceBugId?: string) => {
+  const handleBugInfoConfirm = async ({ nickname, addToParty, replaceBugId, confirmedLabel, confirmationMethod }: { nickname?: string; addToParty?: boolean; replaceBugId?: string; confirmedLabel?: string; confirmationMethod?: ConfirmationMethod; }) => {
     if (!identifiedBug) return;
 
     try {
       // Add nickname if provided
       if (nickname) {
         identifiedBug.nickname = nickname;
+      }
+
+      if (confirmedLabel) {
+        identifiedBug.userConfirmedLabel = confirmedLabel;
+      }
+      if (confirmationMethod) {
+        identifiedBug.confirmationMethod = confirmationMethod;
       }
 
       // Add the bug to collection
@@ -109,8 +125,8 @@ export default function CaptureScreen() {
         }
       }
 
-      const confidenceText = identificationResult?.isFromAPI 
-        ? `\nConfidence: ${Math.round((identificationResult.confidence || 0) * 100)}%` 
+      const confidenceText = identificationResult?.candidates?.[0]?.confidence 
+        ? `\nTop guess: ${Math.round((identificationResult.candidates[0].confidence || 0) * 100)}%` 
         : '';
       
       Alert.alert(
@@ -118,6 +134,17 @@ export default function CaptureScreen() {
         `You caught a ${newBug.rarity} ${newBug.name}!${confidenceText}\n+${newBug.xpValue} XP${addToParty ? '\n\nAdded to your party!' : '\n\nAdded to your collection!'}`,
         [{ text: 'Awesome!', style: 'default' }]
       );
+
+      // Append confirmation to latest log entry
+      try {
+        await appendScanLog({
+          imageUri: capturedPhoto || undefined,
+          provider: identificationResult?.provider || 'Local',
+          candidates: identificationResult?.candidates || [],
+          confirmedLabel: confirmedLabel,
+          confirmationMethod: confirmationMethod,
+        });
+      } catch {}
 
       // Reset state
       setShowBugIdentification(false);
@@ -305,6 +332,7 @@ export default function CaptureScreen() {
         onClose={handleBugInfoClose}
         onConfirm={handleBugInfoConfirm}
         isNewCatch={true}
+        candidates={identificationResult?.candidates || []}
       />
     </ThemedView>
   );

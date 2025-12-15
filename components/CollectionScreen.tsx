@@ -41,9 +41,9 @@ export const CollectionScreen: React.FC = () => {
     setSelectedBug(null);
   };
 
-  const handleBugDetailsConfirm = (nickname?: string, addToParty?: boolean, replaceBugId?: string) => {
+  const handleBugDetailsConfirm = (options: { nickname?: string; addToParty?: boolean; replaceBugId?: string }) => {
     // TODO: Implement bug details update logic
-    console.log('Update bug:', selectedBug?.id, { nickname, addToParty, replaceBugId });
+    console.log('Update bug:', selectedBug?.id, options);
     
     // For now, just close the modal
     handleBugDetailsClose();

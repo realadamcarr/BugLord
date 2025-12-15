@@ -1,7 +1,7 @@
 import { ThemedText } from '@/components/ThemedText';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { Bug, RARITY_CONFIG } from '@/types/Bug';
+import { Bug, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
 import React, { useState } from 'react';
 import {
     Dimensions,
@@ -21,8 +21,9 @@ interface BugInfoModalProps {
   visible: boolean;
   bug: Bug | null;
   onClose: () => void;
-  onConfirm: (nickname?: string, addToParty?: boolean, replaceBugId?: string) => void;
+  onConfirm: (options: { nickname?: string; addToParty?: boolean; replaceBugId?: string; confirmedLabel?: string; confirmationMethod?: ConfirmationMethod; }) => void;
   isNewCatch?: boolean;
+  candidates?: IdentificationCandidate[];
 }
 
 export const BugInfoModal: React.FC<BugInfoModalProps> = ({
@@ -30,13 +31,18 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   bug,
   onClose,
   onConfirm,
-  isNewCatch = false
+  isNewCatch = false,
+  candidates = []
 }) => {
   const { theme } = useTheme();
   const { collection } = useBugCollection();
   const [nickname, setNickname] = useState('');
   const [showPartySwap, setShowPartySwap] = useState(false);
   const [selectedSwapBug, setSelectedSwapBug] = useState<string | null>(null);
+  const [selectedLabel, setSelectedLabel] = useState<string | null>(candidates[0]?.label || null);
+  const [manualMode, setManualMode] = useState(false);
+  const [manualOrder, setManualOrder] = useState('');
+  const [manualFamily, setManualFamily] = useState('');
 
   const styles = createStyles(theme);
 
@@ -111,25 +117,34 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   };
 
   const handleConfirm = () => {
+    let confirmedLabel: string | undefined = selectedLabel || undefined;
+    let confirmationMethod: ConfirmationMethod | undefined = 'AI_PICK';
+    if (manualMode) {
+      confirmedLabel = manualOrder ? `${manualOrder}${manualFamily ? ' - ' + manualFamily : ''}` : 'Unknown bug';
+      confirmationMethod = manualOrder ? 'MANUAL' : 'UNKNOWN';
+    }
+
+    const base = { nickname: nickname || undefined, confirmedLabel, confirmationMethod };
+
     if (showPartySwap && selectedSwapBug) {
-      onConfirm(nickname || undefined, true, selectedSwapBug);
+      onConfirm({ ...base, addToParty: true, replaceBugId: selectedSwapBug });
     } else if (hasPartySpace || !isNewCatch) {
-      onConfirm(nickname || undefined, true);
+      onConfirm({ ...base, addToParty: true });
     } else {
-      onConfirm(nickname || undefined, false);
+      onConfirm({ ...base, addToParty: false });
     }
   };
 
   const handleAddToParty = () => {
     if (hasPartySpace) {
-      onConfirm(nickname || undefined, true);
+      onConfirm({ nickname: nickname || undefined, addToParty: true });
     } else {
       setShowPartySwap(true);
     }
   };
 
   const handleAddToCollection = () => {
-    onConfirm(nickname || undefined, false);
+    onConfirm({ nickname: nickname || undefined, addToParty: false });
   };
 
   const bugFacts = generateBugFacts(bug);
@@ -171,6 +186,55 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
             <ThemedText style={styles.bugSpecies}>{bug.species}</ThemedText>
             <ThemedText style={styles.bugDescription}>{bug.description}</ThemedText>
           </View>
+
+          {/* Candidates Selection */}
+          {isNewCatch && candidates.length > 0 && !showPartySwap && (
+            <View style={styles.section}>
+              <ThemedText style={styles.sectionTitle}>🤖 AI Suggestions</ThemedText>
+              {candidates.map((c) => (
+                <TouchableOpacity
+                  key={c.label}
+                  style={[styles.candidateRow, selectedLabel === c.label && styles.selectedCandidate]}
+                  onPress={() => { setSelectedLabel(c.label); setManualMode(false); }}
+                >
+                  <ThemedText style={styles.candidateLabel}>{c.label}</ThemedText>
+                  <Text style={styles.candidateConfidence}>
+                    {typeof c.confidence === 'number' ? `${Math.round(c.confidence * 100)}%` : ''}
+                  </Text>
+                  <Text style={styles.candidateSource}>{c.source}</Text>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity
+                style={[styles.candidateRow, manualMode && styles.selectedCandidate]}
+                onPress={() => { setManualMode(true); setSelectedLabel(null); }}
+              >
+                <ThemedText style={styles.candidateLabel}>None of these</ThemedText>
+                <Text style={styles.candidateSource}>Manual</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Manual Taxonomy */}
+          {manualMode && (
+            <View style={styles.section}>
+              <ThemedText style={styles.sectionTitle}>📝 Manual Classification</ThemedText>
+              <TextInput
+                style={[styles.nicknameInput, { borderColor: theme.colors.border, color: theme.colors.text }]}
+                placeholder="Order (e.g., Coleoptera)"
+                placeholderTextColor={theme.colors.text + '80'}
+                value={manualOrder}
+                onChangeText={setManualOrder}
+              />
+              <View style={{ height: 12 }} />
+              <TextInput
+                style={[styles.nicknameInput, { borderColor: theme.colors.border, color: theme.colors.text }]}
+                placeholder="Family (optional)"
+                placeholderTextColor={theme.colors.text + '80'}
+                value={manualFamily}
+                onChangeText={setManualFamily}
+              />
+            </View>
+          )}
 
           {/* Personality */}
           <View style={styles.section}>
@@ -496,5 +560,34 @@ const createStyles = (theme: any) => StyleSheet.create({
     color: theme.colors.text,
     fontSize: 16,
     fontWeight: '600',
+  },
+  candidateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: theme.colors.surface,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  selectedCandidate: {
+    borderColor: theme.colors.primary,
+    backgroundColor: theme.colors.primary + '20',
+  },
+  candidateLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  candidateConfidence: {
+    fontSize: 12,
+    marginRight: 8,
+    opacity: 0.8,
+  },
+  candidateSource: {
+    fontSize: 12,
+    opacity: 0.7,
   },
 });

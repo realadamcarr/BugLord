@@ -14,7 +14,7 @@ export interface Bug {
   biome: BiomeType;
   
   // Visual
-  photo?: string; // Base64 or file path
+  photo?: string; // Base64 or file path (original image uri)
   pixelArt?: string; // Pixelized version for collection view
   
   // Stats and traits
@@ -26,6 +26,12 @@ export interface Bug {
   caughtAt: Date;
   location?: string;
   weather?: string;
+  // Identification metadata
+  predictedCandidates?: IdentificationCandidate[];
+  userConfirmedLabel?: string;
+  confirmationMethod?: ConfirmationMethod;
+  provider?: string;
+  confidence?: number;
   
   // Game stats
   level: number;
@@ -41,16 +47,19 @@ export interface BugCollection {
   xp: number;
 }
 
+export type ConfirmationMethod = 'AI_PICK' | 'MANUAL' | 'UNKNOWN';
+
+export interface IdentificationCandidate {
+  label: string;
+  confidence?: number;
+  source: string; // e.g. 'iNaturalist', 'GoogleVision', 'Local'
+  species?: string;
+}
+
 export interface BugIdentificationResult {
-  confidence: number;
-  possibleSpecies: {
-    name: string;
-    species: string;
-    confidence: number;
-    rarity: BugRarity;
-    biome: BiomeType;
-    description: string;
-  }[];
+  candidates: IdentificationCandidate[];
+  provider: string;
+  isFromAPI: boolean;
 }
 
 // Rarity configuration
