@@ -11,8 +11,8 @@ export function ThemedView({ style, lightColor, darkColor, ...otherProps }: Them
   
   // Use custom colors if provided, otherwise use theme colors
   const backgroundColor = theme.isDark 
-    ? (darkColor || theme.colors.surface)
-    : (lightColor || theme.colors.surface);
+    ? (darkColor || theme.colors.background)
+    : (lightColor || theme.colors.background);
 
   return <View style={[{ backgroundColor }, style]} {...otherProps} />;
 }

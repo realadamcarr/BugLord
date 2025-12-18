@@ -1,7 +1,8 @@
 import { useTheme } from '@/contexts/ThemeContext';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
+import Constants from 'expo-constants';
 import * as MediaLibrary from 'expo-media-library';
-import React, { useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import { Alert, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -14,10 +15,10 @@ const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
   const { theme } = useTheme();
-  const [facing, setFacing] = useState<CameraType>('back');
+  const facing: CameraType = 'back';
   const [permission, requestPermission] = useCameraPermissions();
-  const [mediaPermission, requestMediaPermission] = MediaLibrary.usePermissions();
   const cameraRef = useRef<CameraView>(null);
+  const isExpoGo = Constants.appOwnership === 'expo';
 
   const styles = StyleSheet.create({
     container: {
@@ -44,14 +45,6 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
       paddingBottom: 20,
     },
     closeButton: {
-      backgroundColor: 'rgba(0, 0, 0, 0.6)',
-      borderRadius: 25,
-      width: 50,
-      height: 50,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    flipButton: {
       backgroundColor: 'rgba(0, 0, 0, 0.6)',
       borderRadius: 25,
       width: 50,
@@ -171,9 +164,6 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
     );
   }
 
-  const toggleCameraFacing = () => {
-    setFacing(current => (current === 'back' ? 'front' : 'back'));
-  };
 
   const takePicture = async () => {
     if (!cameraRef.current) return;
@@ -181,31 +171,19 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
     try {
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.8,
-        base64: true, // Enable base64 for API calls
-        exif: true, // Include EXIF data for better analysis
+        base64: true,
+        exif: true,
       });
 
       if (photo?.uri) {
-        // Request media library permission if not granted
-        if (!mediaPermission?.granted) {
-          const { status } = await requestMediaPermission();
-          if (status !== 'granted') {
-            Alert.alert(
-              'Photo Captured!',
-              'Photo captured but could not be saved to gallery. Permission denied.',
-              [{ text: 'OK', onPress: () => onCapture(photo.uri) }]
-            );
-            return;
+        // In Expo Go, skip saving to gallery (limited access)
+        if (!isExpoGo) {
+          try {
+            await MediaLibrary.saveToLibraryAsync(photo.uri);
+          } catch (error) {
+            console.warn('Could not save to media library:', error);
           }
         }
-
-        // Save to media library
-        try {
-          await MediaLibrary.saveToLibraryAsync(photo.uri);
-        } catch (error) {
-          console.warn('Could not save to media library:', error);
-        }
-
         onCapture(photo.uri);
       }
     } catch (error) {
@@ -219,6 +197,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
       <CameraView 
         style={styles.camera} 
         facing={facing}
+        mode="picture"
         ref={cameraRef}
       >
         <View style={styles.overlay}>
@@ -228,9 +207,6 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
               <Text style={styles.buttonText}>✕</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.flipButton} onPress={toggleCameraFacing}>
-              <Text style={styles.buttonText}>🔄</Text>
-            </TouchableOpacity>
           </View>
 
           {/* Targeting reticle */}
