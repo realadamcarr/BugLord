@@ -10,6 +10,7 @@
  * - Blue theme styling
  */
 
+import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
@@ -74,7 +75,7 @@ export default function WalkModeScreen() {
     try {
       await startWalkMode();
       Alert.alert(
-        'Walk Mode Started! [WALK]',
+        'Walk Mode Started!',
         `${selectedBug.name} is now training!\n\n• Walk 1 kilometer to gain XP\n• You may find items while walking\n• Progress is tracked even when the app is closed`
       );
     } catch (error) {
@@ -121,7 +122,9 @@ export default function WalkModeScreen() {
                 <Image source={{ uri: bug.pixelArt }} style={styles.bugListPhoto} />
               ) : (
                 <View style={styles.bugListPhoto}>
-                  <Text style={styles.bugListEmoji}>[BUG]</Text>
+                  <View style={styles.bugListEmoji}>
+                    <PixelatedEmoji type="bug" size={24} color={theme.colors.text} />
+                  </View>
                 </View>
               )}
               <View style={styles.bugListInfo}>
@@ -172,7 +175,9 @@ export default function WalkModeScreen() {
               ) : selectedBug.pixelArt ? (
                 <Image source={{ uri: selectedBug.pixelArt }} style={styles.selectedBugPhoto} />
               ) : (
-                <Text style={styles.selectedBugEmoji}>[BUG]</Text>
+                <View style={styles.selectedBugEmoji}>
+                  <PixelatedEmoji type="bug" size={56} color="#ffffff" />
+                </View>
               )
             ) : (
               <Text style={styles.selectBugText}>Select Bug</Text>
@@ -235,7 +240,10 @@ export default function WalkModeScreen() {
 
         {/* Bug Selection */}
         <View style={styles.bugSection}>
-          <ThemedText style={styles.sectionTitle}>Training Bug</ThemedText>
+          <View style={styles.sectionTitleRow}>
+            <PixelatedEmoji type="train" size={20} color="#ffffff" />
+            <ThemedText style={styles.sectionTitle}>Training Bug</ThemedText>
+          </View>
           <TouchableOpacity
             style={styles.bugSelector}
             onPress={() => setShowBugSelector(true)}
@@ -247,7 +255,9 @@ export default function WalkModeScreen() {
                 ) : selectedBug.pixelArt ? (
                   <Image source={{ uri: selectedBug.pixelArt }} style={styles.bugSelectorPhoto} />
                 ) : (
-                  <Text style={styles.bugSelectorEmoji}>[BUG]</Text>
+                  <View style={styles.bugSelectorEmoji}>
+                    <PixelatedEmoji type="bug" size={36} color="#ffffff" />
+                  </View>
                 )}
                 <View style={styles.selectedBugInfo}>
                   <ThemedText style={styles.selectedBugName}>
@@ -260,7 +270,9 @@ export default function WalkModeScreen() {
               </View>
             ) : (
               <View style={styles.selectBugPrompt}>
-                <Text style={styles.selectBugIcon}>[BUG]</Text>
+                <View style={styles.selectBugIcon}>
+                  <PixelatedEmoji type="bug" size={40} color="#ffffff" />
+                </View>
                 <ThemedText style={styles.selectBugPromptText}>
                   Tap to select a bug to train
                 </ThemedText>
@@ -276,7 +288,9 @@ export default function WalkModeScreen() {
               style={[styles.actionButton, styles.stopButton]}
               onPress={handleStopWalkMode}
             >
-              <Text style={styles.actionButtonIcon}>[STOP]</Text>
+              <View style={styles.actionButtonIcon}>
+                <PixelatedEmoji type="stop" size={20} color="#ffffff" />
+              </View>
               <ThemedText style={[styles.actionButtonText, styles.stopButtonText]}>
                 Stop Training
               </ThemedText>
@@ -287,7 +301,9 @@ export default function WalkModeScreen() {
               onPress={handleStartWalkMode}
               disabled={!selectedBug}
             >
-              <Text style={styles.actionButtonIcon}>[WALK]</Text>
+              <View style={styles.actionButtonIcon}>
+                <PixelatedEmoji type="walk" size={20} color="#ffffff" />
+              </View>
               <ThemedText style={[
                 styles.actionButtonText,
                 styles.startButtonText,
@@ -301,27 +317,38 @@ export default function WalkModeScreen() {
 
         {/* Info Section */}
         <View style={styles.infoSection}>
-          <ThemedText style={styles.infoTitle}>How Walk Mode Works</ThemedText>
+          <View style={styles.sectionTitleRow}>
+            <PixelatedEmoji type="info" size={18} color="#ffffff" />
+            <ThemedText style={styles.infoTitle}>How Walk Mode Works</ThemedText>
+          </View>
           <View style={styles.infoItem}>
-            <Text style={styles.infoIcon}>👟</Text>
+            <View style={styles.infoIconContainer}>
+              <PixelatedEmoji type="walk" size={18} color="#ffffff" />
+            </View>
             <ThemedText style={styles.infoText}>
               Walk 1 kilometer (~1,312 steps) to earn XP
             </ThemedText>
           </View>
           <View style={styles.infoItem}>
-            <Text style={styles.infoIcon}>🎁</Text>
+            <View style={styles.infoIconContainer}>
+              <PixelatedEmoji type="item" size={18} color="#ffffff" />
+            </View>
             <ThemedText style={styles.infoText}>
               Find items randomly while walking
             </ThemedText>
           </View>
           <View style={styles.infoItem}>
-            <Text style={styles.infoIcon}>[INFO]</Text>
+            <View style={styles.infoIconContainer}>
+              <PixelatedEmoji type="info" size={18} color="#ffffff" />
+            </View>
             <ThemedText style={styles.infoText}>
               Progress tracked even when app is closed
             </ThemedText>
           </View>
           <View style={styles.infoItem}>
-            <Text style={styles.infoIcon}>[BELL]</Text>
+            <View style={styles.infoIconContainer}>
+              <PixelatedEmoji type="bell" size={18} color="#ffffff" />
+            </View>
             <ThemedText style={styles.infoText}>
               Get notifications for XP gains and item drops
             </ThemedText>
@@ -431,7 +458,10 @@ const createStyles = (theme: any) => StyleSheet.create({
     borderRadius: 60,
   },
   selectedBugEmoji: {
-    fontSize: 60,
+    width: 56,
+    height: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   selectBugText: {
     color: 'white',
@@ -464,7 +494,13 @@ const createStyles = (theme: any) => StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: 'white',
+    marginBottom: 0,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 16,
+    gap: 8,
   },
   bugSelector: {
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
@@ -484,8 +520,11 @@ const createStyles = (theme: any) => StyleSheet.create({
     marginRight: 16,
   },
   bugSelectorEmoji: {
-    fontSize: 30,
+    width: 36,
+    height: 36,
     marginRight: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   selectedBugInfo: {
     flex: 1,
@@ -505,8 +544,11 @@ const createStyles = (theme: any) => StyleSheet.create({
     paddingVertical: 20,
   },
   selectBugIcon: {
-    fontSize: 40,
+    width: 40,
+    height: 40,
     marginBottom: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   selectBugPromptText: {
     fontSize: 16,
@@ -531,8 +573,11 @@ const createStyles = (theme: any) => StyleSheet.create({
     backgroundColor: '#EF4444',
   },
   actionButtonIcon: {
-    fontSize: 24,
+    width: 26,
+    height: 26,
     marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   actionButtonText: {
     fontSize: 18,
@@ -554,17 +599,17 @@ const createStyles = (theme: any) => StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: 'white',
-    marginBottom: 16,
+    marginBottom: 0,
   },
   infoItem: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
   },
-  infoIcon: {
-    fontSize: 20,
-    marginRight: 12,
+  infoIconContainer: {
     width: 30,
+    alignItems: 'center',
+    marginRight: 12,
   },
   infoText: {
     flex: 1,
@@ -627,7 +672,10 @@ const createStyles = (theme: any) => StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   bugListEmoji: {
-    fontSize: 24,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bugListInfo: {
     flex: 1,

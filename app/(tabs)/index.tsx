@@ -1,6 +1,7 @@
 import { BugCamera } from '@/components/BugCamera';
 import { BugInfoModal } from '@/components/BugInfoModal';
 import { CollectionScreen } from '@/components/CollectionScreen';
+import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
@@ -270,7 +271,7 @@ export default function CaptureScreen() {
         : '';
       
       Alert.alert(
-        '[BUG] Bug Captured!',
+        'Bug Captured!',
         `You caught a ${newBug.rarity} ${newBug.name}!${confidenceText}\n+${newBug.xpValue} XP${addToParty ? '\n\nAdded to your party!' : '\n\nAdded to your collection!'}`,
         [{ text: 'Awesome!', style: 'default' }]
       );
@@ -337,7 +338,7 @@ export default function CaptureScreen() {
           {bug.photo ? (
             <Image source={{ uri: bug.photo }} style={styles.bugPhoto} />
           ) : (
-            <Text style={styles.bugEmoji}>[BUG]</Text>
+            <PixelatedEmoji type="bug" size={32} color={theme.colors.text} />
           )}
           <Text style={styles.bugLevel}>Lv.{bug.level}</Text>
         </View>
@@ -360,7 +361,10 @@ export default function CaptureScreen() {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Header with XP Progress */}
         <View style={styles.header}>
-          <ThemedText style={styles.title}>[BUG] BugLord</ThemedText>
+          <View style={styles.titleContainer}>
+            <PixelatedEmoji type="bug" size={24} color={theme.colors.text} />
+            <ThemedText style={styles.title}>BugLord</ThemedText>
+          </View>
           <ThemedText style={styles.subtitle}>Level {collection.level} Explorer</ThemedText>
           <XPProgressBar
             currentXP={collection.xp}
@@ -397,7 +401,10 @@ export default function CaptureScreen() {
 
         {/* Party Display */}
         <View style={styles.partyContainer}>
-          <ThemedText style={styles.sectionTitle}>[PARTY] Your Party</ThemedText>
+          <View style={styles.sectionTitleContainer}>
+            <PixelatedEmoji type="party" size={20} color={theme.colors.text} />
+            <ThemedText style={styles.sectionTitle}>Your Party</ThemedText>
+          </View>
           <View style={styles.partyGrid}>
             {collection.party.map((bug, index) => renderPartySlot(bug, index))}
           </View>
@@ -411,7 +418,7 @@ export default function CaptureScreen() {
           style={styles.collectionButton}
           onPress={() => setShowCollection(true)}
         >
-          <Text style={styles.collectionIcon}>[COL]</Text>
+          <PixelatedEmoji type="dex" size={20} color="#ffffff" />
           <View style={styles.collectionButtonContent}>
             <ThemedText style={styles.collectionButtonText}>View Collection</ThemedText>
             <ThemedText style={styles.collectionButtonSubtext}>
@@ -434,7 +441,7 @@ export default function CaptureScreen() {
                     <Image source={{ uri: bug.pixelArt }} style={styles.recentBugPhoto} />
                   ) : (
                     <View style={styles.recentBugPhoto}>
-                      <Text style={styles.recentBugEmoji}>[BUG]</Text>
+                      <PixelatedEmoji type="bug" size={24} color={theme.colors.text} />
                     </View>
                   )}
                   <ThemedText style={styles.recentBugName} numberOfLines={1}>
@@ -540,6 +547,12 @@ const createStyles = (theme: any) => StyleSheet.create({
   header: {
     marginBottom: 24,
     alignItems: 'center',
+  },
+  titleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 8,
   },
   title: {
     fontSize: 32,

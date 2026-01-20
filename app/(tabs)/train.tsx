@@ -1,3 +1,4 @@
+import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
@@ -38,7 +39,7 @@ export default function TrainScreen() {
           ) : bug.pixelArt ? (
             <Image source={{ uri: bug.pixelArt }} style={styles.bugPhoto} />
           ) : (
-            <Text style={styles.bugEmoji}>[BUG]</Text>
+            <PixelatedEmoji type="bug" size={32} color={theme.colors.text} />
           )}
           <ThemedText style={styles.bugName} numberOfLines={1}>
             {bug.nickname || bug.name}
@@ -76,7 +77,10 @@ export default function TrainScreen() {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Header */}
         <View style={styles.header}>
-          <ThemedText style={styles.title}>[TRAIN] Training Center</ThemedText>
+          <View style={styles.titleContainer}>
+            <PixelatedEmoji type="train" size={24} color={theme.colors.text} />
+            <ThemedText style={styles.title}>Training Center</ThemedText>
+          </View>
           <ThemedText style={styles.subtitle}>Train your bugs to increase their stats</ThemedText>
           
           {/* Player Level Progress */}
@@ -95,7 +99,10 @@ export default function TrainScreen() {
 
         {/* Party Display */}
         <View style={styles.partyContainer}>
-          <ThemedText style={styles.sectionTitle}>[PARTY] Your Active Party</ThemedText>
+          <View style={styles.sectionTitleContainer}>
+            <PixelatedEmoji type="party" size={20} color={theme.colors.text} />
+            <ThemedText style={styles.sectionTitle}>Your Active Party</ThemedText>
+          </View>
           <View style={styles.partyGrid}>
             {collection.party.map((bug, index) => renderPartyBug(bug, index))}
           </View>
@@ -103,13 +110,16 @@ export default function TrainScreen() {
 
         {/* Training Options */}
         <View style={styles.trainingContainer}>
-          <ThemedText style={styles.sectionTitle}>[OPTS] Training Options</ThemedText>
+          <View style={styles.sectionTitleContainer}>
+            <PixelatedEmoji type="train" size={20} color={theme.colors.text} />
+            <ThemedText style={styles.sectionTitle}>Training Options</ThemedText>
+          </View>
           
           <TouchableOpacity 
             style={[styles.trainingCard, walkModeActive && styles.activeTrainingCard]}
             onPress={() => router.push('/walkmode')}
           >
-            <Text style={styles.trainingIcon}>[WALK]</Text>
+            <PixelatedEmoji type="walk" size={24} color={theme.colors.text} />
             <View style={styles.trainingCardContent}>
               <ThemedText style={styles.trainingCardTitle}>Walk Mode</ThemedText>
               <ThemedText style={styles.trainingCardSubtext}>
@@ -129,27 +139,32 @@ export default function TrainScreen() {
             <Text style={styles.arrowIcon}>→</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.trainingCard} disabled>
-            <Text style={styles.trainingIcon}>[HIVE]</Text>
+          <TouchableOpacity
+            style={styles.trainingCard}
+            onPress={() => router.push('/hivemode')}
+          >
+            <PixelatedEmoji type="hive" size={24} color={theme.colors.text} />
             <View style={styles.trainingCardContent}>
               <ThemedText style={styles.trainingCardTitle}>Hive Mode</ThemedText>
               <ThemedText style={styles.trainingCardSubtext}>
-                Battle other trainers and test your skills
+                Battle through 10 rounds of wild bugs!
               </ThemedText>
-              <ThemedText style={styles.comingSoonText}>Coming Soon</ThemedText>
             </View>
           </TouchableOpacity>
         </View>
 
         {/* Item Management */}
         <View style={styles.trainingContainer}>
-          <ThemedText style={styles.sectionTitle}>[ITEM] Item Management</ThemedText>
+          <View style={styles.sectionTitleContainer}>
+            <PixelatedEmoji type="item" size={20} color={theme.colors.text} />
+            <ThemedText style={styles.sectionTitle}>Item Management</ThemedText>
+          </View>
           
           <TouchableOpacity 
             style={styles.trainingCard}
             onPress={() => router.push('/inventory')}
           >
-            <Text style={styles.trainingIcon}>📦</Text>
+            <PixelatedEmoji type="item" size={24} color={theme.colors.text} />
             <View style={styles.trainingCardContent}>
               <ThemedText style={styles.trainingCardTitle}>Check Items</ThemedText>
               <ThemedText style={styles.trainingCardSubtext}>
@@ -165,7 +180,10 @@ export default function TrainScreen() {
 
         {/* Training Stats */}
         <View style={styles.statsContainer}>
-          <ThemedText style={styles.sectionTitle}>[STAT] Training Statistics</ThemedText>
+          <View style={styles.sectionTitleContainer}>
+            <PixelatedEmoji type="stat" size={20} color={theme.colors.text} />
+            <ThemedText style={styles.sectionTitle}>Training Statistics</ThemedText>
+          </View>
           
           <View style={styles.statRow}>
             <View style={styles.statCard}>
@@ -215,6 +233,11 @@ const createStyles = (theme: any) => StyleSheet.create({
     marginBottom: 24,
     alignItems: 'center',
   },
+  titleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   title: {
     fontSize: 32,
     fontWeight: '900',
@@ -239,10 +262,15 @@ const createStyles = (theme: any) => StyleSheet.create({
   partyContainer: {
     marginBottom: 24,
   },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
-    marginBottom: 12,
   },
   partyGrid: {
     flexDirection: 'row',

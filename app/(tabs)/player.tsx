@@ -1,4 +1,5 @@
 import { CollectionScreen } from '@/components/CollectionScreen';
+import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
@@ -44,7 +45,9 @@ export default function PlayerScreen() {
 
   const renderAchievement = (title: string, description: string, completed: boolean, icon: string) => (
     <View style={[styles.achievementCard, completed && styles.achievementCompleted]}>
-      <Text style={[styles.achievementIcon, !completed && styles.achievementIconLocked]}>{icon}</Text>
+      <View style={[styles.achievementIcon, !completed && styles.achievementIconLocked]}>
+        <PixelatedEmoji type={icon as any} size={24} color={completed ? theme.colors.text : theme.colors.text + '40'} />
+      </View>
       <View style={styles.achievementContent}>
         <ThemedText style={[styles.achievementTitle, !completed && styles.achievementTextLocked]}>
           {title}
@@ -63,7 +66,7 @@ export default function PlayerScreen() {
         {/* Player Header */}
         <View style={styles.header}>
           <View style={styles.playerAvatar}>
-            <Text style={styles.avatarText}>[BUG]</Text>
+            <PixelatedEmoji type="bug" size={48} color={theme.colors.text} />
           </View>
           <ThemedText style={styles.playerName}>Bug Explorer</ThemedText>
           <ThemedText style={styles.playerLevel}>Level {collection.level}</ThemedText>
@@ -83,7 +86,10 @@ export default function PlayerScreen() {
 
         {/* Quick Stats */}
         <View style={styles.statsContainer}>
-          <ThemedText style={styles.sectionTitle}>[STAT] Collection Stats</ThemedText>
+          <View style={styles.sectionTitleContainer}>
+            <PixelatedEmoji type="stat" size={20} color={theme.colors.text} />
+            <ThemedText style={styles.sectionTitle}>Collection Stats</ThemedText>
+          </View>
           
           <View style={styles.statRow}>
             <View style={styles.statCard}>
@@ -118,7 +124,9 @@ export default function PlayerScreen() {
             style={styles.collectionButton}
             onPress={() => setShowCollection(true)}
           >
-            <Text style={styles.collectionButtonIcon}>[DEX]</Text>
+            <View style={styles.collectionButtonIcon}>
+              <PixelatedEmoji type="dex" size={28} color={theme.colors.text} />
+            </View>
             <View>
               <ThemedText style={styles.collectionButtonTitle}>View Collection</ThemedText>
               <ThemedText style={styles.collectionButtonSubtitle}>
@@ -145,7 +153,10 @@ export default function PlayerScreen() {
 
         {/* Rarity Breakdown */}
         <View style={styles.rarityContainer}>
-          <ThemedText style={styles.sectionTitle}>[RARE] Collection by Rarity</ThemedText>
+          <View style={styles.sectionTitleContainer}>
+            <PixelatedEmoji type="rare" size={20} color={theme.colors.text} />
+            <ThemedText style={styles.sectionTitle}>Collection by Rarity</ThemedText>
+          </View>
           
           {Object.entries(RARITY_CONFIG).map(([rarity, config]) => (
             <View key={rarity} style={styles.rarityRow}>
@@ -164,7 +175,10 @@ export default function PlayerScreen() {
 
         {/* Biome Progress */}
         <View style={styles.biomeContainer}>
-          <ThemedText style={styles.sectionTitle}>[BIOM] Biome Exploration</ThemedText>
+          <View style={styles.sectionTitleContainer}>
+            <PixelatedEmoji type="map" size={20} color={theme.colors.text} />
+            <ThemedText style={styles.sectionTitle}>Biome Exploration</ThemedText>
+          </View>
           
           <View style={styles.biomeGrid}>
             {Object.entries(BIOME_CONFIG).map(([biome, config]) => (
@@ -183,7 +197,10 @@ export default function PlayerScreen() {
 
         {/* Achievements */}
         <View style={styles.achievementsContainer}>
-          <ThemedText style={styles.sectionTitle}>[ACH] Achievements</ThemedText>
+          <View style={styles.sectionTitleContainer}>
+            <PixelatedEmoji type="rare" size={20} color={theme.colors.text} />
+            <ThemedText style={styles.sectionTitle}>Achievements</ThemedText>
+          </View>
           
           {renderAchievement(
             "First Catch",
@@ -196,35 +213,35 @@ export default function PlayerScreen() {
             "Bug Collector",
             "Capture 10 different bugs",
             totalBugs >= 10,
-            "[DEX]"
+            "dex"
           )}
           
           {renderAchievement(
             "Full Party",
             "Fill all 6 party slots",
             partyCount === 6,
-            "[PPL]"
+            "ppl"
           )}
           
           {renderAchievement(
             "Rare Hunter",
             "Find a rare or higher rarity bug",
             (rarityStats.rare || 0) + (rarityStats.epic || 0) + (rarityStats.legendary || 0) >= 1,
-            "[GEM]"
+            "gem"
           )}
           
           {renderAchievement(
             "Explorer",
             "Discover bugs in 5 different biomes",
             Object.keys(biomeStats).length >= 5,
-            "[MAP]"
+            "map"
           )}
           
           {renderAchievement(
             "Level Up!",
             "Reach Explorer Level 5",
             collection.level >= 5,
-            "[UP]"
+            "up"
           )}
         </View>
       </ScrollView>
@@ -319,9 +336,6 @@ const createStyles = (theme: any) => StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  avatarText: {
-    fontSize: 40,
-  },
   playerName: {
     fontSize: 24,
     fontWeight: '700',
@@ -344,6 +358,12 @@ const createStyles = (theme: any) => StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
+    marginBottom: 0,
+  },
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 12,
   },
   statsContainer: {
@@ -448,8 +468,11 @@ const createStyles = (theme: any) => StyleSheet.create({
     borderColor: theme.colors.primary,
   },
   achievementIcon: {
-    fontSize: 24,
+    width: 28,
+    height: 28,
     marginRight: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   achievementIconLocked: {
     opacity: 0.3,
@@ -487,8 +510,11 @@ const createStyles = (theme: any) => StyleSheet.create({
     borderColor: theme.colors.border,
   },
   collectionButtonIcon: {
-    fontSize: 24,
+    width: 32,
+    height: 32,
     marginRight: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   collectionButtonTitle: {
     fontSize: 18,
