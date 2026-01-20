@@ -184,7 +184,7 @@ export default function InventoryScreen() {
             );
           }}
         >
-          <ThemedText style={styles.debugButtonText}>🗑️ Clear All</ThemedText>
+          <ThemedText style={styles.debugButtonText}>[DEL] Clear All</ThemedText>
         </TouchableOpacity>
 
         <ThemedText style={styles.itemCount}>

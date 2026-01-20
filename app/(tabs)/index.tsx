@@ -1,5 +1,6 @@
 import { BugCamera } from '@/components/BugCamera';
 import { BugInfoModal } from '@/components/BugInfoModal';
+import { CollectionScreen } from '@/components/CollectionScreen';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
@@ -23,6 +24,7 @@ export default function CaptureScreen() {
   const [showCamera, setShowCamera] = useState(false);
   const [showCropper, setShowCropper] = useState(false);
   const [showBugIdentification, setShowBugIdentification] = useState(false);
+  const [showCollection, setShowCollection] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [croppedPhoto, setCroppedPhoto] = useState<string | null>(null);
   const [isIdentifying, setIsIdentifying] = useState(false);
@@ -268,7 +270,7 @@ export default function CaptureScreen() {
         : '';
       
       Alert.alert(
-        '🐛 Bug Captured!',
+        '[BUG] Bug Captured!',
         `You caught a ${newBug.rarity} ${newBug.name}!${confidenceText}\n+${newBug.xpValue} XP${addToParty ? '\n\nAdded to your party!' : '\n\nAdded to your collection!'}`,
         [{ text: 'Awesome!', style: 'default' }]
       );
@@ -335,7 +337,7 @@ export default function CaptureScreen() {
           {bug.photo ? (
             <Image source={{ uri: bug.photo }} style={styles.bugPhoto} />
           ) : (
-            <Text style={styles.bugEmoji}>🐛</Text>
+            <Text style={styles.bugEmoji}>[BUG]</Text>
           )}
           <Text style={styles.bugLevel}>Lv.{bug.level}</Text>
         </View>
@@ -358,7 +360,7 @@ export default function CaptureScreen() {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Header with XP Progress */}
         <View style={styles.header}>
-          <ThemedText style={styles.title}>🐛 BugLord</ThemedText>
+          <ThemedText style={styles.title}>[BUG] BugLord</ThemedText>
           <ThemedText style={styles.subtitle}>Level {collection.level} Explorer</ThemedText>
           <XPProgressBar
             currentXP={collection.xp}
@@ -395,7 +397,7 @@ export default function CaptureScreen() {
 
         {/* Party Display */}
         <View style={styles.partyContainer}>
-          <ThemedText style={styles.sectionTitle}>🏆 Your Party</ThemedText>
+          <ThemedText style={styles.sectionTitle}>[PARTY] Your Party</ThemedText>
           <View style={styles.partyGrid}>
             {collection.party.map((bug, index) => renderPartySlot(bug, index))}
           </View>
@@ -405,8 +407,11 @@ export default function CaptureScreen() {
         </View>
 
         {/* Collection Access */}
-        <TouchableOpacity style={styles.collectionButton}>
-          <Text style={styles.collectionIcon}>📚</Text>
+        <TouchableOpacity 
+          style={styles.collectionButton}
+          onPress={() => setShowCollection(true)}
+        >
+          <Text style={styles.collectionIcon}>[COL]</Text>
           <View style={styles.collectionButtonContent}>
             <ThemedText style={styles.collectionButtonText}>View Collection</ThemedText>
             <ThemedText style={styles.collectionButtonSubtext}>
@@ -423,13 +428,13 @@ export default function CaptureScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.recentList}>
               {collection.bugs.slice(-5).reverse().map((bug) => (
                 <View key={bug.id} style={styles.recentBugCard}>
-                  {bug.pixelArt ? (
-                    <Image source={{ uri: bug.pixelArt }} style={styles.recentBugPhoto} />
-                  ) : bug.photo ? (
+                  {bug.photo ? (
                     <Image source={{ uri: bug.photo }} style={styles.recentBugPhoto} />
+                  ) : bug.pixelArt ? (
+                    <Image source={{ uri: bug.pixelArt }} style={styles.recentBugPhoto} />
                   ) : (
-                    <View style={styles.recentBugPlaceholder}>
-                      <Text style={styles.recentBugEmoji}>🐛</Text>
+                    <View style={styles.recentBugPhoto}>
+                      <Text style={styles.recentBugEmoji}>[BUG]</Text>
                     </View>
                   )}
                   <ThemedText style={styles.recentBugName} numberOfLines={1}>
@@ -503,6 +508,17 @@ export default function CaptureScreen() {
         isNewCatch={true}
         candidates={identificationResult?.candidates || []}
       />
+
+      {/* Collection Modal */}
+      <Modal
+        visible={showCollection}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <CollectionScreen
+          onClose={() => setShowCollection(false)}
+        />
+      </Modal>
     </ThemedView>
   );
 }

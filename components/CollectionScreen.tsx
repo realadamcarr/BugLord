@@ -19,7 +19,11 @@ const { width: screenWidth } = Dimensions.get('window');
 const GRID_COLUMNS = 3;
 const ITEM_SIZE = (screenWidth - 60) / GRID_COLUMNS; // Account for padding and gaps
 
-export const CollectionScreen: React.FC = () => {
+interface CollectionScreenProps {
+  onClose: () => void;
+}
+
+export const CollectionScreen: React.FC<CollectionScreenProps> = ({ onClose }) => {
   const { theme } = useTheme();
   const { collection } = useBugCollection();
   const [selectedBug, setSelectedBug] = useState<Bug | null>(null);
@@ -55,10 +59,10 @@ export const CollectionScreen: React.FC = () => {
       onPress={() => handleBugPress(bug)}
     >
       <View style={styles.bugImageContainer}>
-        {bug.pixelArt ? (
-          <Image source={{ uri: bug.pixelArt }} style={styles.bugIcon} />
-        ) : bug.photo ? (
+        {bug.photo ? (
           <Image source={{ uri: bug.photo }} style={styles.bugIcon} />
+        ) : bug.pixelArt ? (
+          <Image source={{ uri: bug.pixelArt }} style={styles.bugIcon} />
         ) : (
           <View style={styles.placeholderIcon}>
             <Text style={styles.placeholderEmoji}>🐛</Text>
@@ -90,10 +94,15 @@ export const CollectionScreen: React.FC = () => {
     <ThemedView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <ThemedText style={styles.title}>📚 Bug Collection</ThemedText>
-        <ThemedText style={styles.subtitle}>
-          {collectionBugs.length} bugs in storage
-        </ThemedText>
+        <View style={styles.headerContent}>
+          <ThemedText style={styles.title}>📚 Bug Collection</ThemedText>
+          <ThemedText style={styles.subtitle}>
+            {collectionBugs.length} bugs in storage
+          </ThemedText>
+        </View>
+        <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+          <Text style={styles.closeButtonText}>✕</Text>
+        </TouchableOpacity>
       </View>
 
       {collectionBugs.length === 0 ? (
@@ -128,9 +137,28 @@ const createStyles = (theme: any) => StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     padding: 20,
     paddingBottom: 16,
+  },
+  headerContent: {
+    flex: 1,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: theme.colors.surface,
+    justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 16,
+  },
+  closeButtonText: {
+    fontSize: 16,
+    color: theme.colors.text,
+    fontWeight: 'bold',
   },
   title: {
     fontSize: 28,

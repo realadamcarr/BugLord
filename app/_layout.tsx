@@ -26,7 +26,8 @@ export default function RootLayout() {
           <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
             <Stack>
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="inventory" />
+              <Stack.Screen name="inventory" options={{ title: 'Inventory' }} />
+              <Stack.Screen name="walkmode" options={{ headerShown: false }} />
               <Stack.Screen name="+not-found" />
             </Stack>
             <StatusBar style="auto" />

@@ -2,8 +2,11 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
+import { useInventory } from '@/contexts/InventoryContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useWalkMode } from '@/services/useWalkMode';
 import { Bug, RARITY_CONFIG } from '@/types/Bug';
+import { router } from 'expo-router';
 import React from 'react';
 import { Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -12,19 +15,30 @@ const { width: screenWidth } = Dimensions.get('window');
 export default function TrainScreen() {
   const { theme } = useTheme();
   const { collection } = useBugCollection();
+  const { getInventorySummary } = useInventory();
+  const {
+    isActive: walkModeActive,
+    statistics: walkStats,
+  } = useWalkMode();
 
   const styles = createStyles(theme);
+
+  // Check if player has any items
+  const hasItems = getInventorySummary().length > 0;
+  
+  // Get first active bug for Walk Mode display
+  const activeBug = collection.party.find(bug => bug !== null);
 
   const renderPartyBug = (bug: Bug | null, index: number) => (
     <View key={index} style={[styles.partySlot, !bug && styles.emptyPartySlot]}>
       {bug ? (
         <View style={styles.bugInSlot}>
-          {bug.pixelArt ? (
-            <Image source={{ uri: bug.pixelArt }} style={styles.bugPhoto} />
-          ) : bug.photo ? (
+          {bug.photo ? (
             <Image source={{ uri: bug.photo }} style={styles.bugPhoto} />
+          ) : bug.pixelArt ? (
+            <Image source={{ uri: bug.pixelArt }} style={styles.bugPhoto} />
           ) : (
-            <Text style={styles.bugEmoji}>🐛</Text>
+            <Text style={styles.bugEmoji}>[BUG]</Text>
           )}
           <ThemedText style={styles.bugName} numberOfLines={1}>
             {bug.nickname || bug.name}
@@ -62,7 +76,7 @@ export default function TrainScreen() {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Header */}
         <View style={styles.header}>
-          <ThemedText style={styles.title}>🏋️ Training Center</ThemedText>
+          <ThemedText style={styles.title}>[TRAIN] Training Center</ThemedText>
           <ThemedText style={styles.subtitle}>Train your bugs to increase their stats</ThemedText>
           
           {/* Player Level Progress */}
@@ -81,7 +95,7 @@ export default function TrainScreen() {
 
         {/* Party Display */}
         <View style={styles.partyContainer}>
-          <ThemedText style={styles.sectionTitle}>🏆 Your Active Party</ThemedText>
+          <ThemedText style={styles.sectionTitle}>[PARTY] Your Active Party</ThemedText>
           <View style={styles.partyGrid}>
             {collection.party.map((bug, index) => renderPartyBug(bug, index))}
           </View>
@@ -89,45 +103,69 @@ export default function TrainScreen() {
 
         {/* Training Options */}
         <View style={styles.trainingContainer}>
-          <ThemedText style={styles.sectionTitle}>📚 Training Options</ThemedText>
+          <ThemedText style={styles.sectionTitle}>[OPTS] Training Options</ThemedText>
           
-          <TouchableOpacity style={styles.trainingCard} disabled>
-            <Text style={styles.trainingIcon}>⚡</Text>
+          <TouchableOpacity 
+            style={[styles.trainingCard, walkModeActive && styles.activeTrainingCard]}
+            onPress={() => router.push('/walkmode')}
+          >
+            <Text style={styles.trainingIcon}>[WALK]</Text>
             <View style={styles.trainingCardContent}>
-              <ThemedText style={styles.trainingCardTitle}>Speed Training</ThemedText>
+              <ThemedText style={styles.trainingCardTitle}>Walk Mode</ThemedText>
               <ThemedText style={styles.trainingCardSubtext}>
-                Increases bug agility and movement speed
+                {walkModeActive 
+                  ? `Active: ${activeBug?.name} gaining XP from steps`
+                  : "Gain XP and find items by walking"
+                }
               </ThemedText>
-              <ThemedText style={styles.comingSoonText}>Coming Soon</ThemedText>
+              {walkModeActive ? (
+                <ThemedText style={styles.activeText}>
+                  {walkStats.sessionSteps} steps • {walkStats.stepsToNextXp} until next XP
+                </ThemedText>
+              ) : (
+                <ThemedText style={styles.tapToStartText}>Tap to Configure</ThemedText>
+              )}
             </View>
+            <Text style={styles.arrowIcon}>→</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.trainingCard} disabled>
-            <Text style={styles.trainingIcon}>💪</Text>
+            <Text style={styles.trainingIcon}>[HIVE]</Text>
             <View style={styles.trainingCardContent}>
-              <ThemedText style={styles.trainingCardTitle}>Strength Training</ThemedText>
+              <ThemedText style={styles.trainingCardTitle}>Hive Mode</ThemedText>
               <ThemedText style={styles.trainingCardSubtext}>
-                Builds physical power and combat abilities
-              </ThemedText>
-              <ThemedText style={styles.comingSoonText}>Coming Soon</ThemedText>
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.trainingCard} disabled>
-            <Text style={styles.trainingIcon}>🧠</Text>
-            <View style={styles.trainingCardContent}>
-              <ThemedText style={styles.trainingCardTitle}>Intelligence Training</ThemedText>
-              <ThemedText style={styles.trainingCardSubtext}>
-                Enhances problem-solving and tactical skills
+                Battle other trainers and test your skills
               </ThemedText>
               <ThemedText style={styles.comingSoonText}>Coming Soon</ThemedText>
             </View>
           </TouchableOpacity>
         </View>
 
+        {/* Item Management */}
+        <View style={styles.trainingContainer}>
+          <ThemedText style={styles.sectionTitle}>[ITEM] Item Management</ThemedText>
+          
+          <TouchableOpacity 
+            style={styles.trainingCard}
+            onPress={() => router.push('/inventory')}
+          >
+            <Text style={styles.trainingIcon}>📦</Text>
+            <View style={styles.trainingCardContent}>
+              <ThemedText style={styles.trainingCardTitle}>Check Items</ThemedText>
+              <ThemedText style={styles.trainingCardSubtext}>
+                {hasItems 
+                  ? `View and manage your ${getInventorySummary().length} item types`
+                  : "Use walk mode to get items"
+                }
+              </ThemedText>
+            </View>
+            <Text style={styles.arrowIcon}>→</Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Training Stats */}
         <View style={styles.statsContainer}>
-          <ThemedText style={styles.sectionTitle}>📊 Training Statistics</ThemedText>
+          <ThemedText style={styles.sectionTitle}>[STAT] Training Statistics</ThemedText>
           
           <View style={styles.statRow}>
             <View style={styles.statCard}>
@@ -321,6 +359,34 @@ const createStyles = (theme: any) => StyleSheet.create({
     color: theme.colors.primary,
     fontWeight: '600',
     fontStyle: 'italic',
+  },
+  activeTrainingCard: {
+    backgroundColor: `${theme.colors.primary}15`,
+    borderWidth: 2,
+    borderColor: theme.colors.primary,
+  },
+  activeText: {
+    fontSize: 12,
+    color: theme.colors.primary,
+    fontWeight: '600',
+  },
+  tapToStartText: {
+    fontSize: 12,
+    color: theme.colors.primary,
+    fontWeight: '600',
+  },
+  activeIcon: {
+    fontSize: 18,
+    color: theme.colors.primary,
+    marginLeft: 8,
+    alignSelf: 'center',
+  },
+  arrowIcon: {
+    fontSize: 18,
+    color: theme.colors.text,
+    opacity: 0.6,
+    marginLeft: 8,
+    alignSelf: 'center',
   },
   statsContainer: {
     marginBottom: 24,

@@ -166,10 +166,10 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
 
           {/* Bug Image */}
           <View style={styles.imageContainer}>
-            {bug.pixelArt ? (
-              <Image source={{ uri: bug.pixelArt }} style={styles.bugIcon} />
-            ) : bug.photo ? (
+            {bug.photo ? (
               <Image source={{ uri: bug.photo }} style={styles.bugPhoto} />
+            ) : bug.pixelArt ? (
+              <Image source={{ uri: bug.pixelArt }} style={styles.bugIcon} />
             ) : (
               <View style={styles.placeholderIcon}>
                 <Text style={styles.placeholderEmoji}>🐛</Text>
@@ -285,7 +285,9 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
                     ]}
                     onPress={() => setSelectedSwapBug(partyBug.id)}
                   >
-                    {partyBug.pixelArt ? (
+                    {partyBug.photo ? (
+                      <Image source={{ uri: partyBug.photo }} style={styles.partyBugIcon} />
+                    ) : partyBug.pixelArt ? (
                       <Image source={{ uri: partyBug.pixelArt }} style={styles.partyBugIcon} />
                     ) : (
                       <Text style={styles.partyBugEmoji}>🐛</Text>

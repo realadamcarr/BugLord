@@ -9,6 +9,7 @@ interface BugCollectionContextType {
   removeBugFromParty: (slot: number) => void;
   swapPartySlots: (from: number, to: number) => void;
   updateBugNickname: (bugId: string, nickname: string) => void;
+  addXpToBug: (bugId: string, xpAmount: number) => Promise<boolean>;
   gainXP: (amount: number) => void;
   loading: boolean;
 }
@@ -182,6 +183,74 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     }));
   };
 
+  const addXpToBug = async (bugId: string, xpAmount: number): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setCollection(prev => {
+        // Find the bug in either bugs array or party
+        let bugFound = false;
+        
+        // Update bug in bugs array
+        const newBugs = prev.bugs.map(bug => {
+          if (bug.id === bugId) {
+            bugFound = true;
+            let newXp = bug.xp + xpAmount;
+            let newLevel = bug.level;
+            
+            // Level up logic for individual bugs
+            while (newXp >= bug.maxXp) {
+              newXp -= bug.maxXp;
+              newLevel += 1;
+              // Increase max XP for next level (simple progression)
+              const newMaxXp = Math.floor(bug.maxXp * 1.2);
+              bug = { ...bug, maxXp: newMaxXp };
+            }
+            
+            return {
+              ...bug,
+              xp: newXp,
+              level: newLevel,
+            };
+          }
+          return bug;
+        });
+        
+        // Update bug in party array if found
+        const newParty = prev.party.map(bug => {
+          if (bug && bug.id === bugId) {
+            bugFound = true;
+            let newXp = bug.xp + xpAmount;
+            let newLevel = bug.level;
+            
+            // Level up logic for individual bugs
+            while (newXp >= bug.maxXp) {
+              newXp -= bug.maxXp;
+              newLevel += 1;
+              // Increase max XP for next level (simple progression)
+              const newMaxXp = Math.floor(bug.maxXp * 1.2);
+              bug = { ...bug, maxXp: newMaxXp };
+            }
+            
+            return {
+              ...bug,
+              xp: newXp,
+              level: newLevel,
+            };
+          }
+          return bug;
+        });
+        
+        // Resolve the promise with success status
+        setTimeout(() => resolve(bugFound), 0);
+        
+        return {
+          ...prev,
+          bugs: newBugs,
+          party: newParty,
+        };
+      });
+    });
+  };
+
   const gainXP = (amount: number) => {
     setCollection(prev => {
       const newTotalXp = prev.totalXp + amount;
@@ -210,6 +279,7 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     removeBugFromParty,
     swapPartySlots,
     updateBugNickname,
+    addXpToBug,
     gainXP,
     loading,
   };

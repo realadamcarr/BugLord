@@ -63,7 +63,7 @@ export default function PlayerScreen() {
         {/* Player Header */}
         <View style={styles.header}>
           <View style={styles.playerAvatar}>
-            <Text style={styles.avatarText}>🐛</Text>
+            <Text style={styles.avatarText}>[BUG]</Text>
           </View>
           <ThemedText style={styles.playerName}>Bug Explorer</ThemedText>
           <ThemedText style={styles.playerLevel}>Level {collection.level}</ThemedText>
@@ -83,7 +83,7 @@ export default function PlayerScreen() {
 
         {/* Quick Stats */}
         <View style={styles.statsContainer}>
-          <ThemedText style={styles.sectionTitle}>📊 Collection Stats</ThemedText>
+          <ThemedText style={styles.sectionTitle}>[STAT] Collection Stats</ThemedText>
           
           <View style={styles.statRow}>
             <View style={styles.statCard}>
@@ -118,7 +118,7 @@ export default function PlayerScreen() {
             style={styles.collectionButton}
             onPress={() => setShowCollection(true)}
           >
-            <Text style={styles.collectionButtonIcon}>📚</Text>
+            <Text style={styles.collectionButtonIcon}>[DEX]</Text>
             <View>
               <ThemedText style={styles.collectionButtonTitle}>View Collection</ThemedText>
               <ThemedText style={styles.collectionButtonSubtitle}>
@@ -145,7 +145,7 @@ export default function PlayerScreen() {
 
         {/* Rarity Breakdown */}
         <View style={styles.rarityContainer}>
-          <ThemedText style={styles.sectionTitle}>🌟 Collection by Rarity</ThemedText>
+          <ThemedText style={styles.sectionTitle}>[RARE] Collection by Rarity</ThemedText>
           
           {Object.entries(RARITY_CONFIG).map(([rarity, config]) => (
             <View key={rarity} style={styles.rarityRow}>
@@ -164,7 +164,7 @@ export default function PlayerScreen() {
 
         {/* Biome Progress */}
         <View style={styles.biomeContainer}>
-          <ThemedText style={styles.sectionTitle}>🗺️ Biome Exploration</ThemedText>
+          <ThemedText style={styles.sectionTitle}>[BIOM] Biome Exploration</ThemedText>
           
           <View style={styles.biomeGrid}>
             {Object.entries(BIOME_CONFIG).map(([biome, config]) => (
@@ -183,7 +183,7 @@ export default function PlayerScreen() {
 
         {/* Achievements */}
         <View style={styles.achievementsContainer}>
-          <ThemedText style={styles.sectionTitle}>🏆 Achievements</ThemedText>
+          <ThemedText style={styles.sectionTitle}>[ACH] Achievements</ThemedText>
           
           {renderAchievement(
             "First Catch",
@@ -196,35 +196,35 @@ export default function PlayerScreen() {
             "Bug Collector",
             "Capture 10 different bugs",
             totalBugs >= 10,
-            "📚"
+            "[DEX]"
           )}
           
           {renderAchievement(
             "Full Party",
             "Fill all 6 party slots",
             partyCount === 6,
-            "👥"
+            "[PPL]"
           )}
           
           {renderAchievement(
             "Rare Hunter",
             "Find a rare or higher rarity bug",
             (rarityStats.rare || 0) + (rarityStats.epic || 0) + (rarityStats.legendary || 0) >= 1,
-            "💎"
+            "[GEM]"
           )}
           
           {renderAchievement(
             "Explorer",
             "Discover bugs in 5 different biomes",
             Object.keys(biomeStats).length >= 5,
-            "🗺️"
+            "[MAP]"
           )}
           
           {renderAchievement(
             "Level Up!",
             "Reach Explorer Level 5",
             collection.level >= 5,
-            "⬆️"
+            "[UP]"
           )}
         </View>
       </ScrollView>
