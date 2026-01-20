@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "BugLord",
-    "slug": "note-quest",
+    "slug": "buglord",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -43,6 +43,19 @@
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#4CAF50"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow BugLord to access your camera to capture insects"
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow BugLord to save captured insect photos",
+          "savePhotosPermission": "Allow BugLord to save insect photos to your library"
         }
       ]
     ],

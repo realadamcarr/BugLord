@@ -6,9 +6,13 @@ import { XPProgressBar } from '@/components/XPProgressBar';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { bugIdentificationService } from '@/services/BugIdentificationService';
+import { datasetUploadService } from '@/services/DatasetUploadService';
 import { appendScanLog } from '@/services/ScanLogService';
+import { mlPreprocessingService } from '@/services/ml/MLPreprocessingService';
+import { modelUpdateService } from '@/services/ml/ModelUpdateService';
+import { onDeviceClassifier } from '@/services/ml/OnDeviceClassifier';
 import { Bug, BugIdentificationResult, ConfirmationMethod, RARITY_CONFIG } from '@/types/Bug';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -17,29 +21,123 @@ export default function CaptureScreen() {
   const { theme } = useTheme();
   const { collection, addBugToCollection, addBugToParty, loading } = useBugCollection();
   const [showCamera, setShowCamera] = useState(false);
+  const [showCropper, setShowCropper] = useState(false);
   const [showBugIdentification, setShowBugIdentification] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
+  const [croppedPhoto, setCroppedPhoto] = useState<string | null>(null);
   const [isIdentifying, setIsIdentifying] = useState(false);
   const [identificationResult, setIdentificationResult] = useState<BugIdentificationResult | null>(null);
   const [identifiedBug, setIdentifiedBug] = useState<Bug | null>(null);
+  const [mlReady, setMlReady] = useState(false);
+  const [modelVersion, setModelVersion] = useState<string | null>(null);
 
   const styles = createStyles(theme);
+
+  // Initialize ML services on mount
+  useEffect(() => {
+    initializeMLServices();
+  }, []);
+
+  const initializeMLServices = async () => {
+    try {
+      console.log('🚀 Initializing ML services...');
+
+      // Initialize services
+      await datasetUploadService.initialize({
+        // TODO: Set from env or config
+        // baseUrl: process.env.EXPO_PUBLIC_API_URL,
+        enabled: false, // Enable when backend is ready
+      });
+
+      await modelUpdateService.initialize({
+        // TODO: Set from env or config
+        // baseUrl: process.env.EXPO_PUBLIC_API_URL,
+        enabled: false, // Enable when backend is ready
+      });
+
+      // Check for model updates (non-blocking)
+      modelUpdateService.checkForUpdate().then(async (update) => {
+        if (update) {
+          console.log('📥 New model available, downloading...');
+          await modelUpdateService.downloadAndActivate(update);
+          await loadMLModel();
+        }
+      }).catch(err => console.warn('Model update check failed:', err));
+
+      // Load current model
+      await loadMLModel();
+
+      // Process upload queue
+      datasetUploadService.processQueue().catch(err =>
+        console.warn('Upload queue processing failed:', err)
+      );
+
+    } catch (error) {
+      console.error('❌ ML services initialization failed:', error);
+    }
+  };
+
+  const loadMLModel = async () => {
+    try {
+      const hasLocal = await modelUpdateService.hasLocalModel();
+      
+      if (hasLocal) {
+        const paths = modelUpdateService.getCurrentModelPaths();
+        await onDeviceClassifier.loadModel(paths.modelPath, paths.labelsPath);
+        const version = await modelUpdateService.getCurrentVersion();
+        setModelVersion(version);
+        setMlReady(true);
+        console.log('✅ ML model loaded:', version || 'bundled');
+      } else {
+        // Try to load bundled model
+        console.log('⚠️  No local model, attempting to load bundled assets...');
+        // This would require bundling model files in assets/ml/
+        // For now, classifier will use stub predictions
+        setMlReady(false);
+      }
+    } catch (error) {
+      console.error('❌ Model loading failed:', error);
+      setMlReady(false);
+    }
+  };
 
   const handleCameraCapture = async (photoUri: string) => {
     setCapturedPhoto(photoUri);
     setShowCamera(false);
+    
+    // Show manual cropper
+    setShowCropper(true);
+  };
+
+  const handleCropComplete = async (croppedUri: string) => {
+    setCroppedPhoto(croppedUri);
+    setShowCropper(false);
+    await processAndClassify(croppedUri, capturedPhoto!);
+  };
+
+  const handleSkipCrop = async () => {
+    setShowCropper(false);
+    // Use original photo for processing
+    await processAndClassify(capturedPhoto!, capturedPhoto!);
+  };
+
+  const handleCropCancel = () => {
+    setShowCropper(false);
+    setCapturedPhoto(null);
+  };
+
+  const processAndClassify = async (imageToClassify: string, originalPhoto: string) => {
     setShowBugIdentification(true);
     setIsIdentifying(true);
     
     try {
-      // Process the image: crop insect and create pixelated icon
       console.log('🖼️ Processing insect photo...');
       
       // Import the image processing service
       const { imageProcessingService } = await import('@/services/ImageProcessingService');
       
-      // Process the image to detect, crop and pixelate the insect
-      const processedImage = await imageProcessingService.processInsectPhoto(photoUri, {
+      // Process the image to detect, crop and pixelate the insect (for icon)
+      const processedImage = await imageProcessingService.processInsectPhoto(originalPhoto, {
         pixelSize: 8,
         iconSize: 64,
         quality: 0.8,
@@ -47,12 +145,48 @@ export default function CaptureScreen() {
       });
       
       console.log('📸 Image processed:', processedImage);
-      
-      // Identify with multi-candidate pipeline
-      const result = await bugIdentificationService.identify(processedImage.croppedImage);
+
+      // NEW: ML preprocessing for fixed input size
+      const mlInput = await mlPreprocessingService.preprocessForInference(imageToClassify, {
+        targetSize: 224,
+        quality: 0.9,
+      });
+
+      console.log('🧠 Running ML classification...');
+
+      // Try on-device ML first (if ready)
+      let mlCandidates: any[] = [];
+      if (mlReady && onDeviceClassifier.isReady()) {
+        try {
+          mlCandidates = await onDeviceClassifier.classifyImage(mlInput, 5);
+          console.log('✅ ML classification complete:', mlCandidates);
+        } catch (error) {
+          console.warn('⚠️  ML classification failed, falling back to API:', error);
+        }
+      }
+
+      // Fallback to API identification if ML not available or failed
+      let result: BugIdentificationResult;
+      if (mlCandidates.length > 0) {
+        // Use ML results
+        result = {
+          candidates: mlCandidates.map(c => ({
+            label: c.label,
+            confidence: c.confidence,
+            source: 'OnDevice',
+            species: c.label,
+          })),
+          provider: 'OnDevice ML',
+          isFromAPI: false,
+        };
+      } else {
+        // Fallback to existing API pipeline
+        result = await bugIdentificationService.identify(processedImage.croppedImage);
+      }
+
       setIdentificationResult(result);
 
-      // Use first candidate as default preview, derive sensible defaults
+      // Use first candidate as default preview
       const top = result.candidates[0];
       const bugData: Partial<Bug> = {
         name: top?.label || 'Unknown bug',
@@ -60,7 +194,7 @@ export default function CaptureScreen() {
         description: top ? `Identified from ${result.provider}` : 'Unknown insect captured',
         rarity: 'common',
         biome: 'garden',
-        photo: capturedPhoto || undefined,
+        photo: originalPhoto,
         pixelArt: processedImage.pixelatedIcon,
         traits: top ? ['AI Identified'] : ['Unknown'],
         size: 'medium',
@@ -71,6 +205,9 @@ export default function CaptureScreen() {
         caughtAt: new Date(),
         predictedCandidates: result.candidates,
         provider: result.provider,
+        modelVersionUsed: modelVersion || undefined,
+        imageUri: originalPhoto,
+        capturedAt: new Date().toISOString(),
       };
       
       setIdentifiedBug(bugData as Bug);
@@ -78,7 +215,7 @@ export default function CaptureScreen() {
       // Provisional log (pre-confirmation)
       try {
         await appendScanLog({
-          imageUri: capturedPhoto || undefined,
+          imageUri: originalPhoto,
           provider: result.provider,
           candidates: result.candidates,
         });
@@ -107,6 +244,7 @@ export default function CaptureScreen() {
 
       if (confirmedLabel) {
         identifiedBug.userConfirmedLabel = confirmedLabel;
+        identifiedBug.confirmedLabel = confirmedLabel;
       }
       if (confirmationMethod) {
         identifiedBug.confirmationMethod = confirmationMethod;
@@ -135,6 +273,25 @@ export default function CaptureScreen() {
         [{ text: 'Awesome!', style: 'default' }]
       );
 
+      // Queue labeled sample for upload to training dataset
+      if (confirmedLabel && capturedPhoto) {
+        try {
+          await datasetUploadService.queueUpload({
+            imageUri: capturedPhoto,
+            confirmedLabel: confirmedLabel,
+            predictedCandidates: identificationResult?.candidates.map(c => ({
+              label: c.label,
+              confidence: c.confidence || 0,
+            })) || [],
+            modelVersionUsed: modelVersion || 'unknown',
+            capturedAt: new Date().toISOString(),
+          });
+          console.log('📤 Labeled sample queued for upload');
+        } catch (error) {
+          console.warn('Failed to queue upload:', error);
+        }
+      }
+
       // Append confirmation to latest log entry
       try {
         await appendScanLog({
@@ -149,6 +306,7 @@ export default function CaptureScreen() {
       // Reset state
       setShowBugIdentification(false);
       setCapturedPhoto(null);
+      setCroppedPhoto(null);
       setIdentificationResult(null);
       setIdentifiedBug(null);
     } catch (error) {
@@ -298,6 +456,17 @@ export default function CaptureScreen() {
           onClose={() => setShowCamera(false)}
         />
       </Modal>
+
+      {/* Manual Cropper Modal */}
+      {capturedPhoto && (
+        <ManualCropper
+          visible={showCropper}
+          imageUri={capturedPhoto}
+          onCropComplete={handleCropComplete}
+          onSkip={handleSkipCrop}
+          onCancel={handleCropCancel}
+        />
+      )}
 
       {/* Loading Modal for AI Processing */}
       {isIdentifying && (

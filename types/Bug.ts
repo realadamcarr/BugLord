@@ -26,12 +26,17 @@ export interface Bug {
   caughtAt: Date;
   location?: string;
   weather?: string;
-  // Identification metadata
+  
+  // ML/Identification metadata
   predictedCandidates?: IdentificationCandidate[];
   userConfirmedLabel?: string;
+  confirmedLabel?: string; // Alias for userConfirmedLabel
   confirmationMethod?: ConfirmationMethod;
   provider?: string;
   confidence?: number;
+  modelVersionUsed?: string; // ML model version used for prediction
+  imageUri?: string; // Original captured image URI
+  capturedAt?: string; // ISO string timestamp of capture
   
   // Game stats
   level: number;
