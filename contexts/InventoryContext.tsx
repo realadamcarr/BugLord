@@ -11,11 +11,11 @@
  * - Basic error handling and logging
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { ITEM_CATALOG, getItemDefinition } from '@/constants/Items';
+import { getItemDefinition } from '@/constants/Items';
 import { Bug } from '@/types/Bug';
 import { InventorySlot, InventoryState, ItemUseResult } from '@/types/Item';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 
 const INVENTORY_STORAGE_KEY = 'INVENTORY_STATE';
 

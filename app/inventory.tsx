@@ -12,17 +12,17 @@
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { useTheme } from '@/contexts/ThemeContext';
-import { useInventory } from '@/contexts/InventoryContext';
 import { getItemDefinition } from '@/constants/Items';
+import { useInventory } from '@/contexts/InventoryContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import React, { useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    ScrollView,
+    StyleSheet,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
 export default function InventoryScreen() {

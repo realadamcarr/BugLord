@@ -7,7 +7,7 @@
  * This is not a formal test suite - just usage examples and validation.
  */
 
-import { BUG_TRAP, POTION, REVIVE_SEED, SUPER_POTION, FULL_REVIVE } from '@/constants/Items';
+import { BUG_TRAP, POTION, REVIVE_SEED } from '@/constants/Items';
 import { useInventory } from '@/contexts/InventoryContext';
 import React from 'react';
 import { Alert, Button, ScrollView, StyleSheet, Text, View } from 'react-native';
