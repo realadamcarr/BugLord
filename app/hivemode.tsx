@@ -19,9 +19,10 @@ import { HiveBattleService } from '@/services/HiveBattleService';
 import { Bug } from '@/types/Bug';
 import { BattleBug, BattleTurn, generateHiveRounds, HiveRound, HiveRunState } from '@/types/HiveMode';
 import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     Alert,
+    Animated,
     Dimensions,
     Image,
     Modal,
@@ -36,9 +37,15 @@ const { width: screenWidth } = Dimensions.get('window');
 
 export default function HiveModeScreen() {
   const { theme } = useTheme();
-  const { collection, addBugToCollection, gainXP } = useBugCollection();
+  const { collection, addBugToCollection, gainXP, updateBugHp } = useBugCollection();
   const { inventory, useItem: consumeItem } = useInventory();
   const styles = createStyles(theme);
+
+  // Animation refs
+  const playerAnimX = useRef(new Animated.Value(0)).current;
+  const playerAnimY = useRef(new Animated.Value(0)).current;
+  const enemyAnimX = useRef(new Animated.Value(0)).current;
+  const enemyAnimY = useRef(new Animated.Value(0)).current;
 
   // Hive run state
   const [hiveState, setHiveState] = useState<HiveRunState>({
@@ -70,9 +77,32 @@ export default function HiveModeScreen() {
 
   // Start a new Hive run
   const startHiveRun = (selectedBug: Bug) => {
+    // Check if bug has HP
+    const maxHp = selectedBug.maxHp || selectedBug.maxXp;
+    const currentHp = selectedBug.currentHp !== undefined ? selectedBug.currentHp : maxHp;
+    
+    if (currentHp <= 0) {
+      Alert.alert(
+        'Bug Fainted',
+        `${selectedBug.nickname || selectedBug.name} has 0 HP and cannot battle! Use a Heal or Revive item first.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
     console.log('[Hive] Starting new run with', selectedBug.name);
     
-    const playerBattleBug = HiveBattleService.createPlayerBattleBug(selectedBug);
+    const playerBattleBug: BattleBug = {
+      id: selectedBug.id,
+      name: selectedBug.nickname || selectedBug.name,
+      level: selectedBug.level,
+      maxHp,
+      currentHp,
+      attack: Math.floor(10 + selectedBug.level * 2),
+      sprite: selectedBug.pixelArt || selectedBug.photo,
+      isEnemy: false,
+    };
+    
     const firstRound = rounds[0];
     const enemyBattleBug = HiveBattleService.createEnemyBug(firstRound);
 
@@ -100,6 +130,34 @@ export default function HiveModeScreen() {
     
     setIsProcessingTurn(true);
     
+    // Animate player bug attacking enemy
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(playerAnimX, {
+          toValue: screenWidth * 0.3,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(playerAnimY, {
+          toValue: -20,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.parallel([
+        Animated.timing(playerAnimX, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(playerAnimY, {
+          toValue: 0,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
+    
     // Player attacks
     const { damage: playerDamage, enemyHpRemaining } = HiveBattleService.executePlayerAttack(
       hiveState.playerBug,
@@ -125,6 +183,34 @@ export default function HiveModeScreen() {
   // Execute enemy attack
   const executeEnemyTurn = (playerDamage: number, updatedEnemyBug: BattleBug) => {
     if (!hiveState.playerBug) return;
+    
+    // Animate enemy bug attacking player
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(enemyAnimX, {
+          toValue: -screenWidth * 0.3,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(enemyAnimY, {
+          toValue: 20,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.parallel([
+        Animated.timing(enemyAnimX, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.timing(enemyAnimY, {
+          toValue: 0,
+          duration: 150,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
     
     const { damage: enemyDamage, playerHpRemaining } = HiveBattleService.executeEnemyAttack(
       updatedEnemyBug,
@@ -208,6 +294,11 @@ export default function HiveModeScreen() {
       hiveState.playerBug!.currentHp + Math.floor(hiveState.playerBug!.maxHp * 0.2)
     );
     
+    // Persist HP after each round
+    if (hiveState.playerBug) {
+      updateBugHp(hiveState.playerBug.id, restoredHp);
+    }
+    
     setHiveState(prev => ({
       ...prev,
       currentRound: nextRoundNumber,
@@ -233,6 +324,9 @@ export default function HiveModeScreen() {
     turnLog: BattleTurn
   ) => {
     console.log('[Hive] Player defeated');
+    
+    // Persist HP to collection
+    updateBugHp(defeatedPlayer.id, 0);
     
     setBattleMessage(`${defeatedPlayer.name} fainted!`);
     
@@ -355,6 +449,11 @@ export default function HiveModeScreen() {
   const handleRunCompletion = (won: boolean) => {
     console.log('[Hive] Run completed. Won:', won);
     
+    // Persist final HP to collection
+    if (hiveState.playerBug) {
+      updateBugHp(hiveState.playerBug.id, hiveState.playerBug.currentHp);
+    }
+    
     const totalXp = hiveState.roundsWon * 50;
     
     setHiveState(prev => ({
@@ -386,7 +485,12 @@ export default function HiveModeScreen() {
     const availableBugs = [
       ...collection.party.filter(bug => bug !== null),
       ...collection.bugs.filter(bug => !collection.party.some(partyBug => partyBug?.id === bug.id))
-    ];
+    ].filter(bug => {
+      // Only show bugs with HP > 0
+      const maxHp = bug.maxHp || bug.maxXp;
+      const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
+      return currentHp > 0;
+    });
 
     return (
       <Modal visible={showBugSelector} animationType="slide" presentationStyle="pageSheet">
@@ -417,7 +521,7 @@ export default function HiveModeScreen() {
                 <View style={styles.bugListInfo}>
                   <ThemedText style={styles.bugListName}>{bug.nickname || bug.name}</ThemedText>
                   <ThemedText style={styles.bugListDetails}>
-                    Level {bug.level} • HP: {bug.maxXp} • ATK: {10 + bug.level * 2}
+                    Level {bug.level} • HP: {bug.currentHp !== undefined ? bug.currentHp : (bug.maxHp || bug.maxXp)}/{bug.maxHp || bug.maxXp} • ATK: {10 + bug.level * 2}
                   </ThemedText>
                 </View>
               </TouchableOpacity>
@@ -554,9 +658,17 @@ export default function HiveModeScreen() {
             HP: {hiveState.enemyBug?.currentHp}/{hiveState.enemyBug?.maxHp}
           </ThemedText>
           
-          <View style={styles.bugSprite}>
+          <Animated.View style={[
+            styles.bugSprite,
+            {
+              transform: [
+                { translateX: enemyAnimX },
+                { translateY: enemyAnimY },
+              ],
+            },
+          ]}>
             <Text style={styles.enemySprite}>{hiveState.enemyBug?.sprite}</Text>
-          </View>
+          </Animated.View>
         </View>
 
         {/* Battle Message */}
@@ -566,7 +678,15 @@ export default function HiveModeScreen() {
 
         {/* Player Bug */}
         <View style={styles.playerSection}>
-          <View style={styles.bugSprite}>
+          <Animated.View style={[
+            styles.bugSprite,
+            {
+              transform: [
+                { translateX: playerAnimX },
+                { translateY: playerAnimY },
+              ],
+            },
+          ]}>
             {hiveState.playerBug?.sprite ? (
               typeof hiveState.playerBug.sprite === 'string' &&
               hiveState.playerBug.sprite.startsWith('data:') ? (
@@ -577,7 +697,7 @@ export default function HiveModeScreen() {
             ) : (
               <PixelatedEmoji type="bug" size={48} color={theme.colors.text} />
             )}
-          </View>
+          </Animated.View>
           
           <ThemedText style={styles.bugName}>
             {hiveState.playerBug?.name} Lv.{hiveState.playerBug?.level}

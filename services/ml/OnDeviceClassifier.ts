@@ -20,7 +20,6 @@
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
 import { MLCandidate, MLClassifierConfig } from './types';
-
 // TODO: Uncomment when native library is installed
 // import { TensorflowModel } from 'react-native-fast-tflite';
 

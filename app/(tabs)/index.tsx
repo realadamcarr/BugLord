@@ -23,11 +23,9 @@ export default function CaptureScreen() {
   const { theme } = useTheme();
   const { collection, addBugToCollection, addBugToParty, loading } = useBugCollection();
   const [showCamera, setShowCamera] = useState(false);
-  const [showCropper, setShowCropper] = useState(false);
   const [showBugIdentification, setShowBugIdentification] = useState(false);
   const [showCollection, setShowCollection] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
-  const [croppedPhoto, setCroppedPhoto] = useState<string | null>(null);
   const [isIdentifying, setIsIdentifying] = useState(false);
   const [identificationResult, setIdentificationResult] = useState<BugIdentificationResult | null>(null);
   const [identifiedBug, setIdentifiedBug] = useState<Bug | null>(null);
@@ -49,7 +47,7 @@ export default function CaptureScreen() {
       await datasetUploadService.initialize({
         // TODO: Set from env or config
         // baseUrl: process.env.EXPO_PUBLIC_API_URL,
-        enabled: false, // Enable when backend is ready
+        enabled: true, // Enable when backend is ready
       });
 
       await modelUpdateService.initialize({
@@ -108,25 +106,8 @@ export default function CaptureScreen() {
     setCapturedPhoto(photoUri);
     setShowCamera(false);
     
-    // Show manual cropper
-    setShowCropper(true);
-  };
-
-  const handleCropComplete = async (croppedUri: string) => {
-    setCroppedPhoto(croppedUri);
-    setShowCropper(false);
-    await processAndClassify(croppedUri, capturedPhoto!);
-  };
-
-  const handleSkipCrop = async () => {
-    setShowCropper(false);
-    // Use original photo for processing
-    await processAndClassify(capturedPhoto!, capturedPhoto!);
-  };
-
-  const handleCropCancel = () => {
-    setShowCropper(false);
-    setCapturedPhoto(null);
+    // Automatically process the captured photo
+    await processAndClassify(photoUri, photoUri);
   };
 
   const processAndClassify = async (imageToClassify: string, originalPhoto: string) => {
@@ -469,16 +450,7 @@ export default function CaptureScreen() {
         />
       </Modal>
 
-      {/* Manual Cropper Modal */}
-      {capturedPhoto && (
-        <ManualCropper
-          visible={showCropper}
-          imageUri={capturedPhoto}
-          onCropComplete={handleCropComplete}
-          onSkip={handleSkipCrop}
-          onCancel={handleCropCancel}
-        />
-      )}
+
 
       {/* Loading Modal for AI Processing */}
       {isIdentifying && (

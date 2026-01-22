@@ -42,6 +42,10 @@ export interface Bug {
   level: number;
   xp: number;
   maxXp: number;
+  
+  // Battle stats
+  currentHp?: number; // Current HP (defaults to maxHp if not set)
+  maxHp?: number; // Maximum HP (calculated from level/stats)
 }
 
 export interface BugCollection {

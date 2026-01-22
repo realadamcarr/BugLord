@@ -107,11 +107,16 @@ export function useWalkMode(): UseWalkModeReturn {
   async function handleXpReward(reward: WalkModeReward): Promise<void> {
     if (!reward.xpAmount) return;
 
-    // Find the first non-null bug in the party (active bug)
-    const activeBug = collection.party.find(bug => bug !== null);
+    // Find the first non-null bug in the party with HP > 0 (active bug)
+    const activeBug = collection.party.find(bug => {
+      if (!bug) return false;
+      const maxHp = bug.maxHp || bug.maxXp;
+      const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
+      return currentHp > 0;
+    });
     
     if (!activeBug) {
-      console.log('🚶‍♂️ No active bug in party, XP reward skipped');
+      console.log('🚶‍♂️ No healthy bug in party, XP reward skipped');
       return;
     }
 

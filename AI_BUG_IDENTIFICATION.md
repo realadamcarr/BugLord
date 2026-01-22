@@ -3,7 +3,7 @@
 ## Overview
 BugLord now includes an advanced AI-powered bug identification system that automatically identifies bugs when users take photos. The system uses multiple API providers with intelligent fallback to ensure reliable identification.
 
-## How It Works
+## How It Works.
 
 ### 1. Camera Integration
 - When users take a photo in the Capture tab, the image is automatically processed

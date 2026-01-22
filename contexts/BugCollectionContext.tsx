@@ -10,6 +10,7 @@ interface BugCollectionContextType {
   swapPartySlots: (from: number, to: number) => void;
   updateBugNickname: (bugId: string, nickname: string) => void;
   addXpToBug: (bugId: string, xpAmount: number) => Promise<boolean>;
+  updateBugHp: (bugId: string, currentHp: number) => Promise<boolean>;
   gainXP: (amount: number) => void;
   loading: boolean;
 }
@@ -109,6 +110,8 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
       level: 1,
       xp: 0,
       maxXp: stats.maxXp,
+      maxHp: stats.maxXp, // Initialize maxHp
+      currentHp: stats.maxXp, // Start with full HP
     };
 
     setCollection(prev => ({
@@ -272,6 +275,52 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     });
   };
 
+  const updateBugHp = async (bugId: string, currentHp: number): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setCollection(prev => {
+        let bugFound = false;
+        
+        // Update bug in bugs array
+        const newBugs = prev.bugs.map(bug => {
+          if (bug.id === bugId) {
+            bugFound = true;
+            // Initialize maxHp if not set (based on maxXp as proxy)
+            const maxHp = bug.maxHp || bug.maxXp;
+            return {
+              ...bug,
+              currentHp: Math.max(0, Math.min(currentHp, maxHp)),
+              maxHp,
+            };
+          }
+          return bug;
+        });
+        
+        // Update bug in party array if found
+        const newParty = prev.party.map(bug => {
+          if (bug && bug.id === bugId) {
+            bugFound = true;
+            const maxHp = bug.maxHp || bug.maxXp;
+            return {
+              ...bug,
+              currentHp: Math.max(0, Math.min(currentHp, maxHp)),
+              maxHp,
+            };
+          }
+          return bug;
+        });
+        
+        // Resolve the promise with success status
+        setTimeout(() => resolve(bugFound), 0);
+        
+        return {
+          ...prev,
+          bugs: newBugs,
+          party: newParty,
+        };
+      });
+    });
+  };
+
   const contextValue: BugCollectionContextType = {
     collection,
     addBugToCollection,
@@ -280,6 +329,7 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     swapPartySlots,
     updateBugNickname,
     addXpToBug,
+    updateBugHp,
     gainXP,
     loading,
   };
