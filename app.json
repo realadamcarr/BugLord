@@ -37,15 +37,6 @@
     "plugins": [
       "expo-router",
       [
-        "expo-splash-screen",
-        {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#4CAF50"
-        }
-      ],
-      [
         "expo-camera",
         {
           "cameraPermission": "Allow BugLord to access your camera to capture insects"
@@ -57,7 +48,17 @@
           "photosPermission": "Allow BugLord to save captured insect photos",
           "savePhotosPermission": "Allow BugLord to save insect photos to your library"
         }
-      ]
+      ],
+[
+  "expo-splash-screen",
+  {
+    "image": "./assets/images/splash-icon.png",
+    "imageWidth": 200,
+    "resizeMode": "contain",
+    "backgroundColor": "#4CAF50"
+  }
+]
+
     ],
     "experiments": {
       "typedRoutes": true
