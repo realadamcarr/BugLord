@@ -1,5 +1,6 @@
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Dimensions } from 'react-native';
+import { onDeviceClassifier } from './ml/OnDeviceClassifier';
 
 export interface CropResult {
   croppedImage: string;
@@ -23,6 +24,36 @@ export interface ProcessingOptions {
 const { width: screenWidth } = Dimensions.get('window');
 
 class ImageProcessingService {
+  private initialized: boolean = false;
+
+  /**
+   * Initialize the image processing service and load detection model
+   */
+  async initialize(): Promise<void> {
+    if (this.initialized) return;
+    
+    try {
+      console.log('📷 Initializing ImageProcessingService...');
+      
+      // Load detection model when bundled in assets
+      try {
+        const detectionModelPath = await onDeviceClassifier.copyBundledModel(
+          require('@/assets/ml/insect_detector.tflite'),
+          'insect_detector.tflite'
+        );
+        await onDeviceClassifier.loadDetectionModel(detectionModelPath);
+        console.log('✅ Detection model loaded');
+      } catch (detectionError) {
+        console.warn('⚠️  Detection model not available, using fallback:', detectionError);
+      }
+      
+      this.initialized = true;
+      console.log('✅ ImageProcessingService initialized');
+    } catch (error) {
+      console.warn('⚠️  ImageProcessingService initialization failed:', error);
+      // Continue without detection model - will use fallback
+    }
+  }
   
   /**
    * Main processing method - detects insects, crops them, and creates pixelated icons
@@ -31,6 +62,9 @@ class ImageProcessingService {
     photoUri: string, 
     options: ProcessingOptions = {}
   ): Promise<CropResult> {
+    // Ensure service is initialized
+    await this.initialize();
+    
     const {
       pixelSize = 8,
       iconSize = 64,
@@ -82,18 +116,54 @@ class ImageProcessingService {
    */
   private async detectInsect(photoUri: string): Promise<{ x: number; y: number; width: number; height: number } | null> {
     try {
-      // This is a placeholder for actual object detection
-      // In a real implementation, you might use:
-      // 1. TensorFlow Lite models for mobile object detection
-      // 2. Google Vision API for object detection
-      // 3. Custom trained models for insect detection
+      // Check if detection model is ready
+      if (onDeviceClassifier.isDetectionReady()) {
+        console.log('🤖 Using ML-based object detection...');
+        
+        // Get image dimensions for proper scaling
+        const imageInfo = await ImageManipulator.manipulateAsync(
+          photoUri,
+          [],
+          { base64: false, format: ImageManipulator.SaveFormat.JPEG }
+        );
+        
+        // Preprocess for detection model (300x300 for SSD)
+        const detectionConfig = onDeviceClassifier.getDetectionConfig();
+        const inputSize = detectionConfig?.inputSize ?? 300;
+        const preprocessed = await this.preprocessForDetection(photoUri, inputSize);
+        
+        // Run detection
+        const detectionResult = await onDeviceClassifier.detectObjects(preprocessed, {
+          confidenceThreshold: 0.3,
+          maxDetections: 5,
+        });
+        
+        if (detectionResult.boxes.length > 0) {
+          // Use the highest confidence detection
+          const bestBox = detectionResult.boxes.reduce((best, box) => 
+            (box.confidence ?? 0) > (best.confidence ?? 0) ? box : best
+          );
+          
+          console.log(`✅ Detected insect with ${(bestBox.confidence! * 100).toFixed(1)}% confidence`);
+          console.log(`   Inference time: ${detectionResult.inferenceTime}ms`);
+          
+          // Convert normalized coordinates to pixel coordinates
+          return {
+            x: Math.round(bestBox.x * imageInfo.width),
+            y: Math.round(bestBox.y * imageInfo.height),
+            width: Math.round(bestBox.width * imageInfo.width),
+            height: Math.round(bestBox.height * imageInfo.height),
+          };
+        }
+        
+        console.log('⚠️  No detections above threshold, using fallback');
+      }
       
-      // For now, we'll use a simple heuristic approach
-      // assuming insects are typically in the center of photos
+      // Fallback to heuristic detection if ML not available
       return await this.simpleInsectDetection(photoUri);
       
     } catch (error) {
-      console.log('Object detection failed, using fallback');
+      console.log('Object detection failed, using fallback:', error);
       return null;
     }
   }

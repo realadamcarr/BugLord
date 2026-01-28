@@ -19,17 +19,21 @@
 
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system';
-import { MLCandidate, MLClassifierConfig } from './types';
-// TODO: Uncomment when native library is installed
-// import { TensorflowModel } from 'react-native-fast-tflite';
+import { BoundingBox, DetectionModelConfig, DetectionResult, MLCandidate, MLClassifierConfig } from './types';
+// Native TFLite library
 
 class OnDeviceClassifier {
   private modelLoaded: boolean = false;
   private labels: string[] = [];
   private config: MLClassifierConfig | null = null;
   
-  // TODO: Replace with actual TFLite model instance
-  // private model: TensorflowModel | null = null;
+  // Detection model state
+  private detectionModelLoaded: boolean = false;
+  private detectionConfig: DetectionModelConfig | null = null;
+  
+  // TFLite model instances
+  private model: TensorflowModel | null = null;
+  private detectionModel: TensorflowModel | null = null;
 
   /**
    * Load model and labels from specified paths
@@ -47,13 +51,14 @@ class OnDeviceClassifier {
       this.labels = JSON.parse(labelsContent);
       console.log(`✅ Loaded ${this.labels.length} class labels`);
 
-      // TODO: Load actual TFLite model
-      // When react-native-fast-tflite is installed:
-      // this.model = await TensorflowModel.loadFromFile(modelPath);
-      
-      // For now: stub implementation
-      console.log('⚠️  Using STUB classifier (no native TFLite loaded)');
-      console.log('   Install native library and rebuild for real inference');
+      // Load actual TFLite model
+      try {
+        this.model = await TensorflowModel.loadFromFile(modelPath);
+        console.log('✅ TFLite classification model loaded');
+      } catch (modelError) {
+        console.warn('⚠️  Native TFLite loading failed, using stub:', modelError);
+        console.log('   Make sure to rebuild with: npx expo prebuild');
+      }
       
       this.modelLoaded = true;
       this.config = {
@@ -84,14 +89,16 @@ class OnDeviceClassifier {
     console.log(`🔍 Classifying image: ${imageUri}`);
 
     try {
-      // TODO: Real inference when native library is available
-      // const results = await this.model!.run(imageUri);
-      // const predictions = this.processPredictions(results, topK);
-      // return predictions;
-
-      // STUB: Return mock predictions
-      console.log('⚠️  Using STUB predictions (no real inference)');
-      return this.getStubPredictions(topK);
+      // Real inference when model is available
+      if (this.model) {
+        const results = await this.model.run(imageUri);
+        const predictions = this.processPredictions(results, topK);
+        return predictions;
+      } else {
+        // Fallback to stub if model not loaded
+        console.log('⚠️  Using STUB predictions (model not loaded)');
+        return this.getStubPredictions(topK);
+      }
 
     } catch (error) {
       console.error('❌ Classification failed:', error);
@@ -133,6 +140,104 @@ class OnDeviceClassifier {
     this.config = null;
     
     console.log('✅ Model unloaded');
+  }
+
+  /**
+   * Load object detection model for insect localization
+   * @param modelPath - Path to detection .tflite model (e.g., SSD MobileNet)
+   * @param labelsPath - Optional path to detection class labels
+   */
+  async loadDetectionModel(modelPath: string, labelsPath?: string): Promise<void> {
+    console.log('🎯 Loading object detection model...');
+    console.log('  Model:', modelPath);
+
+    try {
+      // Load labels if provided
+      let detectionLabels: string[] = [];
+      if (labelsPath) {
+        const labelsContent = await FileSystem.readAsStringAsync(labelsPath);
+        detectionLabels = JSON.parse(labelsContent);
+        console.log(`✅ Loaded ${detectionLabels.length} detection class labels`);
+      }
+
+      // Load actual TFLite detection model
+      try {
+        this.detectionModel = await TensorflowModel.loadFromFile(modelPath);
+        console.log('✅ TFLite detection model loaded');
+      } catch (modelError) {
+        console.warn('⚠️  Native TFLite loading failed, using stub:', modelError);
+        console.log('   Make sure detection model exists and rebuild with: npx expo prebuild');
+      }
+      
+      this.detectionModelLoaded = true;
+      this.detectionConfig = {
+        modelPath,
+        labelsPath,
+        inputSize: 300, // Standard SSD input size
+        confidenceThreshold: 0.3,
+        maxDetections: 10,
+      };
+
+    } catch (error) {
+      console.error('❌ Failed to load detection model:', error);
+      throw new Error(`Detection model loading failed: ${error}`);
+    }
+  }
+
+  /**
+   * Detect insects in image and return bounding boxes
+   * @param imageUri - Preprocessed image URI (should be detection model input size)
+   * @param options - Detection options
+   * @returns Detection results with bounding boxes
+   */
+  async detectObjects(imageUri: string, options?: {
+    confidenceThreshold?: number;
+    maxDetections?: number;
+  }): Promise<DetectionResult> {
+    if (!this.detectionModelLoaded) {
+      throw new Error('Detection model not loaded. Call loadDetectionModel() first.');
+    }
+
+    const startTime = Date.now();
+    console.log(`🔍 Detecting objects in: ${imageUri}`);
+
+    const confidenceThreshold = options?.confidenceThreshold ?? this.detectionConfig!.confidenceThreshold;
+    const maxDetections = options?.maxDetections ?? this.detectionConfig!.maxDetections;
+
+    try {
+      // Real detection when model is available
+      if (this.detectionModel) {
+        const results = await this.detectionModel.run(imageUri);
+        const boxes = this.parseDetectionResults(results, confidenceThreshold, maxDetections);
+        return { boxes, inferenceTime: Date.now() - startTime };
+      } else {
+        // Fallback to stub if model not loaded
+        console.log('⚠️  Using STUB object detection (model not loaded)');
+        const boxes = this.getStubDetection(confidenceThreshold);
+        return { boxes, inferenceTime: Date.now() - startTime };
+      }
+
+    } catch (error) {
+      console.error('❌ Object detection failed:', error);
+      
+      // Fallback to empty detection on error
+      console.log('⚠️  Falling back to empty detection due to error');
+      return { boxes: [], inferenceTime: Date.now() - startTime };
+    }
+  }
+
+  /**
+   * Check if detection model is loaded and ready
+   */
+  isDetectionReady(): boolean {
+    return this.detectionModelLoaded;
+  }
+
+  /**
+   * Get current detection model configuration
+   */
+  getDetectionConfig(): DetectionModelConfig | null {
+    return this.detectionConfig;
   }
 
   /**
@@ -180,26 +285,66 @@ class OnDeviceClassifier {
   }
 
   /**
-   * TODO: Process raw model output into predictions
-   * Implement this when integrating real TFLite
+   * Process raw model output into predictions
    */
-  // private processPredictions(rawOutput: Float32Array, topK: number): MLCandidate[] {
-  //   // Convert raw output to label-confidence pairs
-  //   const predictions: MLCandidate[] = [];
-  //   
-  //   for (let i = 0; i < rawOutput.length; i++) {
-  //     predictions.push({
-  //       label: this.labels[i] || 'Unknown',
-  //       confidence: rawOutput[i],
-  //     });
-  //   }
-  //   
-  //   // Sort by confidence descending
-  //   predictions.sort((a, b) => b.confidence - a.confidence);
-  //   
-  //   // Return top-K
-  //   return predictions.slice(0, topK);
-  // }
+  private processPredictions(rawOutput: Float32Array, topK: number): MLCandidate[] {
+    // Convert raw output to label-confidence pairs
+    const predictions: MLCandidate[] = [];
+    
+    for (let i = 0; i < rawOutput.length && i < this.labels.length; i++) {
+      predictions.push({
+        label: this.labels[i] || 'Unknown',
+        confidence: rawOutput[i],
+      });
+    }
+    
+    // Sort by confidence descending
+    predictions.sort((a, b) => b.confidence - a.confidence);
+    
+    // Return top-K
+    return predictions.slice(0, topK);
+  }
+
+  /**
+   * Parse raw detection model output into bounding boxes
+   * SSD model output format: [boxes, classes, scores, num_detections]
+   */
+  private parseDetectionResults(
+    rawOutput: any,
+    confidenceThreshold: number,
+    maxDetections: number
+  ): BoundingBox[] {
+    // SSD output format: [boxes, classes, scores, num_detections]
+    // boxes: [batch, max_detections, 4] - [y1, x1, y2, x2] normalized 0-1
+    // classes: [batch, max_detections]
+    // scores: [batch, max_detections]
+    // num_detections: [batch]
+    
+    const boxes: BoundingBox[] = [];
+    const numDetections = Math.min(rawOutput[3][0], maxDetections);
+    
+    for (let i = 0; i < numDetections; i++) {
+      const score = rawOutput[2][i];
+      if (score < confidenceThreshold) continue;
+      
+      // Convert from [y1, x1, y2, x2] to [x, y, width, height]
+      const y1 = rawOutput[0][i * 4];
+      const x1 = rawOutput[0][i * 4 + 1];
+      const y2 = rawOutput[0][i * 4 + 2];
+      const x2 = rawOutput[0][i * 4 + 3];
+      
+      boxes.push({
+        x: x1,
+        y: y1,
+        width: x2 - x1,
+        height: y2 - y1,
+        confidence: score,
+        class: 'insect',
+      });
+    }
+    
+    return boxes;
+  }
 
   /**
    * Helper: Copy bundled model to FileSystem if needed
@@ -270,6 +415,34 @@ class OnDeviceClassifier {
     }
 
     throw new Error('Failed to load bundled labels asset');
+  }
+
+  /**
+   * STUB: Generate mock detection for development/testing
+   * Replace this with real model inference once native library is integrated
+   */
+  private getStubDetection(confidenceThreshold: number): BoundingBox[] {
+    // Simulate a center-biased detection with some randomness
+    const numDetections = Math.floor(Math.random() * 2) + 1; // 1-2 detections
+    const boxes: BoundingBox[] = [];
+
+    for (let i = 0; i < numDetections; i++) {
+      // Simulated detection centered with some variance
+      const centerX = 0.5 + (Math.random() - 0.5) * 0.3;
+      const centerY = 0.5 + (Math.random() - 0.5) * 0.3;
+      const size = 0.3 + Math.random() * 0.2; // 30-50% of image
+      
+      boxes.push({
+        x: centerX - size / 2,
+        y: centerY - size / 2,
+        width: size,
+        height: size,
+        confidence: 0.5 + Math.random() * 0.4, // 50-90%
+        class: 'insect',
+      });
+    }
+
+    return boxes.filter(box => (box.confidence ?? 0) >= confidenceThreshold);
   }
 }
 

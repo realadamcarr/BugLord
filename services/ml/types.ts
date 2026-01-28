@@ -22,6 +22,29 @@ export interface MLClassifierConfig {
   confidenceThreshold: number;
 }
 
+// Object Detection Types
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence?: number;
+  class?: string;
+}
+
+export interface DetectionResult {
+  boxes: BoundingBox[];
+  inferenceTime: number;
+}
+
+export interface DetectionModelConfig {
+  modelPath: string;
+  labelsPath?: string;
+  inputSize: number; // e.g., 300 or 320 for SSD
+  confidenceThreshold: number;
+  maxDetections: number;
+}
+
 export interface PreprocessingConfig {
   targetSize: number;
   quality: number;
@@ -48,4 +71,27 @@ export interface UploadQueueItem extends LabeledSample {
   uploadAttempts: number;
   lastAttempt?: string;
   status: 'pending' | 'uploading' | 'failed' | 'success';
+}
+
+// Object Detection Types
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  confidence?: number;
+  class?: string;
+}
+
+export interface DetectionResult {
+  boxes: BoundingBox[];
+  inferenceTime: number;
+}
+
+export interface DetectionModelConfig {
+  modelPath: string;
+  labelsPath?: string;
+  inputSize: number; // e.g., 300 or 320 for SSD
+  confidenceThreshold: number;
+  maxDetections: number;
 }
