@@ -24,11 +24,19 @@ dataset/
 datasets/
 inaturalist/
 
-# Images used for training
-**/*.jpg
-**/*.jpeg
-**/*.png
-**/*.webp
+# Images used for training (exclude training folders specifically, but keep app assets)
+training/**/*.jpg
+training/**/*.jpeg
+training/**/*.png
+training/**/*.webp
+dataset/**/*.jpg
+dataset/**/*.jpeg  
+dataset/**/*.png
+dataset/**/*.webp
+datasets/**/*.jpg
+datasets/**/*.jpeg
+datasets/**/*.png
+datasets/**/*.webp
 
 # ML artifacts
 *.pt
