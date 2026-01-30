@@ -15,50 +15,48 @@
 
 import { BUG_TRAP, FULL_REVIVE, POTION, REVIVE_SEED, SUPER_POTION } from '@/constants/Items';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Pedometer } from 'expo-sensors';
+import { Platform } from 'react-native';
 
-// For now, we'll create a mock pedometer for development
-// In a real app, you'd use expo-sensors or react-native-sensors
+// Background task name
+const BACKGROUND_STEP_TASK = 'background-step-tracking';
+
+// Mock Pedometer for web/simulator
 class MockPedometer {
   private stepCount = 0;
   private listeners: ((result: { steps: number }) => void)[] = [];
   private interval: NodeJS.Timeout | null = null;
 
   static async isAvailableAsync(): Promise<boolean> {
-    return Promise.resolve(true); // Always available for testing
+    return Promise.resolve(true);
   }
 
-  watchStepCount(callback: (result: { steps: number }) => void) {
+  static watchStepCount(callback: (result: { steps: number }) => void) {
+    const instance = new MockPedometer();
     console.log('🚶‍♂️ [WalkMode] Starting mock step tracking (web/simulator mode)');
-    this.listeners.push(callback);
+    instance.listeners.push(callback);
     
     // Simulate steps every 10 seconds for testing
-    if (!this.interval) {
-      this.interval = setInterval(() => {
-        this.stepCount += Math.floor(Math.random() * 20) + 5; // 5-25 steps
-        this.listeners.forEach(listener => {
-          listener({ steps: this.stepCount });
-        });
-      }, 10000); // Every 10 seconds
-    }
+    instance.interval = setInterval(() => {
+      instance.stepCount += Math.floor(Math.random() * 20) + 5; // 5-25 steps
+      instance.listeners.forEach(listener => {
+        listener({ steps: instance.stepCount });
+      });
+    }, 10000);
 
     return {
       remove: () => {
-        const index = this.listeners.indexOf(callback);
-        if (index > -1) {
-          this.listeners.splice(index, 1);
-        }
-        if (this.listeners.length === 0 && this.interval) {
-          clearInterval(this.interval);
-          this.interval = null;
+        if (instance.interval) {
+          clearInterval(instance.interval);
+          instance.interval = null;
         }
       }
     };
   }
 }
 
-// Use mock pedometer for development
-// TODO: Replace with real pedometer when deploying to device
-const Pedometer = new MockPedometer();
+// Use real Pedometer on device, mock on web
+const PedometerAPI = Platform.OS === 'web' ? MockPedometer : Pedometer;
 
 // Storage key for Walk Mode data
 const WALK_MODE_STORAGE_KEY = 'walk_mode_data';
@@ -140,17 +138,69 @@ class WalkModeService {
       await this.loadState();
       
       // Check if pedometer is available
-      const isAvailable = await MockPedometer.isAvailableAsync();
+      const isAvailable = await PedometerAPI.isAvailableAsync();
       if (!isAvailable) {
         this.log('⚠️ Pedometer not available on this device');
         return;
       }
+
+      // Register background task for step tracking
+      await this.registerBackgroundTask();
 
       this.log('✅ Walk Mode service initialized');
       this.isInitialized = true;
       
     } catch (error) {
       this.log('❌ Failed to initialize Walk Mode:', error);
+    }
+  }
+
+  /**
+   * Register background fetch task for step tracking
+   */
+  private async registerBackgroundTask(): Promise<void> {
+    if (Platform.OS === 'web') {
+      this.log('⚠️ Background tasks not supported on web');
+      return;
+    }
+
+    try {
+      // Define the background task
+      TaskManager.defineTask(BACKGROUND_STEP_TASK, async () => {
+        try {
+          this.log('🔄 Background task executing...');
+          
+          // Update step count in background
+          const now = new Date();
+          const start = new Date(now.getTime() - 24 * 60 * 60 * 1000); // Last 24 hours
+          
+          const result = await Pedometer.getStepCountAsync(start, now);
+          if (result && typeof result.steps === 'number') {
+            // Update state with new steps
+            const newSessionSteps = result.steps - (this.state.totalSteps - this.state.sessionSteps);
+            if (newSessionSteps > 0) {
+              this.handleStepUpdate(newSessionSteps);
+              await this.saveState();
+            }
+          }
+          
+          return BackgroundFetch.BackgroundFetchResult.NewData;
+        } catch (error) {
+          this.log('❌ Background task failed:', error);
+          return BackgroundFetch.BackgroundFetchResult.Failed;
+        }
+      });
+
+      // Register the task
+      await BackgroundFetch.registerTaskAsync(BACKGROUND_STEP_TASK, {
+        minimumInterval: 60 * 15, // 15 minutes
+        stopOnTerminate: false, // Continue after app closes
+        startOnBoot: true, // Start on device boot
+      });
+
+      this.log('✅ Background task registered');
+    } catch (error) {
+      this.log('⚠️ Failed to register background task:', error);
     }
   }
 
@@ -176,12 +226,17 @@ class WalkModeService {
       this.state.isActive = true;
       
       // Start step counting from now
-      this.pedometerSubscription = Pedometer.watchStepCount((result) => {
+      this.pedometerSubscription = PedometerAPI.watchStepCount((result) => {
         this.handleStepUpdate(result.steps);
       });
 
+      // Start background fetch if on device
+      if (Platform.OS !== 'web') {
+        await BackgroundFetch.setMinimumIntervalAsync(60 * 15); // 15 minutes
+      }
+
       await this.saveState();
-      this.log('✅ Walk Mode tracking started');
+      this.log('✅ Walk Mode tracking started (background enabled)');
       
     } catch (error) {
       this.log('❌ Failed to start Walk Mode tracking:', error);

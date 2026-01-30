@@ -150,35 +150,59 @@ export default function WalkModeScreen() {
 
   const renderCircularProgress = () => {
     const circleSize = 200;
-    const strokeWidth = 12;
+    const strokeWidth = 8;
     const radius = (circleSize - strokeWidth) / 2;
     const circumference = 2 * Math.PI * radius;
-    const strokeDashoffset = circumference - (progressPercentage / 100) * circumference;
+    
+    // Calculate progress within current milestone (0-100%)
+    const currentMilestoneSteps = currentSteps % STEPS_PER_KM;
+    const milestoneProgress = (currentMilestoneSteps / STEPS_PER_KM) * 100;
 
     return (
       <View style={styles.progressContainer}>
-        {/* SVG Circle would go here in a real implementation */}
-        {/* For now, using a simpler circular progress */}
         <View style={[styles.progressCircle, { width: circleSize, height: circleSize }]}>
+          {/* Empty track (gray circle) */}
+          <View style={[
+            styles.progressTrack,
+            {
+              width: circleSize,
+              height: circleSize,
+              borderRadius: circleSize / 2,
+              borderWidth: strokeWidth,
+            }
+          ]} />
+          
+          {/* Filled progress (blue arc) */}
           <View style={[
             styles.progressFill,
             {
-              transform: [{ rotate: `${(progressPercentage / 100) * 360}deg` }],
               width: circleSize,
               height: circleSize,
+              borderRadius: circleSize / 2,
+              borderWidth: strokeWidth,
+              transform: [{ rotate: `${-90 + (milestoneProgress / 100) * 360}deg` }],
             }
           ]} />
+          
+          {/* Inner circle with bug */}
           <View style={styles.progressInner}>
             {selectedBug ? (
-              selectedBug.photo ? (
-                <Image source={{ uri: selectedBug.photo }} style={styles.selectedBugPhoto} />
-              ) : selectedBug.pixelArt ? (
-                <Image source={{ uri: selectedBug.pixelArt }} style={styles.selectedBugPhoto} />
-              ) : (
-                <View style={styles.selectedBugEmoji}>
-                  <PixelatedEmoji type="bug" size={56} color="#ffffff" />
+              <>
+                {selectedBug.photo ? (
+                  <Image source={{ uri: selectedBug.photo }} style={styles.selectedBugPhoto} />
+                ) : selectedBug.pixelArt ? (
+                  <Image source={{ uri: selectedBug.pixelArt }} style={styles.selectedBugPhoto} />
+                ) : (
+                  <View style={styles.selectedBugEmoji}>
+                    <PixelatedEmoji type="bug" size={56} color="#ffffff" />
+                  </View>
+                )}
+                {/* Progress percentage text */}
+                <View style={styles.progressTextContainer}>
+                  <Text style={styles.progressPercentage}>{Math.floor(milestoneProgress)}%</Text>
+                  <Text style={styles.progressSteps}>{currentMilestoneSteps}/{STEPS_PER_KM}</Text>
                 </View>
-              )
+              </>
             ) : (
               <Text style={styles.selectBugText}>Select Bug</Text>
             )}
@@ -426,42 +450,57 @@ const createStyles = (theme: any) => StyleSheet.create({
     marginBottom: 30,
   },
   progressCircle: {
-    borderRadius: 100,
-    borderWidth: 12,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  progressTrack: {
+    position: 'absolute',
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
   progressFill: {
     position: 'absolute',
-    borderRadius: 100,
-    borderWidth: 12,
     borderColor: 'transparent',
     borderTopColor: '#60A5FA',
     borderRightColor: '#60A5FA',
   },
   progressInner: {
     position: 'absolute',
-    top: 12,
-    left: 12,
-    right: 12,
-    bottom: 12,
+    top: 8,
+    left: 8,
+    right: 8,
+    bottom: 8,
     borderRadius: 100,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   selectedBugPhoto: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    marginBottom: 8,
   },
   selectedBugEmoji: {
     width: 56,
     height: 56,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 8,
+  },
+  progressTextContainer: {
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  progressPercentage: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#60A5FA',
+  },
+  progressSteps: {
+    fontSize: 10,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginTop: 2,
   },
   selectBugText: {
     color: 'white',
