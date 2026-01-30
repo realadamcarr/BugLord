@@ -1,24 +1,28 @@
 # 🐛## ✨ Features
 
 ### 📸 **Bug Photography & Identification**
+
 - Real-time camera with targeting reticle for bug capture
 - AI-powered bug identification (species, rarity, traits)
 - Photo storage and gallery integration
 - Smart species recognition with confidence scoring
 
 ### 🐛 **Bug Collection System**
+
 - **Rarity System**: Common, Uncommon, Rare, Epic, Legendary bugs
 - **Biome Classification**: Forest, Garden, Wetland, Desert, Urban, Mountain, Meadow
 - **Detailed Bug Cards**: Name, species, description, traits, catch location
 - **Persistent Collection**: All discoveries saved with AsyncStorage
 
 ### 🏆 **Party Management**
+
 - **Active Party**: Maximum 6 bugs in your active lineup
 - **Strategic Selection**: Choose your best bugs for your party
 - **Quick Swap**: Easy party management interface
 - **Visual Display**: See your party bugs on the main hub
 
 ### 🎮 **RPG Progression System**
+
 - **XP & Leveling**: Earn XP based on bug rarity (10-120 XP per catch)
 - **Explorer Levels**: Level up every 100 XP as a bug explorer
 - **Achievement System**: Track your collection milestones
@@ -27,17 +31,20 @@
 ## ✨ Features
 
 ### � **Smart Note Taking**
+
 - Create, edit, and complete notes with a beautiful interface
 - Mark notes as complete to earn XP
 - Persistent storage using AsyncStorage
 
 ### 🎮 **RPG Gamification System**
+
 - **XP & Leveling**: Earn 10 XP per completed note
 - **Character Progression**: Level up every 100 XP
 - **Cosmetic Unlocks**: Unlock hats, outfits, accessories, and backgrounds
 - **Visual Character**: Customizable sprite-based character display
 
 ### 🎨 **Character Customization**
+
 - **Hats**: Baseball Cap, Crown, Wizard Hat, Party Hat
 - **Outfits**: Casual, Formal, Superhero, Ninja
 - **Accessories**: Sunglasses, Briefcase, Trophy
@@ -45,6 +52,7 @@
 - **Smart Sprite System**: Use custom sprites or emoji fallbacks
 
 ### 📱 **Modern UI/UX**
+
 - Beautiful tab-based navigation
 - Parallax scrolling effects
 - Level-up celebrations with confetti
@@ -54,6 +62,7 @@
 ## 🚀 Getting Started
 
 ### Prerequisites
+
 - Node.js (v16 or higher)
 - npm or yarn
 - Expo CLI
@@ -62,22 +71,26 @@
 ### Installation
 
 1. **Clone the repository**
+
    ```bash
    git clone https://github.com/yourusername/buglord.git
    cd buglord
    ```
 
 2. **Install dependencies**
+
    ```bash
    npm install
    ```
 
 3. **Start the development server**
+
    ```bash
    npm start
    ```
 
 4. **Run on device/simulator**
+
    ```bash
    # Android
    npm run android
@@ -94,16 +107,19 @@
 To create an APK for testing:
 
 1. **Install EAS CLI**
+
    ```bash
    npm install -g eas-cli
    ```
 
 2. **Login to Expo**
+
    ```bash
    eas login
    ```
 
 3. **Build APK**
+
    ```bash
    eas build --platform android --profile preview
    ```
@@ -111,6 +127,7 @@ To create an APK for testing:
 ## 🎨 Custom Sprites
 
 The app supports custom character sprites! See [`SPRITE_GUIDE.md`](SPRITE_GUIDE.md) for detailed instructions on:
+
 - Adding your own sprite artwork
 - Recommended sprite specifications
 - File naming conventions
@@ -141,11 +158,13 @@ buglord/
 ## 🎯 Key Components
 
 ### Character System
+
 - **Character.tsx**: Main character display with cosmetics
 - **SpriteAssets.ts**: Sprite loading with emoji fallbacks
 - **CosmeticsShowcase.tsx**: Grid view of all cosmetics
 
 ### Game Logic
+
 - **XP System**: 10 XP per completed note
 - **Leveling**: Level up every 100 XP
 - **Auto-equip**: Highest unlocked cosmetics are equipped
@@ -154,11 +173,13 @@ buglord/
 ## 🔧 Configuration
 
 ### App Settings
+
 - **app.json**: Expo configuration
 - **eas.json**: Build configuration
 - **tsconfig.json**: TypeScript settings
 
 ### Customization
+
 - **Colors.ts**: App color scheme
 - **Character.tsx**: Cosmetics & unlock levels
 - **SpriteAssets.ts**: Sprite file mappings
@@ -166,12 +187,14 @@ buglord/
 ## 📦 Dependencies
 
 ### Core
+
 - **Expo**: ~52.0.11
 - **React Native**: 0.76.3
 - **React**: 18.3.1
 - **TypeScript**: ^5.3.3
 
 ### Features
+
 - **@react-native-async-storage/async-storage**: Data persistence
 - **expo-router**: Navigation
 - **react-native-reanimated**: Animations

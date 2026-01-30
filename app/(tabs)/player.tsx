@@ -1,7 +1,6 @@
 import { CollectionScreen } from '@/components/CollectionScreen';
 import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -61,7 +60,7 @@ export default function PlayerScreen() {
   );
 
   return (
-    <ThemedView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Player Header */}
         <View style={styles.header}>
@@ -310,7 +309,7 @@ export default function PlayerScreen() {
           </ScrollView>
         </View>
       </Modal>
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 

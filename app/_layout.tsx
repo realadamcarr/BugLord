@@ -2,6 +2,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } fro
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { BugCollectionProvider } from '@/contexts/BugCollectionContext';
 import { InventoryProvider } from '@/contexts/InventoryContext';
@@ -20,20 +21,22 @@ export default function RootLayout() {
   }
 
   return (
-    <ThemeProvider>
-      <BugCollectionProvider>
-        <InventoryProvider>
-          <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-            <Stack>
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="inventory" options={{ title: 'Inventory' }} />
-              <Stack.Screen name="walkmode" options={{ headerShown: false }} />
-              <Stack.Screen name="+not-found" />
-            </Stack>
-            <StatusBar style="auto" />
-          </NavigationThemeProvider>
-        </InventoryProvider>
-      </BugCollectionProvider>
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <BugCollectionProvider>
+          <InventoryProvider>
+            <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+              <Stack>
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="inventory" options={{ title: 'Inventory' }} />
+                <Stack.Screen name="walkmode" options={{ headerShown: false }} />
+                <Stack.Screen name="+not-found" />
+              </Stack>
+              <StatusBar style="auto" />
+            </NavigationThemeProvider>
+          </InventoryProvider>
+        </BugCollectionProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

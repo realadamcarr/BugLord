@@ -4,6 +4,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { Bug, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
 import React, { useState } from 'react';
 import {
+    Alert,
     Dimensions,
     Image,
     Modal,
@@ -35,7 +36,7 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   candidates = []
 }) => {
   const { theme } = useTheme();
-  const { collection } = useBugCollection();
+  const { collection, releaseBug } = useBugCollection();
   const [nickname, setNickname] = useState('');
   const [showPartySwap, setShowPartySwap] = useState(false);
   const [selectedSwapBug, setSelectedSwapBug] = useState<string | null>(null);
@@ -47,6 +48,27 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   const styles = createStyles(theme);
 
   if (!bug) return null;
+
+  const handleRelease = () => {
+    Alert.alert(
+      'Release Bug',
+      'Are you sure you want to release this bug? It will be lost forever.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Release',
+          style: 'destructive',
+          onPress: () => {
+            releaseBug(bug.id);
+            onClose();
+          },
+        },
+      ]
+    );
+  };
 
   const hasPartySpace = collection.party.some(slot => slot === null);
   const partyBugs = collection.party.filter(Boolean) as Bug[];
@@ -346,12 +368,20 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
               </>
             )
           ) : (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.primaryButton, { flex: 1 }]}
-              onPress={handleConfirm}
-            >
-              <ThemedText style={styles.primaryButtonText}>Save Changes</ThemedText>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.secondaryButton]}
+                onPress={handleRelease}
+              >
+                <ThemedText style={[styles.secondaryButtonText, { color: '#ff4444' }]}>Release</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.primaryButton]}
+                onPress={handleConfirm}
+              >
+                <ThemedText style={styles.primaryButtonText}>Save Changes</ThemedText>
+              </TouchableOpacity>
+            </>
           )}
         </View>
       </View>

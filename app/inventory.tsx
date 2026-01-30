@@ -11,7 +11,6 @@
  */
 
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
 import { getItemDefinition } from '@/constants/Items';
 import { useInventory } from '@/contexts/InventoryContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -24,6 +23,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function InventoryScreen() {
   const { theme } = useTheme();
@@ -42,16 +42,16 @@ export default function InventoryScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
         <ActivityIndicator size="large" color={theme.colors.primary} />
-      </ThemedView>
+      </SafeAreaView>
     );
   }
 
   const selectedItem = selectedItemId ? getItemDefinition(selectedItemId) : null;
 
   return (
-    <ThemedView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
       <ThemedText style={styles.title}>📦 Inventory</ThemedText>
 
       <ScrollView style={styles.content}>
@@ -191,7 +191,7 @@ export default function InventoryScreen() {
           {inventory.reduce((sum, slot) => sum + slot.quantity, 0)} items
         </ThemedText>
       </View>
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 

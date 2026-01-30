@@ -11,6 +11,7 @@ interface BugCollectionContextType {
   updateBugNickname: (bugId: string, nickname: string) => void;
   addXpToBug: (bugId: string, xpAmount: number) => Promise<boolean>;
   updateBugHp: (bugId: string, currentHp: number) => Promise<boolean>;
+  releaseBug: (bugId: string) => void;
   gainXP: (amount: number) => void;
   loading: boolean;
 }
@@ -321,6 +322,24 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     });
   };
 
+  const releaseBug = (bugId: string) => {
+    setCollection(prev => {
+      // Remove from bugs array
+      const newBugs = prev.bugs.filter(bug => bug.id !== bugId);
+      
+      // Remove from party if present
+      const newParty = prev.party.map(bug => 
+        bug && bug.id === bugId ? null : bug
+      );
+      
+      return {
+        ...prev,
+        bugs: newBugs,
+        party: newParty,
+      };
+    });
+  };
+
   const contextValue: BugCollectionContextType = {
     collection,
     addBugToCollection,
@@ -330,6 +349,7 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     updateBugNickname,
     addXpToBug,
     updateBugHp,
+    releaseBug,
     gainXP,
     loading,
   };

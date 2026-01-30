@@ -12,7 +12,6 @@
 
 import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useWalkMode } from '@/services/useWalkMode';
@@ -30,6 +29,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 const STEPS_PER_KM = 1312; // Average steps per kilometer
@@ -213,7 +213,7 @@ export default function WalkModeScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -381,7 +381,7 @@ export default function WalkModeScreen() {
       </ScrollView>
 
       {renderBugSelector()}
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 

@@ -1,6 +1,5 @@
 import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useInventory } from '@/contexts/InventoryContext';
@@ -73,7 +72,7 @@ export default function TrainScreen() {
   );
 
   return (
-    <ThemedView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Header */}
         <View style={styles.header}>
@@ -111,8 +110,8 @@ export default function TrainScreen() {
         {/* Training Options */}
         <View style={styles.trainingContainer}>
           <View style={styles.sectionTitleContainer}>
-            <PixelatedEmoji type="train" size={20} color={theme.colors.text} />
-            <ThemedText style={styles.sectionTitle}>Training Options</ThemedText>
+            <PixelatedEmoji type="train" size={20} color="#FFD700" />
+            <ThemedText style={styles.trainingOptionsTitle}>Training Options</ThemedText>
           </View>
           
           <TouchableOpacity 
@@ -216,7 +215,7 @@ export default function TrainScreen() {
           </View>
         </View>
       </ScrollView>
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 
@@ -271,6 +270,14 @@ const createStyles = (theme: any) => StyleSheet.create({
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
+  },
+  trainingOptionsTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFD700',
+    textShadowColor: 'rgba(255, 215, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   partyGrid: {
     flexDirection: 'row',

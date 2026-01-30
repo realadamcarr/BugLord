@@ -1,8 +1,3 @@
-[
-  "anax_junius",
-  "apis_mellifera",
-  "danaus_plexippus",
-  "harmonia",
-  "polistes",
-  "solenopsis"
-]
+{
+  "labels": ["insect"]
+}

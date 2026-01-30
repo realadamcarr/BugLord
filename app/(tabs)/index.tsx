@@ -16,15 +16,17 @@ import { onDeviceClassifier } from '@/services/ml/OnDeviceClassifier';
 import { Bug, BugIdentificationResult, ConfirmationMethod, RARITY_CONFIG } from '@/types/Bug';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
 export default function CaptureScreen() {
   const { theme } = useTheme();
-  const { collection, addBugToCollection, addBugToParty, loading } = useBugCollection();
+  const { collection, addBugToCollection, addBugToParty, removeBugFromParty, loading } = useBugCollection();
   const [showCamera, setShowCamera] = useState(false);
   const [showBugIdentification, setShowBugIdentification] = useState(false);
   const [showCollection, setShowCollection] = useState(false);
+  const [showPartyManagement, setShowPartyManagement] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [isIdentifying, setIsIdentifying] = useState(false);
   const [identificationResult, setIdentificationResult] = useState<BugIdentificationResult | null>(null);
@@ -331,14 +333,14 @@ export default function CaptureScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
         <ThemedText style={styles.loadingText}>Loading your bug collection...</ThemedText>
-      </ThemedView>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ThemedView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Header with XP Progress */}
         <View style={styles.header}>
@@ -389,7 +391,10 @@ export default function CaptureScreen() {
           <View style={styles.partyGrid}>
             {collection.party.map((bug, index) => renderPartySlot(bug, index))}
           </View>
-          <TouchableOpacity style={styles.managePartyButton}>
+          <TouchableOpacity 
+            style={styles.managePartyButton}
+            onPress={() => setShowPartyManagement(true)}
+          >
             <ThemedText style={styles.managePartyButtonText}>Manage Party</ThemedText>
           </TouchableOpacity>
         </View>
@@ -488,6 +493,125 @@ export default function CaptureScreen() {
         candidates={identificationResult?.candidates || []}
       />
 
+      {/* Party Management Modal */}
+      <Modal
+        visible={showPartyManagement}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <ThemedView style={styles.partyManagementContainer}>
+          <View style={styles.partyManagementHeader}>
+            <TouchableOpacity 
+              onPress={() => setShowPartyManagement(false)}
+              style={styles.closeButton}
+            >
+              <ThemedText style={styles.closeButtonText}>✕</ThemedText>
+            </TouchableOpacity>
+            <ThemedText style={styles.partyManagementTitle}>Manage Party</ThemedText>
+            <View style={{ width: 40 }} />
+          </View>
+
+          <ScrollView style={styles.partyManagementScroll}>
+            {/* Current Party */}
+            <View style={styles.partyManagementSection}>
+              <ThemedText style={styles.partyManagementSectionTitle}>Current Party (Tap to Remove)</ThemedText>
+              <View style={styles.partyManagementGrid}>
+                {collection.party.map((bug, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.partyManagementSlot,
+                      !bug && styles.partyManagementEmptySlot
+                    ]}
+                    onPress={() => {
+                      if (bug) {
+                        removeBugFromParty(index);
+                      }
+                    }}
+                  >
+                    {bug ? (
+                      <>
+                        {bug.photo ? (
+                          <Image source={{ uri: bug.photo }} style={styles.partyManagementBugPhoto} />
+                        ) : bug.pixelArt ? (
+                          <Image source={{ uri: bug.pixelArt }} style={styles.partyManagementBugPhoto} />
+                        ) : (
+                          <PixelatedEmoji type="bug" size={40} color={theme.colors.text} />
+                        )}
+                        <ThemedText style={styles.partyManagementBugName} numberOfLines={1}>
+                          {bug.nickname || bug.name}
+                        </ThemedText>
+                        <ThemedText style={styles.partyManagementBugLevel}>Lv.{bug.level}</ThemedText>
+                        <Text style={[
+                          styles.partyManagementRarityBadge,
+                          { backgroundColor: RARITY_CONFIG[bug.rarity].color }
+                        ]}>
+                          {bug.rarity}
+                        </Text>
+                      </>
+                    ) : (
+                      <ThemedText style={styles.partyManagementEmptyText}>Empty Slot</ThemedText>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Available Bugs */}
+            <View style={styles.partyManagementSection}>
+              <ThemedText style={styles.partyManagementSectionTitle}>
+                Available Bugs (Tap to Add to Party)
+              </ThemedText>
+              <View style={styles.partyManagementGrid}>
+                {collection.bugs
+                  .filter(bug => !collection.party.some(partyBug => partyBug?.id === bug.id))
+                  .map((bug) => (
+                    <TouchableOpacity
+                      key={bug.id}
+                      style={styles.partyManagementSlot}
+                      onPress={() => {
+                        const hasSpace = collection.party.some(slot => slot === null);
+                        if (hasSpace) {
+                          addBugToParty(bug);
+                        } else {
+                          Alert.alert(
+                            'Party Full',
+                            'Your party is full! Remove a bug from your party first.',
+                            [{ text: 'OK' }]
+                          );
+                        }
+                      }}
+                    >
+                      {bug.photo ? (
+                        <Image source={{ uri: bug.photo }} style={styles.partyManagementBugPhoto} />
+                      ) : bug.pixelArt ? (
+                        <Image source={{ uri: bug.pixelArt }} style={styles.partyManagementBugPhoto} />
+                      ) : (
+                        <PixelatedEmoji type="bug" size={40} color={theme.colors.text} />
+                      )}
+                      <ThemedText style={styles.partyManagementBugName} numberOfLines={1}>
+                        {bug.nickname || bug.name}
+                      </ThemedText>
+                      <ThemedText style={styles.partyManagementBugLevel}>Lv.{bug.level}</ThemedText>
+                      <Text style={[
+                        styles.partyManagementRarityBadge,
+                        { backgroundColor: RARITY_CONFIG[bug.rarity].color }
+                      ]}>
+                        {bug.rarity}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+              </View>
+              {collection.bugs.filter(bug => !collection.party.some(partyBug => partyBug?.id === bug.id)).length === 0 && (
+                <ThemedText style={styles.partyManagementEmptyMessage}>
+                  All bugs are in your party!
+                </ThemedText>
+              )}
+            </View>
+          </ScrollView>
+        </ThemedView>
+      </Modal>
+
       {/* Collection Modal */}
       <Modal
         visible={showCollection}
@@ -498,7 +622,7 @@ export default function CaptureScreen() {
           onClose={() => setShowCollection(false)}
         />
       </Modal>
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 
@@ -831,5 +955,101 @@ const createStyles = (theme: any) => StyleSheet.create({
   alternateButtonText: {
     color: '#fff',
     fontSize: 16,
+  },
+  partyManagementContainer: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  partyManagementHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
+  closeButton: {
+    padding: 8,
+    width: 40,
+  },
+  closeButtonText: {
+    fontSize: 20,
+    color: theme.colors.text,
+  },
+  partyManagementTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  partyManagementScroll: {
+    flex: 1,
+    padding: 16,
+  },
+  partyManagementSection: {
+    marginBottom: 32,
+  },
+  partyManagementSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+    opacity: 0.8,
+  },
+  partyManagementGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  partyManagementSlot: {
+    width: (screenWidth - 48) / 3,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+  },
+  partyManagementEmptySlot: {
+    backgroundColor: theme.colors.background,
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+  },
+  partyManagementBugPhoto: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    marginBottom: 8,
+  },
+  partyManagementBugName: {
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  partyManagementBugLevel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: theme.colors.primary,
+    marginBottom: 4,
+  },
+  partyManagementRarityBadge: {
+    fontSize: 8,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    textTransform: 'uppercase',
+  },
+  partyManagementEmptyText: {
+    fontSize: 12,
+    opacity: 0.5,
+    textAlign: 'center',
+  },
+  partyManagementEmptyMessage: {
+    fontSize: 14,
+    opacity: 0.6,
+    textAlign: 'center',
+    marginTop: 20,
+    fontStyle: 'italic',
   },
 });
