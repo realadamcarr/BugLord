@@ -9,6 +9,7 @@ import { Bug, RARITY_CONFIG } from '@/types/Bug';
 import { router } from 'expo-router';
 import React from 'react';
 import { Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 

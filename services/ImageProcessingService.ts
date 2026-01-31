@@ -35,14 +35,64 @@ class ImageProcessingService {
     try {
       console.log('📷 Initializing ImageProcessingService...');
       
-      // Load detection model when bundled in assets
+      // Load detection model when available in document directory
       try {
-        const detectionModelPath = await onDeviceClassifier.copyBundledModel(
-          require('@/assets/ml/insect_detector.tflite'),
-          'insect_detector.tflite'
-        );
-        await onDeviceClassifier.loadDetectionModel(detectionModelPath);
-        console.log('✅ Detection model loaded');
+        const FileSystem = require('expo-file-system/legacy');
+        
+        const modelPath = `${FileSystem.documentDirectory}ml/insect_detector.tflite`;
+        console.log('🔍 Looking for detection model at:', modelPath);
+        
+        const modelInfo = await FileSystem.getInfoAsync(modelPath);
+        console.log('📋 Model file check result:', modelInfo);
+        
+        if (modelInfo.exists) {
+          await onDeviceClassifier.loadDetectionModel(modelPath);
+          console.log('✅ Detection model loaded from:', modelPath);
+        } else {
+          console.log('⚠️ Detection model not found, trying to copy from bundle...');
+          
+          // Try to copy from app bundle automatically
+          try {
+            const possiblePaths = [
+              `${FileSystem.bundleDirectory}assets/ml/insect_detector.tflite`,
+              `${FileSystem.bundleDirectory}assets/assets/ml/insect_detector.tflite`,
+              `${FileSystem.bundleDirectory}bundled/assets/ml/insect_detector.tflite`
+            ];
+            
+            let copied = false;
+            for (const sourcePath of possiblePaths) {
+              try {
+                const sourceInfo = await FileSystem.getInfoAsync(sourcePath);
+                if (sourceInfo.exists) {
+                  // Ensure ml directory exists
+                  const mlDir = `${FileSystem.documentDirectory}ml/`;
+                  await FileSystem.makeDirectoryAsync(mlDir, { intermediates: true }).catch(() => {});
+                  
+                  await FileSystem.copyAsync({
+                    from: sourcePath,
+                    to: modelPath
+                  });
+                  console.log('✅ Copied detection model from bundle:', sourcePath);
+                  
+                  // Try to load it
+                  await onDeviceClassifier.loadDetectionModel(modelPath);
+                  console.log('✅ Detection model loaded successfully');
+                  copied = true;
+                  break;
+                }
+              } catch (pathError) {
+                // Continue trying other paths
+              }
+            }
+            
+            if (!copied) {
+              console.warn('⚠️ Could not copy detection model from bundle');
+              console.warn('📋 Using fallback detection (center crop)');
+            }
+          } catch (bundleError) {
+            console.warn('⚠️ Bundle copy failed, using fallback:', bundleError);
+          }
+        }
       } catch (detectionError) {
         console.warn('⚠️  Detection model not available, using fallback:', detectionError);
       }
@@ -76,6 +126,13 @@ class ImageProcessingService {
     console.log('🖼️ Starting insect photo processing:', photoUri);
     
     try {
+      // Get actual image dimensions first
+      const imageInfo = await ImageManipulator.manipulateAsync(
+        photoUri,
+        [],
+        { base64: false, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      
       let boundingBox;
       
       if (detectObjects) {
@@ -84,15 +141,38 @@ class ImageProcessingService {
       }
       
       if (!boundingBox) {
-        // If no detection or detection disabled, use center crop
-        boundingBox = this.getCenterCropBoundingBox();
+        // If no detection or detection disabled, use center crop with actual dimensions
+        boundingBox = this.getCenterCropBoundingBox(imageInfo.width, imageInfo.height);
       }
+      
+      // Validate and clamp bounding box to image dimensions
+      boundingBox = this.validateBoundingBox(boundingBox, imageInfo.width, imageInfo.height);
       
       // Resize original before crop to reduce noise/latency
       const resizedForId = await this.resizeLongestEdge(photoUri, maxEdge, quality);
+      
+      // Get resized dimensions
+      const resizedInfo = await ImageManipulator.manipulateAsync(
+        resizedForId,
+        [],
+        { base64: false, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      
+      // Scale bounding box to match resized image
+      const scaleX = resizedInfo.width / imageInfo.width;
+      const scaleY = resizedInfo.height / imageInfo.height;
+      const scaledBox = {
+        x: Math.round(boundingBox.x * scaleX),
+        y: Math.round(boundingBox.y * scaleY),
+        width: Math.round(boundingBox.width * scaleX),
+        height: Math.round(boundingBox.height * scaleY)
+      };
+      
+      // Validate scaled bounding box
+      const validatedBox = this.validateBoundingBox(scaledBox, resizedInfo.width, resizedInfo.height);
 
       // Crop the insect from the resized image
-      const croppedImage = await this.cropImage(resizedForId, boundingBox, quality);
+      const croppedImage = await this.cropImage(resizedForId, validatedBox, quality);
       
       // Create pixelated icon version
       const pixelatedIcon = await this.pixelateImage(croppedImage, pixelSize, iconSize);
@@ -198,10 +278,8 @@ class ImageProcessingService {
   /**
    * Get a default center crop bounding box
    */
-  private getCenterCropBoundingBox(): { x: number; y: number; width: number; height: number } {
+  private getCenterCropBoundingBox(imageWidth: number, imageHeight: number): { x: number; y: number; width: number; height: number } {
     // Default to center crop if no detection
-    const imageWidth = 1080;
-    const imageHeight = 1920;
     const cropSize = Math.min(imageWidth, imageHeight) * 0.7;
     
     return {
@@ -210,6 +288,27 @@ class ImageProcessingService {
       width: Math.round(cropSize),
       height: Math.round(cropSize)
     };
+  }
+  
+  /**
+   * Validate and clamp bounding box to image dimensions
+   */
+  private validateBoundingBox(
+    box: { x: number; y: number; width: number; height: number },
+    imageWidth: number,
+    imageHeight: number
+  ): { x: number; y: number; width: number; height: number } {
+    // Clamp x and y to be within image bounds
+    const x = Math.max(0, Math.min(box.x, imageWidth - 1));
+    const y = Math.max(0, Math.min(box.y, imageHeight - 1));
+    
+    // Clamp width and height to not exceed image bounds
+    const maxWidth = imageWidth - x;
+    const maxHeight = imageHeight - y;
+    const width = Math.max(1, Math.min(box.width, maxWidth));
+    const height = Math.max(1, Math.min(box.height, maxHeight));
+    
+    return { x, y, width, height };
   }
   
   /**

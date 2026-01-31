@@ -191,29 +191,10 @@ class BugIdentificationService {
    * Process iNaturalist API response
    */
   private processINaturalistResponse(data: any): BugIdentificationResult {
-    // Process real iNaturalist data here
-    // For now, return multiple candidates based on common observations
-    const commonInsects = [
-      { label: 'House Fly', species: 'Musca domestica' },
-      { label: 'Honey Bee', species: 'Apis mellifera' },
-      { label: 'Ladybug', species: 'Coccinella septempunctata' },
-      { label: 'Paper Wasp', species: 'Polistes' },
-      { label: 'Hoverfly', species: 'Syrphidae' },
-    ];
-    const candidates: IdentificationCandidate[] = commonInsects
-      .slice(0, 5)
-      .map((c, idx) => ({
-        label: c.label,
-        species: c.species,
-        confidence: Math.max(0.5, 0.95 - idx * 0.1),
-        source: 'iNaturalist',
-      }));
-
-    return {
-      candidates,
-      provider: 'iNaturalist',
-      isFromAPI: true,
-    };
+    // TODO: Process real iNaturalist API data when properly implemented
+    // For now, use local analysis with weighted random selection
+    console.warn('⚠️  iNaturalist not sending image data - using local fallback');
+    return this.getFallbackIdentification();
   }
 
   /**

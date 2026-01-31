@@ -45,10 +45,24 @@ class ModelUpdateService {
     this.config = { ...DEFAULT_CONFIG, ...config };
 
     // Ensure ml directory exists
-    const dirInfo = await FileSystem.getInfoAsync(this.modelDir);
-    if (!dirInfo.exists) {
-      await FileSystem.makeDirectoryAsync(this.modelDir, { intermediates: true });
-      console.log('📁 Created ml directory:', this.modelDir);
+    try {
+      const dirInfo = await FileSystem.getInfoAsync(this.modelDir, { size: false });
+      if (!dirInfo.exists) {
+        try {
+          await FileSystem.StorageAccessFramework.makeDirectoryAsync(this.modelDir);
+          console.log('📁 Created ml directory:', this.modelDir);
+        } catch {
+          console.warn('Could not create ML directory, may already exist:', this.modelDir);
+        }
+      }
+    } catch {
+      // Directory doesn't exist, try to create it
+      try {
+        await FileSystem.StorageAccessFramework.makeDirectoryAsync(this.modelDir);
+        console.log('📁 Created ml directory:', this.modelDir);
+      } catch {
+        console.warn('Could not create ML directory, may already exist:', this.modelDir);
+      }
     }
 
     console.log('🔄 ModelUpdateService initialized:', {
@@ -216,10 +230,14 @@ class ModelUpdateService {
   async hasLocalModel(): Promise<boolean> {
     const { modelPath, labelsPath } = this.getCurrentModelPaths();
     
-    const modelInfo = await FileSystem.getInfoAsync(modelPath);
-    const labelsInfo = await FileSystem.getInfoAsync(labelsPath);
-    
-    return modelInfo.exists && labelsInfo.exists;
+    try {
+      const modelInfo = await FileSystem.getInfoAsync(modelPath, { size: false });
+      const labelsInfo = await FileSystem.getInfoAsync(labelsPath, { size: false });
+      
+      return modelInfo.exists && labelsInfo.exists;
+    } catch {
+      return false;
+    }
   }
 
   /**
