@@ -149,41 +149,85 @@ export default function WalkModeScreen() {
   );
 
   const renderCircularProgress = () => {
-    const circleSize = 200;
+    const size = 200;
     const strokeWidth = 8;
-    const radius = (circleSize - strokeWidth) / 2;
-    const circumference = 2 * Math.PI * radius;
-    
-    // Calculate progress within current milestone (0-100%)
+    const halfSize = size / 2;
+    const fillColor = '#60A5FA';
+    const trackColor = 'rgba(255, 255, 255, 0.2)';
+
+    // Calculate progress within current milestone (0 to 1)
     const currentMilestoneSteps = currentSteps % STEPS_PER_KM;
-    const milestoneProgress = (currentMilestoneSteps / STEPS_PER_KM) * 100;
+    const progress = currentMilestoneSteps / STEPS_PER_KM;
+    const progressDeg = progress * 360;
+
+    // Two-semicircle clipping technique:
+    // Right clip reveals first 0-180° (0-50%), left clip reveals 180-360° (50-100%)
+    // Offset of -135° aligns the colored border segments with the clip boundary
+    const rightRotation = -135 + Math.min(progressDeg, 180);
+    const leftRotation = -135 + Math.max(0, progressDeg - 180);
+    const showLeftHalf = progressDeg > 180;
 
     return (
       <View style={styles.progressContainer}>
-        <View style={[styles.progressCircle, { width: circleSize, height: circleSize }]}>
-          {/* Empty track (gray circle) */}
-          <View style={[
-            styles.progressTrack,
-            {
-              width: circleSize,
-              height: circleSize,
-              borderRadius: circleSize / 2,
+        <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+          {/* Background track (full gray ring) */}
+          <View style={{
+            position: 'absolute',
+            width: size,
+            height: size,
+            borderRadius: halfSize,
+            borderWidth: strokeWidth,
+            borderColor: trackColor,
+          }} />
+
+          {/* Right half clip (fills first 0-50% of progress, top → right → bottom) */}
+          <View style={{
+            position: 'absolute',
+            width: halfSize,
+            height: size,
+            left: halfSize,
+            overflow: 'hidden',
+          }}>
+            <View style={{
+              width: size,
+              height: size,
+              borderRadius: halfSize,
               borderWidth: strokeWidth,
-            }
-          ]} />
-          
-          {/* Filled progress (blue arc) */}
-          <View style={[
-            styles.progressFill,
-            {
-              width: circleSize,
-              height: circleSize,
-              borderRadius: circleSize / 2,
-              borderWidth: strokeWidth,
-              transform: [{ rotate: `${-90 + (milestoneProgress / 100) * 360}deg` }],
-            }
-          ]} />
-          
+              borderTopColor: fillColor,
+              borderRightColor: fillColor,
+              borderBottomColor: 'transparent',
+              borderLeftColor: 'transparent',
+              position: 'absolute',
+              left: -halfSize,
+              transform: [{ rotate: `${rightRotation}deg` }],
+            }} />
+          </View>
+
+          {/* Left half clip (fills second 50-100% of progress, bottom → left → top) */}
+          {showLeftHalf && (
+            <View style={{
+              position: 'absolute',
+              width: halfSize,
+              height: size,
+              left: 0,
+              overflow: 'hidden',
+            }}>
+              <View style={{
+                width: size,
+                height: size,
+                borderRadius: halfSize,
+                borderWidth: strokeWidth,
+                borderTopColor: 'transparent',
+                borderRightColor: 'transparent',
+                borderBottomColor: fillColor,
+                borderLeftColor: fillColor,
+                position: 'absolute',
+                left: 0,
+                transform: [{ rotate: `${leftRotation}deg` }],
+              }} />
+            </View>
+          )}
+
           {/* Inner circle with bug */}
           <View style={styles.progressInner}>
             {selectedBug ? (
@@ -199,7 +243,7 @@ export default function WalkModeScreen() {
                 )}
                 {/* Progress percentage text */}
                 <View style={styles.progressTextContainer}>
-                  <Text style={styles.progressPercentage}>{Math.floor(milestoneProgress)}%</Text>
+                  <Text style={styles.progressPercentage}>{Math.floor(progress * 100)}%</Text>
                   <Text style={styles.progressSteps}>{currentMilestoneSteps}/{STEPS_PER_KM}</Text>
                 </View>
               </>
@@ -448,21 +492,6 @@ const createStyles = (theme: any) => StyleSheet.create({
   progressContainer: {
     alignItems: 'center',
     marginBottom: 30,
-  },
-  progressCircle: {
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  progressTrack: {
-    position: 'absolute',
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  progressFill: {
-    position: 'absolute',
-    borderColor: 'transparent',
-    borderTopColor: '#60A5FA',
-    borderRightColor: '#60A5FA',
   },
   progressInner: {
     position: 'absolute',

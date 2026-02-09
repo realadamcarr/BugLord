@@ -65,8 +65,12 @@ export default function HiveModeScreen() {
   const [rounds, setRounds] = useState<HiveRound[]>([]);
   const [showBugSelector, setShowBugSelector] = useState(false);
   const [showItemSelector, setShowItemSelector] = useState(false);
+  const [showSwitchSelector, setShowSwitchSelector] = useState(false);
   const [battleMessage, setBattleMessage] = useState<string>('');
   const [isProcessingTurn, setIsProcessingTurn] = useState(false);
+  const [faintedBugIds, setFaintedBugIds] = useState<Set<string>>(new Set());
+  const [partyBugHp, setPartyBugHp] = useState<Record<string, { current: number; max: number }>>({}); 
+  const [forcedSwitch, setForcedSwitch] = useState(false);
 
   // Initialize rounds when component mounts
   useEffect(() => {
@@ -105,6 +109,21 @@ export default function HiveModeScreen() {
     
     const firstRound = rounds[0];
     const enemyBattleBug = HiveBattleService.createEnemyBug(firstRound);
+
+    // Initialize HP tracking for all party bugs
+    const hpMap: Record<string, { current: number; max: number }> = {};
+    collection.party.forEach(bug => {
+      if (bug) {
+        const mHp = bug.maxHp || bug.maxXp;
+        const cHp = bug.currentHp !== undefined ? bug.currentHp : mHp;
+        hpMap[bug.id] = { current: cHp, max: mHp };
+      }
+    });
+    // Overwrite the selected bug's entry with the battle bug values
+    hpMap[playerBattleBug.id] = { current: playerBattleBug.currentHp, max: playerBattleBug.maxHp };
+    setPartyBugHp(hpMap);
+    setFaintedBugIds(new Set());
+    setForcedSwitch(false);
 
     setHiveState({
       isActive: true,
@@ -297,6 +316,10 @@ export default function HiveModeScreen() {
     // Persist HP after each round
     if (hiveState.playerBug) {
       updateBugHp(hiveState.playerBug.id, restoredHp);
+      setPartyBugHp(prev => ({
+        ...prev,
+        [hiveState.playerBug!.id]: { ...prev[hiveState.playerBug!.id], current: restoredHp },
+      }));
     }
     
     setHiveState(prev => ({
@@ -323,16 +346,25 @@ export default function HiveModeScreen() {
     enemy: BattleBug,
     turnLog: BattleTurn
   ) => {
-    console.log('[Hive] Player defeated');
+    console.log('[Hive] Player bug defeated:', defeatedPlayer.name);
     
     // Persist HP to collection
     updateBugHp(defeatedPlayer.id, 0);
+    
+    // Track fainted bug and update HP map
+    const newFaintedIds = new Set(faintedBugIds);
+    newFaintedIds.add(defeatedPlayer.id);
+    setFaintedBugIds(newFaintedIds);
+    setPartyBugHp(prev => ({
+      ...prev,
+      [defeatedPlayer.id]: { ...prev[defeatedPlayer.id], current: 0 },
+    }));
     
     setBattleMessage(`${defeatedPlayer.name} fainted!`);
     
     setHiveState(prev => ({
       ...prev,
-      playerBug: defeatedPlayer,
+      playerBug: { ...defeatedPlayer, currentHp: 0 },
       enemyBug: enemy,
       battleLog: [...prev.battleLog, turnLog],
       isPlayerTurn: false,
@@ -340,26 +372,36 @@ export default function HiveModeScreen() {
     
     setIsProcessingTurn(false);
     
-    // Show defeat options after delay
+    // Check if any other party bugs are alive
+    const aliveBugs = collection.party.filter(bug => {
+      if (!bug) return false;
+      if (bug.id === defeatedPlayer.id) return false;
+      if (newFaintedIds.has(bug.id)) return false;
+      const hp = partyBugHp[bug.id];
+      if (hp && hp.current <= 0) return false;
+      // If not tracked yet, check collection HP
+      const maxHp = bug.maxHp || bug.maxXp;
+      const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
+      return currentHp > 0;
+    });
+    
     setTimeout(() => {
-      Alert.alert(
-        'Bug Fainted!',
-        'Your bug fainted! Use a Revive item or end the run.',
-        [
-          {
-            text: 'Use Revive',
-            onPress: () => {
-              tryRevive().catch(console.error);
-            },
-          },
-          {
+      if (aliveBugs.length > 0) {
+        // Force switch to another bug
+        setForcedSwitch(true);
+        setShowSwitchSelector(true);
+      } else {
+        // All bugs fainted - run is over
+        Alert.alert(
+          'All Bugs Fainted!',
+          'All your party bugs have been defeated. The hive run is over.',
+          [{
             text: 'End Run',
             onPress: () => handleRunCompletion(false),
-            style: 'destructive',
-          },
-        ]
-      );
-    }, 1000);
+          }]
+        );
+      }
+    }, 1200);
   };
 
   // Attempt to revive player bug
@@ -382,6 +424,62 @@ export default function HiveModeScreen() {
     }));
     
     setBattleMessage(`${revivedBug.name} was revived!`);
+  };
+
+  // Switch to a different bug from party
+  const switchBug = (newBug: Bug) => {
+    if (!hiveState.enemyBug) return;
+    
+    const maxHp = partyBugHp[newBug.id]?.max || newBug.maxHp || newBug.maxXp;
+    const currentHp = partyBugHp[newBug.id]?.current ?? (newBug.currentHp !== undefined ? newBug.currentHp : maxHp);
+    
+    if (currentHp <= 0) {
+      Alert.alert('Bug Fainted', `${newBug.nickname || newBug.name} has 0 HP and cannot battle!`);
+      return;
+    }
+    
+    // Save current bug's HP before switching out
+    if (hiveState.playerBug && hiveState.playerBug.currentHp > 0) {
+      updateBugHp(hiveState.playerBug.id, hiveState.playerBug.currentHp);
+      setPartyBugHp(prev => ({
+        ...prev,
+        [hiveState.playerBug!.id]: { ...prev[hiveState.playerBug!.id], current: hiveState.playerBug!.currentHp },
+      }));
+    }
+    
+    const newBattleBug: BattleBug = {
+      id: newBug.id,
+      name: newBug.nickname || newBug.name,
+      level: newBug.level,
+      maxHp,
+      currentHp,
+      attack: Math.floor(10 + newBug.level * 2),
+      sprite: newBug.pixelArt || newBug.photo,
+      isEnemy: false,
+    };
+    
+    const wasForcedSwitch = forcedSwitch;
+    setShowSwitchSelector(false);
+    setForcedSwitch(false);
+    
+    setBattleMessage(`Go, ${newBattleBug.name}!`);
+    
+    setHiveState(prev => ({
+      ...prev,
+      playerBug: newBattleBug,
+      isPlayerTurn: true,
+    }));
+    
+    // If forced switch (after fainting), don't give enemy a free hit
+    // If voluntary switch, enemy gets a free attack
+    if (!wasForcedSwitch) {
+      setIsProcessingTurn(true);
+      setTimeout(() => {
+        executeEnemyTurn(0, hiveState.enemyBug!);
+      }, 1000);
+    } else {
+      setIsProcessingTurn(false);
+    }
   };
 
   // Handle item usage
@@ -580,6 +678,110 @@ export default function HiveModeScreen() {
     );
   };
 
+  // Render switch bug selector modal
+  const renderSwitchSelector = () => {
+    const switchableBugs = collection.party.filter(bug => {
+      if (!bug) return false;
+      // Exclude the current battling bug
+      if (hiveState.playerBug && bug.id === hiveState.playerBug.id) return false;
+      // Exclude fainted bugs
+      if (faintedBugIds.has(bug.id)) return false;
+      // Check tracked HP
+      const hp = partyBugHp[bug.id];
+      if (hp && hp.current <= 0) return false;
+      // If not tracked, check collection HP
+      if (!hp) {
+        const maxHp = bug.maxHp || bug.maxXp;
+        const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
+        if (currentHp <= 0) return false;
+      }
+      return true;
+    }) as Bug[];
+
+    return (
+      <Modal visible={showSwitchSelector} animationType="fade" transparent>
+        <View style={styles.itemModalOverlay}>
+          <View style={styles.switchModalContent}>
+            <ThemedText style={styles.itemModalTitle}>
+              {forcedSwitch ? 'Choose Next Bug' : 'Switch Bug'}
+            </ThemedText>
+            {forcedSwitch && (
+              <ThemedText style={styles.switchSubtitle}>
+                Your bug fainted! Select another to continue.
+              </ThemedText>
+            )}
+            
+            {switchableBugs.length === 0 ? (
+              <View>
+                <ThemedText style={styles.noItemsText}>No available bugs to switch to!</ThemedText>
+                <TouchableOpacity
+                  style={styles.endRunButton}
+                  onPress={() => { setShowSwitchSelector(false); handleRunCompletion(false); }}
+                >
+                  <ThemedText style={styles.endRunButtonText}>End Run</ThemedText>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              switchableBugs.map(bug => {
+                const hp = partyBugHp[bug.id];
+                const maxHp = hp?.max || bug.maxHp || bug.maxXp;
+                const currentHp = hp?.current ?? (bug.currentHp !== undefined ? bug.currentHp : maxHp);
+                const hpPercent = Math.round((currentHp / maxHp) * 100);
+                
+                return (
+                  <TouchableOpacity
+                    key={bug.id}
+                    style={styles.switchBugItem}
+                    onPress={() => switchBug(bug)}
+                  >
+                    {bug.photo ? (
+                      <Image source={{ uri: bug.photo }} style={styles.switchBugPhoto} />
+                    ) : bug.pixelArt ? (
+                      <Image source={{ uri: bug.pixelArt }} style={styles.switchBugPhoto} />
+                    ) : (
+                      <View style={styles.switchBugPhoto}>
+                        <PixelatedEmoji type="bug" size={20} color={theme.colors.text} />
+                      </View>
+                    )}
+                    <View style={styles.switchBugInfo}>
+                      <ThemedText style={styles.switchBugName}>
+                        {bug.nickname || bug.name}
+                      </ThemedText>
+                      <View style={styles.switchBugHpRow}>
+                        <ThemedText style={styles.switchBugLevel}>Lv.{bug.level}</ThemedText>
+                        <View style={styles.switchBugHpBar}>
+                          <View style={[
+                            styles.switchBugHpFill,
+                            { 
+                              width: `${hpPercent}%`,
+                              backgroundColor: hpPercent > 50 ? '#10B981' : hpPercent > 25 ? '#F59E0B' : '#EF4444',
+                            },
+                          ]} />
+                        </View>
+                        <ThemedText style={styles.switchBugHpText}>
+                          {currentHp}/{maxHp}
+                        </ThemedText>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+            
+            {!forcedSwitch && (
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setShowSwitchSelector(false)}
+              >
+                <ThemedText style={styles.cancelButtonText}>Cancel</ThemedText>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   // Pre-battle screen
   if (!hiveState.isActive && !hiveState.runCompleted) {
     return (
@@ -667,7 +869,19 @@ export default function HiveModeScreen() {
               ],
             },
           ]}>
-            <Text style={styles.enemySprite}>{hiveState.enemyBug?.sprite}</Text>
+            {hiveState.enemyBug?.sprite ? (
+              typeof hiveState.enemyBug.sprite === 'string' &&
+              (hiveState.enemyBug.sprite.startsWith('data:') || 
+               hiveState.enemyBug.sprite.startsWith('file:') ||
+               hiveState.enemyBug.sprite.startsWith('http:') ||
+               hiveState.enemyBug.sprite.startsWith('https:')) ? (
+                <Image source={{ uri: hiveState.enemyBug.sprite }} style={styles.enemyBugImage} />
+              ) : (
+                <Text style={styles.enemySprite}>{hiveState.enemyBug.sprite}</Text>
+              )
+            ) : (
+              <Text style={styles.enemySprite}>🐛</Text>
+            )}
           </Animated.View>
         </View>
 
@@ -689,7 +903,10 @@ export default function HiveModeScreen() {
           ]}>
             {hiveState.playerBug?.sprite ? (
               typeof hiveState.playerBug.sprite === 'string' &&
-              hiveState.playerBug.sprite.startsWith('data:') ? (
+              (hiveState.playerBug.sprite.startsWith('data:') || 
+               hiveState.playerBug.sprite.startsWith('file:') ||
+               hiveState.playerBug.sprite.startsWith('http:') ||
+               hiveState.playerBug.sprite.startsWith('https:')) ? (
                 <Image source={{ uri: hiveState.playerBug.sprite }} style={styles.playerBugImage} />
               ) : (
                 <Text style={styles.playerSprite}>{hiveState.playerBug.sprite}</Text>
@@ -729,6 +946,14 @@ export default function HiveModeScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
+            style={[styles.actionButton, styles.switchButton]}
+            onPress={() => { setForcedSwitch(false); setShowSwitchSelector(true); }}
+            disabled={!hiveState.isPlayerTurn || isProcessingTurn}
+          >
+            <ThemedText style={styles.actionButtonText}>🔄 Switch</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={[styles.actionButton, styles.itemButton]}
             onPress={() => setShowItemSelector(true)}
             disabled={!hiveState.isPlayerTurn || isProcessingTurn}
@@ -745,6 +970,7 @@ export default function HiveModeScreen() {
       </ScrollView>
 
       {renderItemSelector()}
+      {renderSwitchSelector()}
     </ThemedView>
   );
 }
@@ -882,6 +1108,11 @@ const createStyles = (theme: any) => StyleSheet.create({
   enemySprite: {
     fontSize: 64,
   },
+  enemyBugImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+  },
   playerSprite: {
     fontSize: 48,
   },
@@ -918,6 +1149,9 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   attackButton: {
     backgroundColor: '#EF4444',
+  },
+  switchButton: {
+    backgroundColor: '#F59E0B',
   },
   itemButton: {
     backgroundColor: '#3B82F6',
@@ -1064,5 +1298,84 @@ const createStyles = (theme: any) => StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#EF4444',
+  },
+  switchModalContent: {
+    width: screenWidth - 60,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 16,
+    padding: 20,
+    maxHeight: '70%',
+  },
+  switchSubtitle: {
+    fontSize: 14,
+    textAlign: 'center',
+    opacity: 0.7,
+    marginBottom: 16,
+  },
+  switchBugItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.background,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+  switchBugPhoto: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surface,
+  },
+  switchBugInfo: {
+    flex: 1,
+  },
+  switchBugName: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  switchBugHpRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  switchBugLevel: {
+    fontSize: 12,
+    fontWeight: '600',
+    opacity: 0.7,
+    width: 36,
+  },
+  switchBugHpBar: {
+    flex: 1,
+    height: 8,
+    backgroundColor: theme.colors.border,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  switchBugHpFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  switchBugHpText: {
+    fontSize: 11,
+    fontWeight: '600',
+    opacity: 0.7,
+    width: 56,
+    textAlign: 'right',
+  },
+  endRunButton: {
+    padding: 16,
+    backgroundColor: '#EF4444',
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  endRunButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: 'white',
   },
 });

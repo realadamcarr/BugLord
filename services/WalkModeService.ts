@@ -15,7 +15,9 @@
 
 import { BUG_TRAP, FULL_REVIVE, POTION, REVIVE_SEED, SUPER_POTION } from '@/constants/Items';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as BackgroundFetch from 'expo-background-fetch';
 import { Pedometer } from 'expo-sensors';
+import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
 // Background task name
@@ -60,6 +62,21 @@ const PedometerAPI = Platform.OS === 'web' ? MockPedometer : Pedometer;
 
 // Storage key for Walk Mode data
 const WALK_MODE_STORAGE_KEY = 'walk_mode_data';
+const WALK_HISTORY_STORAGE_KEY = 'walk_mode_history';
+
+// Walk History Entry Interface
+export interface WalkHistoryEntry {
+  id: string;
+  date: string; // ISO string
+  duration: number; // minutes
+  stepsWalked: number;
+  bugName: string;
+  bugId: string;
+  xpGained: number;
+  itemsFound: { itemId: string; amount: number; name: string }[];
+  startTime: string; // ISO string
+  endTime: string; // ISO string
+}
 
 // Walk Mode Configuration
 export const WALK_MODE_CONFIG = {
@@ -120,6 +137,14 @@ class WalkModeService {
   private isInitialized = false;
   private pedometerSubscription: any = null;
   private rewardCallbacks: ((reward: WalkModeReward) => void)[] = [];
+  private currentSession: {
+    startTime: Date;
+    startSteps: number;
+    bugId: string | null;
+    bugName: string | null;
+    xpGained: number;
+    itemsFound: { itemId: string; amount: number; name: string }[];
+  } | null = null;
 
   /**
    * Initialize Walk Mode service
@@ -141,66 +166,15 @@ class WalkModeService {
       const isAvailable = await PedometerAPI.isAvailableAsync();
       if (!isAvailable) {
         this.log('⚠️ Pedometer not available on this device');
-        return;
+        throw new Error('Pedometer not available on this device');
       }
-
-      // Register background task for step tracking
-      await this.registerBackgroundTask();
 
       this.log('✅ Walk Mode service initialized');
       this.isInitialized = true;
       
     } catch (error) {
       this.log('❌ Failed to initialize Walk Mode:', error);
-    }
-  }
-
-  /**
-   * Register background fetch task for step tracking
-   */
-  private async registerBackgroundTask(): Promise<void> {
-    if (Platform.OS === 'web') {
-      this.log('⚠️ Background tasks not supported on web');
-      return;
-    }
-
-    try {
-      // Define the background task
-      TaskManager.defineTask(BACKGROUND_STEP_TASK, async () => {
-        try {
-          this.log('🔄 Background task executing...');
-          
-          // Update step count in background
-          const now = new Date();
-          const start = new Date(now.getTime() - 24 * 60 * 60 * 1000); // Last 24 hours
-          
-          const result = await Pedometer.getStepCountAsync(start, now);
-          if (result && typeof result.steps === 'number') {
-            // Update state with new steps
-            const newSessionSteps = result.steps - (this.state.totalSteps - this.state.sessionSteps);
-            if (newSessionSteps > 0) {
-              this.handleStepUpdate(newSessionSteps);
-              await this.saveState();
-            }
-          }
-          
-          return BackgroundFetch.BackgroundFetchResult.NewData;
-        } catch (error) {
-          this.log('❌ Background task failed:', error);
-          return BackgroundFetch.BackgroundFetchResult.Failed;
-        }
-      });
-
-      // Register the task
-      await BackgroundFetch.registerTaskAsync(BACKGROUND_STEP_TASK, {
-        minimumInterval: 60 * 15, // 15 minutes
-        stopOnTerminate: false, // Continue after app closes
-        startOnBoot: true, // Start on device boot
-      });
-
-      this.log('✅ Background task registered');
-    } catch (error) {
-      this.log('⚠️ Failed to register background task:', error);
+      throw error;
     }
   }
 
@@ -208,7 +182,7 @@ class WalkModeService {
    * Start step tracking and reward processing
    * Call this when the user enables Walk Mode
    */
-  async startTracking(): Promise<void> {
+  async startTracking(activeBugId?: string, activeBugName?: string): Promise<void> {
     if (!this.isInitialized) {
       await this.initialize();
     }
@@ -221,9 +195,35 @@ class WalkModeService {
     try {
       this.log('🚶 Starting Walk Mode tracking...');
       
+      // Start new session
+      this.currentSession = {
+        startTime: new Date(),
+        startSteps: this.state.totalSteps,
+        bugId: activeBugId || null,
+        bugName: activeBugName || null,
+        xpGained: 0,
+        itemsFound: []
+      };
+      
       // Reset session steps
       this.state.sessionSteps = 0;
       this.state.isActive = true;
+      
+      // Start step tracking
+      this.pedometerSubscription = PedometerAPI.watchStepCount((result) => {
+        if (result && typeof result.steps === 'number') {
+          this.handleStepUpdate(result.steps);
+        }
+      });
+
+      await this.saveState();
+      this.log('✅ Walk Mode tracking started');
+      
+    } catch (error) {
+      this.log('❌ Failed to start Walk Mode tracking:', error);
+      throw error;
+    }
+  }
       
       // Start step counting from now
       this.pedometerSubscription = PedometerAPI.watchStepCount((result) => {
@@ -256,6 +256,11 @@ class WalkModeService {
     try {
       this.log('🚶 Stopping Walk Mode tracking...');
       
+      // Save walk session to history
+      if (this.currentSession) {
+        await this.saveWalkSession();
+      }
+      
       // Stop pedometer subscription
       if (this.pedometerSubscription) {
         this.pedometerSubscription.remove();
@@ -263,13 +268,73 @@ class WalkModeService {
       }
 
       this.state.isActive = false;
+      this.currentSession = null;
       await this.saveState();
       
       this.log('✅ Walk Mode tracking stopped');
       
     } catch (error) {
       this.log('❌ Failed to stop Walk Mode tracking:', error);
+      throw error;
     }
+  }
+
+  /**
+   * Save current walk session to history
+   */
+  private async saveWalkSession(): Promise<void> {
+    if (!this.currentSession) return;
+
+    const endTime = new Date();
+    const duration = Math.round((endTime.getTime() - this.currentSession.startTime.getTime()) / (1000 * 60)); // minutes
+    const stepsWalked = this.state.sessionSteps;
+
+    if (duration < 1 || stepsWalked < 10) {
+      this.log('🚶 Session too short to save to history');
+      return;
+    }
+
+    const historyEntry: WalkHistoryEntry = {
+      id: 'walk_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+      date: this.currentSession.startTime.toISOString().split('T')[0], // YYYY-MM-DD
+      duration,
+      stepsWalked,
+      bugName: this.currentSession.bugName || 'No Bug',
+      bugId: this.currentSession.bugId || '',
+      xpGained: this.currentSession.xpGained,
+      itemsFound: [...this.currentSession.itemsFound],
+      startTime: this.currentSession.startTime.toISOString(),
+      endTime: endTime.toISOString(),
+    };
+
+    try {
+      const existingHistory = await this.getWalkHistory();
+      const newHistory = [historyEntry, ...existingHistory];
+      
+      // Keep only last 100 entries
+      const trimmedHistory = newHistory.slice(0, 100);
+      
+      await AsyncStorage.setItem(WALK_HISTORY_STORAGE_KEY, JSON.stringify(trimmedHistory));
+      this.log('💾 Walk session saved to history');
+      
+    } catch (error) {
+      this.log('❌ Failed to save walk history:', error);
+    }
+  }
+
+  /**
+   * Get walk history
+   */
+  async getWalkHistory(): Promise<WalkHistoryEntry[]> {
+    try {
+      const stored = await AsyncStorage.getItem(WALK_HISTORY_STORAGE_KEY);
+      if (stored) {
+        return JSON.parse(stored) as WalkHistoryEntry[];
+      }
+    } catch (error) {
+      this.log('❌ Failed to load walk history:', error);
+    }
+    return [];
   }
 
   /**
@@ -303,6 +368,12 @@ class WalkModeService {
       };
       
       this.state.totalXpEarned += WALK_MODE_CONFIG.XP_PER_MILESTONE;
+      
+      // Track XP in current session
+      if (this.currentSession) {
+        this.currentSession.xpGained += WALK_MODE_CONFIG.XP_PER_MILESTONE;
+      }
+      
       this.notifyReward(xpReward);
       
       // Roll for item drop
@@ -317,6 +388,24 @@ class WalkModeService {
           };
           
           this.state.totalItemsDropped += 1;
+          
+          // Track item in current session
+          if (this.currentSession && droppedItem) {
+            const itemDef = require('@/constants/Items').getItemDefinition?.(droppedItem);
+            const itemName = itemDef?.name || droppedItem;
+            
+            const existingItem = this.currentSession.itemsFound.find(item => item.itemId === droppedItem);
+            if (existingItem) {
+              existingItem.amount += 1;
+            } else {
+              this.currentSession.itemsFound.push({
+                itemId: droppedItem,
+                amount: 1,
+                name: itemName
+              });
+            }
+          }
+          
           this.notifyReward(itemReward);
         }
       }

@@ -1,13 +1,14 @@
+import { BugInfoModal } from '@/components/BugInfoModal';
 import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
-import { XPProgressBar } from '@/components/XPProgressBar';
+import { WalkHistoryModal } from '@/components/WalkHistoryModal';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useInventory } from '@/contexts/InventoryContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useWalkMode } from '@/services/useWalkMode';
-import { Bug, RARITY_CONFIG } from '@/types/Bug';
+import { Bug, ConfirmationMethod, RARITY_CONFIG } from '@/types/Bug';
 import { router } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import { Dimensions, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -15,15 +16,17 @@ const { width: screenWidth } = Dimensions.get('window');
 
 export default function TrainScreen() {
   const { theme } = useTheme();
-  const { collection } = useBugCollection();
+  const { collection, updateBugNickname } = useBugCollection();
   const { getInventorySummary } = useInventory();
   const {
     isActive: walkModeActive,
     statistics: walkStats,
+    getWalkHistory
   } = useWalkMode();
 
   const [selectedBug, setSelectedBug] = useState<Bug | null>(null);
   const [showBugInfo, setShowBugInfo] = useState(false);
+  const [showWalkHistory, setShowWalkHistory] = useState(false);
 
   const styles = createStyles(theme);
 
@@ -41,6 +44,14 @@ export default function TrainScreen() {
   const handleCloseBugInfo = () => {
     setShowBugInfo(false);
     setSelectedBug(null);
+  };
+
+  const handleConfirmBugInfo = ({ nickname }: { nickname?: string; addToParty?: boolean; replaceBugId?: string; confirmedLabel?: string; confirmationMethod?: ConfirmationMethod; }) => {
+    // Update nickname if provided and bug is selected
+    if (selectedBug && nickname && nickname !== selectedBug.nickname) {
+      updateBugNickname(selectedBug.id, nickname);
+    }
+    handleCloseBugInfo();
   };
 
   const renderPartyBug = (bug: Bug | null, index: number) => (
@@ -94,118 +105,102 @@ export default function TrainScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContainer}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.titleContainer}>
-            <PixelatedEmoji type="train" size={24} color={theme.colors.text} />
-            <ThemedText style={styles.title}>Training Center</ThemedText>
-          </View>
-          <ThemedText style={styles.subtitle}>Train your bugs to increase their stats</ThemedText>
-          
-          {/* Player Level Progress */}
-          <View style={styles.playerProgressContainer}>
-            <ThemedText style={styles.playerLevelText}>
-              Explorer Level {collection.level}
+        {/* Large Training Mode Buttons */}
+        <View style={styles.heroSection}>
+          <TouchableOpacity 
+            style={[styles.heroButton, styles.walkModeButton, walkModeActive && styles.heroButtonActive]}
+            onPress={() => router.push('/walkmode')}
+            activeOpacity={0.8}
+          >
+            <View style={styles.heroIconContainer}>
+              <Text style={styles.heroIcon}>🚶</Text>
+              {walkModeActive && <View style={styles.activePulse} />}
+            </View>
+            <ThemedText style={styles.heroTitle}>Walk Mode</ThemedText>
+            <ThemedText style={styles.heroSubtitle}>
+              {walkModeActive 
+                ? `${walkStats.sessionSteps} steps walked`
+                : "Train bugs while walking"
+              }
             </ThemedText>
-            <XPProgressBar
-              currentXP={collection.xp}
-              maxXP={100}
-              level={collection.level}
-              animated={true}
-            />
-          </View>
+            {walkModeActive && (
+              <View style={styles.activeIndicator}>
+                <View style={styles.activeDot} />
+                <ThemedText style={styles.activeLabel}>ACTIVE</ThemedText>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.heroButton, styles.hiveModeButton]}
+            onPress={() => router.push('/hivemode')}
+            activeOpacity={0.8}
+          >
+            <View style={styles.heroIconContainer}>
+              <Text style={styles.heroIcon}>🐝</Text>
+            </View>
+            <ThemedText style={styles.heroTitle}>Hive Mode</ThemedText>
+            <ThemedText style={styles.heroSubtitle}>
+              Battle 10 rounds of bugs
+            </ThemedText>
+          </TouchableOpacity>
         </View>
 
         {/* Party Display */}
-        <View style={styles.partyContainer}>
-          <View style={styles.sectionTitleContainer}>
-            <PixelatedEmoji type="party" size={20} color={theme.colors.text} />
-            <ThemedText style={styles.sectionTitle}>Your Active Party</ThemedText>
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <ThemedText style={styles.sectionTitle}>Your Party</ThemedText>
+            <ThemedText style={styles.sectionCount}>
+              {collection.party.filter(Boolean).length}/6
+            </ThemedText>
           </View>
           <View style={styles.partyGrid}>
             {collection.party.map((bug, index) => renderPartyBug(bug, index))}
           </View>
         </View>
 
-        {/* Training Options */}
-        <View style={styles.trainingContainer}>
-          <View style={styles.sectionTitleContainer}>
-            <PixelatedEmoji type="train" size={20} color="#FFD700" />
-            <ThemedText style={styles.trainingOptionsTitle}>Training Options</ThemedText>
-          </View>
+        {/* Quick Actions */}
+        <View style={styles.section}>
+          <ThemedText style={styles.sectionTitle}>Quick Actions</ThemedText>
           
-          <TouchableOpacity 
-            style={[styles.trainingCard, walkModeActive && styles.activeTrainingCard]}
-            onPress={() => router.push('/walkmode')}
-          >
-            <PixelatedEmoji type="walk" size={24} color={theme.colors.text} />
-            <View style={styles.trainingCardContent}>
-              <ThemedText style={styles.trainingCardTitle}>Walk Mode</ThemedText>
-              <ThemedText style={styles.trainingCardSubtext}>
-                {walkModeActive 
-                  ? `Active: ${activeBug?.name} gaining XP from steps`
-                  : "Gain XP and find items by walking"
-                }
+          <View style={styles.quickActionsGrid}>
+            <TouchableOpacity 
+              style={styles.quickActionCard}
+              onPress={() => router.push('/inventory')}
+            >
+              <Text style={styles.quickActionIcon}>🎒</Text>
+              <ThemedText style={styles.quickActionTitle}>Items</ThemedText>
+              <ThemedText style={styles.quickActionValue}>
+                {getInventorySummary().length}
               </ThemedText>
-              {walkModeActive ? (
-                <ThemedText style={styles.activeText}>
-                  {walkStats.sessionSteps} steps • {walkStats.stepsToNextXp} until next XP
-                </ThemedText>
-              ) : (
-                <ThemedText style={styles.tapToStartText}>Tap to Configure</ThemedText>
-              )}
-            </View>
-            <Text style={styles.arrowIcon}>→</Text>
-          </TouchableOpacity>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.trainingCard}
-            onPress={() => router.push('/hivemode')}
-          >
-            <PixelatedEmoji type="hive" size={24} color={theme.colors.text} />
-            <View style={styles.trainingCardContent}>
-              <ThemedText style={styles.trainingCardTitle}>Hive Mode</ThemedText>
-              <ThemedText style={styles.trainingCardSubtext}>
-                Battle through 10 rounds of wild bugs!
-              </ThemedText>
-            </View>
-          </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.quickActionCard}
+              onPress={() => setShowWalkHistory(true)}
+            >
+              <Text style={styles.quickActionIcon}>📊</Text>
+              <ThemedText style={styles.quickActionTitle}>History</ThemedText>
+              <ThemedText style={styles.quickActionValue}>View</ThemedText>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Item Management */}
-        <View style={styles.trainingContainer}>
-          <View style={styles.sectionTitleContainer}>
-            <PixelatedEmoji type="item" size={20} color={theme.colors.text} />
-            <ThemedText style={styles.sectionTitle}>Item Management</ThemedText>
-          </View>
+        {/* Statistics */}
+        <View style={styles.section}>
+          <ThemedText style={styles.sectionTitle}>Statistics</ThemedText>
           
-          <TouchableOpacity 
-            style={styles.trainingCard}
-            onPress={() => router.push('/inventory')}
-          >
-            <PixelatedEmoji type="item" size={24} color={theme.colors.text} />
-            <View style={styles.trainingCardContent}>
-              <ThemedText style={styles.trainingCardTitle}>Check Items</ThemedText>
-              <ThemedText style={styles.trainingCardSubtext}>
-                {hasItems 
-                  ? `View and manage your ${getInventorySummary().length} item types`
-                  : "Use walk mode to get items"
-                }
-              </ThemedText>
-            </View>
-            <Text style={styles.arrowIcon}>→</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Training Stats */}
-        <View style={styles.statsContainer}>
-          <View style={styles.sectionTitleContainer}>
-            <PixelatedEmoji type="stat" size={20} color={theme.colors.text} />
-            <ThemedText style={styles.sectionTitle}>Training Statistics</ThemedText>
-          </View>
-          
-          <View style={styles.statRow}>
+          <View style={styles.statsGrid}>
             <View style={styles.statCard}>
+              <Text style={styles.statIcon}>⭐</Text>
+              <ThemedText style={styles.statNumber}>
+                {collection.level}
+              </ThemedText>
+              <ThemedText style={styles.statLabel}>Explorer Level</ThemedText>
+            </View>
+            
+            <View style={styles.statCard}>
+              <Text style={styles.statIcon}>🐛</Text>
               <ThemedText style={styles.statNumber}>
                 {collection.party.filter(Boolean).length}
               </ThemedText>
@@ -213,24 +208,13 @@ export default function TrainScreen() {
             </View>
             
             <View style={styles.statCard}>
+              <Text style={styles.statIcon}>📈</Text>
               <ThemedText style={styles.statNumber}>
                 {collection.party
                   .filter(Boolean)
                   .reduce((total: number, bug: any) => total + bug.level, 0)}
               </ThemedText>
               <ThemedText style={styles.statLabel}>Total Levels</ThemedText>
-            </View>
-          </View>
-          
-          <View style={styles.statRow}>
-            <View style={styles.statCard}>
-              <ThemedText style={styles.statNumber}>0</ThemedText>
-              <ThemedText style={styles.statLabel}>Sessions Complete</ThemedText>
-            </View>
-            
-            <View style={styles.statCard}>
-              <ThemedText style={styles.statNumber}>0</ThemedText>
-              <ThemedText style={styles.statLabel}>Hours Trained</ThemedText>
             </View>
           </View>
         </View>
@@ -241,8 +225,15 @@ export default function TrainScreen() {
         visible={showBugInfo}
         bug={selectedBug}
         onClose={handleCloseBugInfo}
-        onConfirm={handleCloseBugInfo}
+        onConfirm={handleConfirmBugInfo}
         isNewCatch={false}
+      />
+
+      {/* Walk History Modal */}
+      <WalkHistoryModal
+        visible={showWalkHistory}
+        onClose={() => setShowWalkHistory(false)}
+        getWalkHistory={getWalkHistory}
       />
     </SafeAreaView>
   );
@@ -254,108 +245,153 @@ const createStyles = (theme: any) => StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   scrollContainer: {
-    padding: 16,
     paddingBottom: 100,
   },
-  header: {
-    marginBottom: 24,
-    alignItems: 'center',
-  },
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: '900',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 16,
-    opacity: 0.8,
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  playerProgressContainer: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  playerLevelText: {
-    fontSize: 18,
-    fontWeight: '700',
+  heroSection: {
+    padding: 16,
+    gap: 16,
     marginBottom: 8,
   },
-  partyContainer: {
-    marginBottom: 24,
-  },
-  sectionTitleContainer: {
-    flexDirection: 'row',
+  heroButton: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: 24,
+    padding: 24,
     alignItems: 'center',
-    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  walkModeButton: {
+    minHeight: 160,
+  },
+  hiveModeButton: {
+    minHeight: 160,
+  },
+  heroButtonActive: {
+    borderColor: theme.colors.primary,
+    backgroundColor: `${theme.colors.primary}10`,
+  },
+  heroIconContainer: {
+    position: 'relative',
     marginBottom: 12,
   },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
+  heroIcon: {
+    fontSize: 64,
   },
-  trainingOptionsTitle: {
+  activePulse: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#4CAF50',
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  heroTitle: {
+    fontSize: 28,
+    fontWeight: '900',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  heroSubtitle: {
+    fontSize: 16,
+    opacity: 0.7,
+    textAlign: 'center',
+  },
+  activeIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    backgroundColor: '#4CAF50',
+    borderRadius: 16,
+  },
+  activeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FFF',
+  },
+  activeLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  section: {
+    padding: 16,
+    paddingTop: 8,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#FFD700',
-    textShadowColor: 'rgba(255, 215, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
+  },
+  sectionCount: {
+    fontSize: 16,
+    fontWeight: '600',
+    opacity: 0.6,
   },
   partyGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    gap: 12,
   },
   partySlot: {
-    width: (screenWidth - 48) / 2,
+    width: (screenWidth - 56) / 3,
     backgroundColor: theme.colors.surface,
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 12,
-    marginBottom: 12,
-    minHeight: 120,
+    minHeight: 110,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   emptyPartySlot: {
-    backgroundColor: theme.colors.background,
+    backgroundColor: 'transparent',
     borderWidth: 2,
     borderStyle: 'dashed',
     borderColor: theme.colors.border,
     justifyContent: 'center',
-    alignItems: 'center',
   },
   bugInSlot: {
     alignItems: 'center',
   },
   bugPhoto: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginBottom: 6,
-  },
-  bugEmoji: {
-    fontSize: 40,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     marginBottom: 6,
   },
   bugName: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 4,
   },
   rarityBadge: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
     color: '#FFFFFF',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   bugXpContainer: {
     width: '100%',
@@ -363,120 +399,84 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   bugXpBar: {
     width: '100%',
-    height: 6,
+    height: 4,
     backgroundColor: theme.colors.border,
-    borderRadius: 3,
-    marginBottom: 4,
+    borderRadius: 2,
+    marginBottom: 2,
   },
   bugXpFill: {
     height: '100%',
     backgroundColor: theme.colors.primary,
-    borderRadius: 3,
+    borderRadius: 2,
   },
   bugXpText: {
-    fontSize: 10,
-    opacity: 0.8,
+    fontSize: 8,
+    opacity: 0.7,
   },
   emptySlotContent: {
     alignItems: 'center',
   },
   emptySlotText: {
-    fontSize: 32,
+    fontSize: 24,
     color: theme.colors.textMuted,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   emptySlotLabel: {
-    fontSize: 12,
-    opacity: 0.6,
+    fontSize: 10,
+    opacity: 0.5,
   },
-  trainingContainer: {
-    marginBottom: 24,
+  quickActionsGrid: {
+    flexDirection: 'row',
+    gap: 12,
   },
-  trainingCard: {
+  quickActionCard: {
+    flex: 1,
     backgroundColor: theme.colors.surface,
     borderRadius: 16,
     padding: 20,
-    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
-    opacity: 0.6,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
-  trainingIcon: {
-    fontSize: 32,
-    marginRight: 16,
+  quickActionIcon: {
+    fontSize: 36,
+    marginBottom: 8,
   },
-  trainingCardContent: {
-    flex: 1,
-  },
-  trainingCardTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  trainingCardSubtext: {
+  quickActionTitle: {
     fontSize: 14,
-    opacity: 0.8,
+    fontWeight: '600',
     marginBottom: 4,
+    opacity: 0.7,
   },
-  comingSoonText: {
-    fontSize: 12,
-    color: theme.colors.primary,
-    fontWeight: '600',
-    fontStyle: 'italic',
-  },
-  activeTrainingCard: {
-    backgroundColor: `${theme.colors.primary}15`,
-    borderWidth: 2,
-    borderColor: theme.colors.primary,
-  },
-  activeText: {
-    fontSize: 12,
-    color: theme.colors.primary,
-    fontWeight: '600',
-  },
-  tapToStartText: {
-    fontSize: 12,
-    color: theme.colors.primary,
-    fontWeight: '600',
-  },
-  activeIcon: {
+  quickActionValue: {
     fontSize: 18,
-    color: theme.colors.primary,
-    marginLeft: 8,
-    alignSelf: 'center',
+    fontWeight: '800',
   },
-  arrowIcon: {
-    fontSize: 18,
-    color: theme.colors.text,
-    opacity: 0.6,
-    marginLeft: 8,
-    alignSelf: 'center',
-  },
-  statsContainer: {
-    marginBottom: 24,
-  },
-  statRow: {
+  statsGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+    gap: 12,
+  },
+  statIcon: {
+    fontSize: 24,
+    marginBottom: 8,
   },
   statCard: {
+    flex: 1,
     backgroundColor: theme.colors.surface,
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
     alignItems: 'center',
-    flex: 1,
-    marginHorizontal: 6,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   statNumber: {
     fontSize: 24,
-    fontWeight: '800',
-    color: theme.colors.primary,
+    fontWeight: '900',
+    marginBottom: 4,
   },
   statLabel: {
-    fontSize: 12,
-    opacity: 0.8,
-    marginTop: 4,
+    fontSize: 11,
+    opacity: 0.7,
     textAlign: 'center',
   },
 });

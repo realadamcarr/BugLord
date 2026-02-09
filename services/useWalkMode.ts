@@ -9,7 +9,7 @@ import { getItemDefinition } from '@/constants/Items';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useInventory } from '@/contexts/InventoryContext';
 import { useEffect, useState } from 'react';
-import { WalkModeReward, walkModeService } from './WalkModeService';
+import { WalkHistoryEntry, WalkModeReward, walkModeService } from './WalkModeService';
 
 export interface UseWalkModeReturn {
   // State
@@ -20,6 +20,9 @@ export interface UseWalkModeReturn {
   startWalkMode: () => Promise<void>;
   stopWalkMode: () => Promise<void>;
   resetWalkMode: () => Promise<void>;
+  
+  // History
+  getWalkHistory: () => Promise<WalkHistoryEntry[]>;
   
   // Status
   isAvailable: boolean;
@@ -165,7 +168,16 @@ export function useWalkMode(): UseWalkModeReturn {
   async function startWalkMode(): Promise<void> {
     try {
       setError(null);
-      await walkModeService.startTracking();
+      
+      // Find the first active bug in party
+      const activeBug = collection.party.find(bug => {
+        if (!bug) return false;
+        const maxHp = bug.maxHp || bug.maxXp;
+        const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
+        return currentHp > 0;
+      });
+      
+      await walkModeService.startTracking(activeBug?.id, activeBug?.name || activeBug?.nickname);
       
       // Update state
       const stats = walkModeService.getStatistics();
@@ -219,9 +231,36 @@ export function useWalkMode(): UseWalkModeReturn {
     }
   }
 
+  /**
+   * Get walk history
+   */
+  async function getWalkHistory(): Promise<WalkHistoryEntry[]> {
+    try {
+      return await walkModeService.getWalkHistory();
+    } catch (err) {
+      console.error('Failed to get walk history:', err);
+      return [];
+    }
+  }
+
   return {
     // State
     isActive,
+    statistics,
+    
+    // Actions
+    startWalkMode,
+    stopWalkMode,
+    resetWalkMode,
+    
+    // History
+    getWalkHistory,
+    
+    // Status
+    isAvailable,
+    error,
+  };
+}
     statistics,
     
     // Actions

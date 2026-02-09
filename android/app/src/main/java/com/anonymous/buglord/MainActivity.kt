@@ -3,6 +3,8 @@ import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
 import android.os.Bundle
+import android.view.View
+import android.view.WindowManager
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -21,6 +23,34 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
+    
+    // Enable immersive mode for navigation bar
+    setupImmersiveMode()
+  }
+
+  private fun setupImmersiveMode() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      // Android 11+ (API 30+)
+      window.setDecorFitsSystemWindows(false)
+      window.decorView.setOnApplyWindowInsetsListener { view, insets ->
+        view.onApplyWindowInsets(insets)
+      }
+    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+      // Android 4.4+ (API 19+)
+      window.decorView.systemUiVisibility = (
+        View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+      )
+    }
+  }
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (hasFocus) {
+      setupImmersiveMode()
+    }
   }
 
   /**

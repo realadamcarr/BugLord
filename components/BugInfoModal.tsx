@@ -2,7 +2,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Bug, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Alert,
     Dimensions,
@@ -46,6 +46,15 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   const [manualFamily, setManualFamily] = useState('');
 
   const styles = createStyles(theme);
+
+  // Initialize nickname from bug when modal opens or bug changes
+  useEffect(() => {
+    if (bug && !isNewCatch) {
+      setNickname(bug.nickname || '');
+    } else {
+      setNickname('');
+    }
+  }, [bug, isNewCatch, visible]);
 
   if (!bug) return null;
 

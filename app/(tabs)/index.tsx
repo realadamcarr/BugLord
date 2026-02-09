@@ -22,7 +22,7 @@ const { width: screenWidth } = Dimensions.get('window');
 
 export default function CaptureScreen() {
   const { theme } = useTheme();
-  const { collection, addBugToCollection, addBugToParty, removeBugFromParty, loading } = useBugCollection();
+  const { collection, addBugToCollection, addBugToParty, removeBugFromParty, updateBugNickname, loading } = useBugCollection();
   const [showCamera, setShowCamera] = useState(false);
   const [showBugIdentification, setShowBugIdentification] = useState(false);
   const [showCollection, setShowCollection] = useState(false);
@@ -299,8 +299,13 @@ export default function CaptureScreen() {
     setSelectedRecentBug(null);
   };
 
-  const handleConfirmRecentBug = () => {
-    // Just close the modal since this is for viewing existing bugs
+  const handleConfirmRecentBug = ({ nickname }: { nickname?: string; addToParty?: boolean; replaceBugId?: string; confirmedLabel?: string; confirmationMethod?: ConfirmationMethod; }) => {
+    // Update nickname if provided and different from current
+    if (selectedRecentBug && nickname && nickname !== selectedRecentBug.nickname) {
+      updateBugNickname(selectedRecentBug.id, nickname);
+      Alert.alert('Nickname Updated', `${selectedRecentBug.name} is now called "${nickname}"!`);
+    }
+    // Close the modal
     handleCloseRecentBugModal();
   };
 
@@ -433,21 +438,19 @@ export default function CaptureScreen() {
     if (!identifiedBug) return;
 
     try {
-      // Add nickname if provided
-      if (nickname) {
-        identifiedBug.nickname = nickname;
-      }
-
-      if (confirmedLabel) {
-        identifiedBug.userConfirmedLabel = confirmedLabel;
-        identifiedBug.confirmedLabel = confirmedLabel;
-      }
-      if (confirmationMethod) {
-        identifiedBug.confirmationMethod = confirmationMethod;
-      }
+      // Prepare bug data with all optional fields
+      const bugData = {
+        ...identifiedBug,
+        ...(nickname && { nickname }),
+        ...(confirmedLabel && { 
+          userConfirmedLabel: confirmedLabel,
+          confirmedLabel: confirmedLabel 
+        }),
+        ...(confirmationMethod && { confirmationMethod })
+      };
 
       // Add the bug to collection
-      const newBug = await addBugToCollection(identifiedBug);
+      const newBug = await addBugToCollection(bugData);
 
       if (addToParty) {
         if (replaceBugId) {
