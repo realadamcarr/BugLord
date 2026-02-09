@@ -227,12 +227,12 @@ class ImageProcessingService {
           console.log(`✅ Detected insect with ${(bestBox.confidence! * 100).toFixed(1)}% confidence`);
           console.log(`   Inference time: ${detectionResult.inferenceTime}ms`);
           
-          // Convert normalized coordinates to pixel coordinates
+          // Convert to pixel coordinates (detection returns normalized coordinates)
           return {
-            x: Math.round(bestBox.x * imageInfo.width),
-            y: Math.round(bestBox.y * imageInfo.height),
-            width: Math.round(bestBox.width * imageInfo.width),
-            height: Math.round(bestBox.height * imageInfo.height),
+            x: Math.round(bestBox.x),
+            y: Math.round(bestBox.y), 
+            width: Math.round(bestBox.width),
+            height: Math.round(bestBox.height),
           };
         }
         
@@ -248,6 +248,54 @@ class ImageProcessingService {
     }
   }
   
+  /**
+   * Preprocess image for object detection model
+   * @param photoUri - Original photo URI
+   * @param inputSize - Target input size for detection model
+   * @returns URI of preprocessed image
+   */
+  private async preprocessForDetection(photoUri: string, inputSize: number): Promise<string> {
+    console.log(`🔧 Preprocessing for detection (${inputSize}x${inputSize})`);
+    
+    const preprocessed = await ImageManipulator.manipulateAsync(
+      photoUri,
+      [
+        { resize: { width: inputSize, height: inputSize } }
+      ],
+      { 
+        format: ImageManipulator.SaveFormat.JPEG, 
+        compress: 0.9 
+      }
+    );
+    
+    console.log(`✅ Preprocessed for detection: ${inputSize}x${inputSize}`);
+    return preprocessed.uri;
+  }
+
+  /**
+   * Preprocess image for object detection model
+   * @param photoUri - Original photo URI
+   * @param inputSize - Target input size for detection model
+   * @returns URI of preprocessed image
+   */
+  private async preprocessForDetection(photoUri: string, inputSize: number): Promise<string> {
+    console.log(`🔧 Preprocessing for detection (${inputSize}x${inputSize})`);
+    
+    const preprocessed = await ImageManipulator.manipulateAsync(
+      photoUri,
+      [
+        { resize: { width: inputSize, height: inputSize } }
+      ],
+      { 
+        format: ImageManipulator.SaveFormat.JPEG, 
+        compress: 0.9 
+      }
+    );
+    
+    console.log(`✅ Preprocessed for detection: ${inputSize}x${inputSize}`);
+    return preprocessed.uri;
+  }
+
   /**
    * Simple insect detection using image analysis heuristics
    */

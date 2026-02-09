@@ -2,6 +2,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } fro
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { BugCollectionProvider } from '@/contexts/BugCollectionContext';
@@ -32,7 +33,11 @@ export default function RootLayout() {
                 <Stack.Screen name="walkmode" options={{ headerShown: false }} />
                 <Stack.Screen name="+not-found" />
               </Stack>
-              <StatusBar style="auto" />
+              <StatusBar 
+                style={colorScheme === 'dark' ? 'light' : 'dark'} 
+                backgroundColor="transparent"
+                translucent={Platform.OS === 'android'}
+              />
             </NavigationThemeProvider>
           </InventoryProvider>
         </BugCollectionProvider>

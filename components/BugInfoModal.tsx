@@ -138,6 +138,17 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
     return facts;
   };
 
+  const getRarityPercentage = (rarity: string): number => {
+    const rarityValues = {
+      'common': 20,
+      'uncommon': 40,
+      'rare': 60,
+      'epic': 80,
+      'legendary': 100
+    };
+    return rarityValues[rarity as keyof typeof rarityValues] || 20;
+  };
+
   const handleConfirm = () => {
     let confirmedLabel: string | undefined = selectedLabel || undefined;
     let confirmationMethod: ConfirmationMethod | undefined = 'AI_PICK';
@@ -207,6 +218,108 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
             <ThemedText style={styles.bugName}>{bug.name}</ThemedText>
             <ThemedText style={styles.bugSpecies}>{bug.species}</ThemedText>
             <ThemedText style={styles.bugDescription}>{bug.description}</ThemedText>
+          </View>
+
+          {/* Bug Stats Chart */}
+          <View style={styles.section}>
+            <ThemedText style={styles.sectionTitle}>📊 Stats</ThemedText>
+            
+            {/* Level */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>Level</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View 
+                    style={[
+                      styles.statBarFill, 
+                      { 
+                        width: `${Math.min(100, ((bug.level || 1) / 20) * 100)}%`,
+                        backgroundColor: '#4CAF50'
+                      }
+                    ]} 
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.level || 1}</ThemedText>
+              </View>
+            </View>
+
+            {/* XP Progress */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>XP Progress</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View 
+                    style={[
+                      styles.statBarFill, 
+                      { 
+                        width: `${bug.maxXp && bug.maxXp > 0 ? ((bug.xp || 0) / bug.maxXp) * 100 : 0}%`,
+                        backgroundColor: '#2196F3'
+                      }
+                    ]} 
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.xp || 0}/{bug.maxXp || 100}</ThemedText>
+              </View>
+            </View>
+
+            {/* HP (if available) */}
+            {bug.maxHp && bug.maxHp > 0 && (
+              <View style={styles.statRow}>
+                <ThemedText style={styles.statLabel}>Health</ThemedText>
+                <View style={styles.statBarContainer}>
+                  <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                    <View 
+                      style={[
+                        styles.statBarFill, 
+                        { 
+                          width: `${((bug.currentHp || bug.maxHp) / bug.maxHp) * 100}%`,
+                          backgroundColor: '#FF5722'
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <ThemedText style={styles.statValue}>{bug.currentHp || bug.maxHp}/{bug.maxHp}</ThemedText>
+                </View>
+              </View>
+            )}
+
+            {/* Rarity */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>Rarity</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View 
+                    style={[
+                      styles.statBarFill, 
+                      { 
+                        width: `${getRarityPercentage(bug.rarity || 'common')}%`,
+                        backgroundColor: RARITY_CONFIG[bug.rarity || 'common']?.color || '#666'
+                      }
+                    ]} 
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{(bug.rarity || 'common').toUpperCase()}</ThemedText>
+              </View>
+            </View>
+
+            {/* XP Value */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>XP Value</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View 
+                    style={[
+                      styles.statBarFill, 
+                      { 
+                        width: `${Math.min(100, ((bug.xpValue || 10) / 120) * 100)}%`,
+                        backgroundColor: '#FF9800'
+                      }
+                    ]} 
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.xpValue || 10} XP</ThemedText>
+              </View>
+            </View>
           </View>
 
           {/* Candidates Selection */}
@@ -621,5 +734,40 @@ const createStyles = (theme: any) => StyleSheet.create({
   candidateSource: {
     fontSize: 12,
     opacity: 0.7,
+  },
+  statRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  statLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+    marginRight: 12,
+  },
+  statBarContainer: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statBar: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+    overflow: 'hidden',
+  },
+  statBarFill: {
+    height: '100%',
+    borderRadius: 4,
+    minWidth: 2,
+  },
+  statValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    minWidth: 60,
+    textAlign: 'right',
   },
 });

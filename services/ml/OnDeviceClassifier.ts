@@ -7,16 +7,21 @@
  */
 
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Image } from 'react-native';
 import { BoundingBox, DetectionModelConfig, DetectionResult, MLCandidate, MLClassifierConfig } from './types';
 
 // Try to import react-native-fast-tflite, fallback gracefully
 let TFLite: any = null;
+let loadTensorflowModel: any = null;
 try {
-  TFLite = require('react-native-fast-tflite');
+  const tfliteModule = require('react-native-fast-tflite');
+  TFLite = tfliteModule;
+  loadTensorflowModel = tfliteModule.loadTensorflowModel;
   console.log('✅ react-native-fast-tflite loaded successfully');
+  console.log('🔧 TFLite object keys:', Object.keys(TFLite || {}));
+  console.log('🔧 loadTensorflowModel function exists:', typeof loadTensorflowModel);
 } catch (e) {
   console.warn('⚠️  react-native-fast-tflite not available (running in Expo Go?)', e);
 }
@@ -110,12 +115,12 @@ class OnDeviceClassifier {
       console.log(`✅ Loaded ${this.labels.length} class labels`);
 
       // Load TFLite model if native module available
-      if (TFLite && TFLite.loadModel) {
+      if (loadTensorflowModel) {
         try {
-          this.model = await TFLite.loadModel(modelPath);
+          this.model = await loadTensorflowModel({url: `file://${modelPath}`});
           console.log('✅ TFLite classification model loaded with react-native-fast-tflite');
-          console.log(`   Input: ${JSON.stringify(this.model?.inputs)}`);
-          console.log(`   Output: ${JSON.stringify(this.model?.outputs)}`);
+          console.log(`   Input shapes: ${JSON.stringify(this.model?.inputs)}`);
+          console.log(`   Output shapes: ${JSON.stringify(this.model?.outputs)}`);
         } catch (modelError) {
           console.warn('⚠️  TFLite loading failed, using fallback:', modelError);
           this.model = null;
@@ -156,38 +161,70 @@ class OnDeviceClassifier {
 
     try {
       // Real inference when model is available
-      if (this.model && TFLite) {
-        // Preprocess image to 224x224 RGB
-        const resized = await ImageManipulator.manipulateAsync(
-          imageUri,
-          [{ resize: { width: 224, height: 224 } }],
-          { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 }
-        );
+      if (this.model && loadTensorflowModel) {
+          console.log('🤖 USING REAL TENSORFLOW LITE INFERENCE (not stub mode)');
+          
+          // Preprocess image to 224x224 RGB
+          const resized = await ImageManipulator.manipulateAsync(
+            imageUri,
+            [{ resize: { width: 224, height: 224 } }],
+            { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 }
+          );
 
-        // Run inference
-        // Note: react-native-fast-tflite handles image loading and tensor conversion
-        const outputs = await this.model.run(resized.uri);
-        
-        // Process output tensor into predictions
-        const predictions: MLCandidate[] = [];
-        const outputTensor = Array.isArray(outputs) ? outputs[0] : outputs;
-        
-        // Map output values to labels
-        for (let i = 0; i < this.labels.length && i < outputTensor.length; i++) {
-          predictions.push({
-            label: this.labels[i],
-            confidence: outputTensor[i],
+          // Run inference
+          // Note: react-native-fast-tflite handles image loading and tensor conversion
+          const outputs = await this.model.run(resized.uri);
+          
+          console.log(`🔧 Raw model outputs:`, outputs);
+          console.log(`🔧 Outputs type:`, typeof outputs);
+          console.log(`🔧 Outputs keys:`, Object.keys(outputs || {}));
+          
+          // Process output tensor into predictions
+          const predictions: MLCandidate[] = [];
+          let outputTensor;
+          
+          // Handle different output formats from react-native-fast-tflite
+          if (Array.isArray(outputs)) {
+            outputTensor = outputs[0];
+          } else if (outputs && typeof outputs === 'object' && outputs.data) {
+            outputTensor = outputs.data;
+          } else if (outputs && typeof outputs === 'object') {
+            // If outputs is an object with named keys, get the first value
+            const keys = Object.keys(outputs);
+            outputTensor = keys.length > 0 ? outputs[keys[0]] : outputs;
+          } else {
+            outputTensor = outputs;
+          }
+          
+          console.log(`🔢 Raw tensor outputs (first 10):`, Array.isArray(outputTensor) ? outputTensor.slice(0, 10) : outputTensor);
+          console.log(`📊 Tensor shape: length=${Array.isArray(outputTensor) ? outputTensor.length : 'not array'}`);
+          console.log(`📝 Available labels: ${this.labels.length} labels`);
+          
+          if (!Array.isArray(outputTensor)) {
+            throw new Error(`Expected array tensor output, got: ${typeof outputTensor}`);
+          }
+          
+          // Map output values to labels
+          for (let i = 0; i < this.labels.length && i < outputTensor.length; i++) {
+            predictions.push({
+              label: this.labels[i],
+              confidence: outputTensor[i],
+            });
+          }
+
+          // Sort and return top-K
+          const topPredictions = this.sortTopK(predictions, topK);
+          
+          console.log('🏆 TOP PREDICTIONS FROM REAL TENSORFLOW LITE MODEL:');
+          topPredictions.forEach((pred, idx) => {
+            console.log(`  ${idx + 1}. ${pred.label}: ${(pred.confidence * 100).toFixed(2)}%`);
           });
-        }
-
-        // Sort and return top-K
-        const topPredictions = this.sortTopK(predictions, topK);
-        console.log(`✅ Classification complete: ${topPredictions[0]?.label} (${(topPredictions[0]?.confidence * 100).toFixed(1)}%)`);
-        return topPredictions;
-        
+          
       } else {
         // Fallback to stub if model not loaded
-        console.warn('⚠️  Using STUB predictions (TFLite not available)');
+        console.warn('🎭 USING STUB PREDICTIONS - TensorFlow Lite not available!');
+        console.warn('🔧 This means you are getting FAKE predictions, not real AI inference');
+        console.warn('💡 To fix: Ensure the APK was built with react-native-fast-tflite');
         return this.getStubPredictions(topK);
       }
 
@@ -245,12 +282,12 @@ class OnDeviceClassifier {
 
     try {
       // Load TFLite detection model if native module available
-      if (TFLite && TFLite.loadModel) {
+      if (loadTensorflowModel) {
         try {
-          this.detectionModel = await TFLite.loadModel(modelPath);
+          this.detectionModel = await loadTensorflowModel({url: `file://${modelPath}`});
           console.log('✅ TFLite detection model loaded with react-native-fast-tflite');
-          console.log(`   Input: ${JSON.stringify(this.detectionModel?.inputs)}`);
-          console.log(`   Output: ${JSON.stringify(this.detectionModel?.outputs)}`);
+          console.log(`   Input shapes: ${JSON.stringify(this.detectionModel?.inputs)}`);
+          console.log(`   Output shapes: ${JSON.stringify(this.detectionModel?.outputs)}`);
         } catch (modelError) {
           console.warn('⚠️  TFLite detection loading failed, using fallback:', modelError);
           this.detectionModel = null;
@@ -295,7 +332,7 @@ class OnDeviceClassifier {
 
     try {
       // Real detection when model is available
-      if (this.detectionModel && TFLite) {
+      if (this.detectionModel && loadTensorflowModel) {
         // Get original image dimensions
         const originalSize = await this.getImageSize(imageUri);
         
@@ -409,7 +446,15 @@ class OnDeviceClassifier {
 
     // Select species based on weights (simulating YOLOv8 confidence scores)
     const predictions: MLCandidate[] = [];
-    const availableSpecies = [...this.labels];
+    
+    // Ensure labels are available, fallback to default species if not loaded
+    const fallbackLabels = [
+      "Bees", "Butterfly", "Mantis", "ant", "beetle", 
+      "caterpillar", "centipedes", "cockroach", "dragonfly", 
+      "fly", "grasshopper", "ladybug", "mosquito", "spider", "wasp"
+    ];
+    const labelsToUse = this.labels && this.labels.length > 0 ? this.labels : fallbackLabels;
+    const availableSpecies = [...labelsToUse];
     
     // Primary prediction (60-85% confidence)
     const primaryIdx = this.getWeightedRandomIndex(availableSpecies, speciesWeights);

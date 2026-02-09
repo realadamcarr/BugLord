@@ -31,6 +31,8 @@ export default function CaptureScreen() {
   const [isIdentifying, setIsIdentifying] = useState(false);
   const [identificationResult, setIdentificationResult] = useState<BugIdentificationResult | null>(null);
   const [identifiedBug, setIdentifiedBug] = useState<Bug | null>(null);
+  const [selectedRecentBug, setSelectedRecentBug] = useState<Bug | null>(null);
+  const [showRecentBugModal, setShowRecentBugModal] = useState(false);
   const [mlReady, setMlReady] = useState(false);
   const [modelVersion, setModelVersion] = useState<string | null>(null);
 
@@ -101,7 +103,7 @@ export default function CaptureScreen() {
           
           // Bundled assets are in the app bundle, we need to copy them to accessible location
           const modelDir = `${FileSystem.documentDirectory}ml/`;
-          const modelPath = `${modelDir}insect_detector.tflite`;
+          const modelPath = `${modelDir}model.tflite`;
           const labelsPath = `${modelDir}labels.json`;
           
           console.log('📁 Checking for model files in:', modelDir);
@@ -110,7 +112,16 @@ export default function CaptureScreen() {
           const modelInfo = await FileSystem.getInfoAsync(modelPath);
           const labelsInfo = await FileSystem.getInfoAsync(labelsPath);
           
-          if (!modelInfo.exists || !labelsInfo.exists) {
+          // Check if model exists but is wrong size (corrupted)
+          const expectedModelSize = 2800000; // ~2.8MB
+          const isCorrupted = modelInfo.exists && modelInfo.size && modelInfo.size < expectedModelSize;
+          
+          if (!modelInfo.exists || !labelsInfo.exists || isCorrupted) {
+            if (isCorrupted) {
+              console.log(`🗑️  Deleting corrupted model file (${Math.round(modelInfo.size! / 1024)}KB instead of ~12MB)`);
+              await FileSystem.deleteAsync(modelPath);
+            }
+            
             console.log('📦 Copying bundled assets to document directory...');
             
             // Ensure directory exists
@@ -135,13 +146,13 @@ export default function CaptureScreen() {
               }
               
               // Try to copy model from app bundle
-              if (!modelInfo.exists) {
+              if (!modelInfo.exists || isCorrupted) {
                 try {
                   // Attempt multiple bundle paths
                   const possiblePaths = [
-                    `${FileSystem.bundleDirectory}assets/ml/insect_detector.tflite`,
-                    `${FileSystem.bundleDirectory}assets/assets/ml/insect_detector.tflite`,
-                    `${FileSystem.bundleDirectory}bundled/assets/ml/insect_detector.tflite`
+                    `${FileSystem.bundleDirectory}assets/ml/model.tflite`,
+                    `${FileSystem.bundleDirectory}assets/assets/ml/model.tflite`,
+                    `${FileSystem.bundleDirectory}bundled/assets/ml/model.tflite`
                   ];
                   
                   let copied = false;
@@ -163,9 +174,71 @@ export default function CaptureScreen() {
                     }
                   }
                   
+                  // If bundle copy fails, try expo-asset approach with error handling
+                  if (!copied) {
+                    console.log('📦 Trying expo-asset approach...');
+                    try {
+                      console.log('🔍 Asset module path: @/assets/ml/model.tflite');
+                      // Import the model asset 
+                      const modelAsset = Asset.fromModule(require('../../assets/ml/model.tflite'));
+                      console.log('📋 Asset info:', {
+                        name: modelAsset.name,
+                        type: modelAsset.type,
+                        hash: modelAsset.hash,
+                        uri: modelAsset.uri,
+                        downloaded: modelAsset.downloaded
+                      });
+                      
+                      await modelAsset.downloadAsync();
+                      console.log('📋 After download:', {
+                        localUri: modelAsset.localUri,
+                        downloaded: modelAsset.downloaded
+                      });
+                      
+                      if (modelAsset.localUri) {
+                        // Check source size before copying
+                        const sourceInfo = await FileSystem.getInfoAsync(modelAsset.localUri);
+                        console.log('📊 Source file info:', sourceInfo);
+                        
+                        await FileSystem.copyAsync({
+                          from: modelAsset.localUri,
+                          to: modelPath
+                        });
+                        
+                        // Verify copy
+                        const destInfo = await FileSystem.getInfoAsync(modelPath);
+                        console.log('📊 Copied file info:', destInfo);
+                        console.log('✅ Copied model using expo-asset');
+                        copied = true;
+                      }
+                    } catch (assetError) {
+                      console.log('❌ Expo-asset failed:', assetError);
+                    }
+                  }
+                  
+                  // Final fallback: Check downloads folder for manually copied model
+                  if (!copied) {
+                    console.log('📲 Trying downloads folder...');
+                    try {
+                      const downloadPath = '/storage/emulated/0/Download/model.tflite';
+                      const downloadInfo = await FileSystem.getInfoAsync(`file://${downloadPath}`);
+                      
+                      if (downloadInfo.exists) {
+                        await FileSystem.copyAsync({
+                          from: `file://${downloadPath}`,
+                          to: modelPath
+                        });
+                        console.log('✅ Copied model from downloads folder');
+                        copied = true;
+                      }
+                    } catch (downloadError) {
+                      console.log('❌ Downloads copy failed:', downloadError);
+                    }
+                  }
+                  
                   if (!copied) {
                     // If bundle copy fails, create a placeholder for now
-                    console.warn('⚠️ Could not copy from bundle, using labels-only mode');
+                    console.warn('⚠️ Could not copy from any source, using labels-only mode');
                     setMlReady(true);
                     setModelVersion('labels-only');
                     console.log('✅ ML ready in labels-only mode');
@@ -184,7 +257,7 @@ export default function CaptureScreen() {
               console.warn('⚠️  Model files not found in document directory.');
               console.warn('📋 Please ensure model files are in:', modelDir);
               console.warn('   Expected files:');
-              console.warn('   - insect_detector.tflite (12 MB)');
+              console.warn('   - model.tflite (2.8 MB)');
               console.warn('   - labels.json');
               
               setMlReady(false);
@@ -214,6 +287,21 @@ export default function CaptureScreen() {
     
     // Automatically process the captured photo
     await processAndClassify(photoUri, photoUri);
+  };
+
+  const handleRecentBugTap = (bug: Bug) => {
+    setSelectedRecentBug(bug);
+    setShowRecentBugModal(true);
+  };
+
+  const handleCloseRecentBugModal = () => {
+    setShowRecentBugModal(false);
+    setSelectedRecentBug(null);
+  };
+
+  const handleConfirmRecentBug = () => {
+    // Just close the modal since this is for viewing existing bugs
+    handleCloseRecentBugModal();
   };
 
   const processAndClassify = async (imageToClassify: string, originalPhoto: string) => {
@@ -271,10 +359,26 @@ export default function CaptureScreen() {
         return;
       }
 
-      // Model only detects generic "insect" - need to retrain with species labels for specific ID
-      // For now, use API for species identification
-      console.log('⚠️  Model trained with generic "insect" label only. Using fallback identification.');
-      const result = await bugIdentificationService.identify(processedImage.croppedImage);
+      // USE REAL TENSORFLOW LITE PREDICTIONS WHEN AVAILABLE!
+      let result;
+      if (mlCandidates.length > 0) {
+        console.log('✅ Using real TensorFlow Lite predictions:', mlCandidates);
+        
+        // Convert TensorFlow Lite predictions to BugIdentificationResult format
+        result = {
+          candidates: mlCandidates.map(candidate => ({
+            label: candidate.label,
+            species: candidate.label, // Use label as species for now
+            confidence: candidate.confidence,
+            source: 'TensorFlow Lite ML Model'
+          })),
+          provider: 'TensorFlow Lite',
+          isFromAPI: false
+        };
+      } else {
+        console.log('⚠️  No ML predictions available, using fallback identification.');
+        result = await bugIdentificationService.identify(processedImage.croppedImage);
+      }
 
       setIdentificationResult(result);
 
@@ -526,7 +630,12 @@ export default function CaptureScreen() {
             <ThemedText style={styles.sectionTitle}>🕐 Recent Discoveries</ThemedText>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.recentList}>
               {collection.bugs.slice(-5).reverse().map((bug) => (
-                <View key={bug.id} style={styles.recentBugCard}>
+                <TouchableOpacity 
+                  key={bug.id} 
+                  style={styles.recentBugCard}
+                  onPress={() => handleRecentBugTap(bug)}
+                  activeOpacity={0.7}
+                >
                   {bug.photo ? (
                     <Image source={{ uri: bug.photo }} style={styles.recentBugPhoto} />
                   ) : bug.pixelArt ? (
@@ -542,7 +651,7 @@ export default function CaptureScreen() {
                   <Text style={[styles.rarityBadge, { backgroundColor: RARITY_CONFIG[bug.rarity].color }]}>
                     {bug.rarity}
                   </Text>
-                </View>
+                </TouchableOpacity>
               ))}
             </ScrollView>
           </View>
@@ -597,6 +706,16 @@ export default function CaptureScreen() {
         onConfirm={handleBugInfoConfirm}
         isNewCatch={true}
         candidates={identificationResult?.candidates || []}
+      />
+
+      {/* Recent Bug Info Modal */}
+      <BugInfoModal
+        visible={showRecentBugModal}
+        bug={selectedRecentBug}
+        onClose={handleCloseRecentBugModal}
+        onConfirm={handleConfirmRecentBug}
+        isNewCatch={false}
+        candidates={[]}
       />
 
       {/* Party Management Modal */}

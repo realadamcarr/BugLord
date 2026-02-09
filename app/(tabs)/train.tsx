@@ -22,6 +22,9 @@ export default function TrainScreen() {
     statistics: walkStats,
   } = useWalkMode();
 
+  const [selectedBug, setSelectedBug] = useState<Bug | null>(null);
+  const [showBugInfo, setShowBugInfo] = useState(false);
+
   const styles = createStyles(theme);
 
   // Check if player has any items
@@ -30,8 +33,24 @@ export default function TrainScreen() {
   // Get first active bug for Walk Mode display
   const activeBug = collection.party.find(bug => bug !== null);
 
+  const handleBugTap = (bug: Bug) => {
+    setSelectedBug(bug);
+    setShowBugInfo(true);
+  };
+
+  const handleCloseBugInfo = () => {
+    setShowBugInfo(false);
+    setSelectedBug(null);
+  };
+
   const renderPartyBug = (bug: Bug | null, index: number) => (
-    <View key={index} style={[styles.partySlot, !bug && styles.emptyPartySlot]}>
+    <TouchableOpacity 
+      key={index} 
+      style={[styles.partySlot, !bug && styles.emptyPartySlot]}
+      onPress={() => bug && handleBugTap(bug)}
+      activeOpacity={bug ? 0.7 : 1}
+      disabled={!bug}
+    >
       {bug ? (
         <View style={styles.bugInSlot}>
           {bug.photo ? (
@@ -69,7 +88,7 @@ export default function TrainScreen() {
           <ThemedText style={styles.emptySlotLabel}>Empty</ThemedText>
         </View>
       )}
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -216,6 +235,15 @@ export default function TrainScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Bug Info Modal */}
+      <BugInfoModal
+        visible={showBugInfo}
+        bug={selectedBug}
+        onClose={handleCloseBugInfo}
+        onConfirm={handleCloseBugInfo}
+        isNewCatch={false}
+      />
     </SafeAreaView>
   );
 }

@@ -8,6 +8,7 @@ import { clearScanLogs, getScanLogs, ScanLogEntry } from '@/services/ScanLogServ
 import { BIOME_CONFIG, RARITY_CONFIG } from '@/types/Bug';
 import React, { useEffect, useState } from 'react';
 import { Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -32,13 +33,17 @@ export default function PlayerScreen() {
   
   // Count bugs by rarity
   const rarityStats = collection.bugs.reduce((acc: any, bug) => {
-    acc[bug.rarity] = (acc[bug.rarity] || 0) + 1;
+    if (bug && bug.rarity) {
+      acc[bug.rarity] = (acc[bug.rarity] || 0) + 1;
+    }
     return acc;
   }, {});
 
   // Count bugs by biome
   const biomeStats = collection.bugs.reduce((acc: any, bug) => {
-    acc[bug.biome] = (acc[bug.biome] || 0) + 1;
+    if (bug && bug.biome) {
+      acc[bug.biome] = (acc[bug.biome] || 0) + 1;
+    }
     return acc;
   }, {});
 
@@ -110,7 +115,7 @@ export default function PlayerScreen() {
             </View>
             <View style={styles.statCard}>
               <ThemedText style={styles.statNumber}>
-                {rarityStats.rare || 0 + rarityStats.epic || 0 + rarityStats.legendary || 0}
+                {(rarityStats.rare || 0) + (rarityStats.epic || 0) + (rarityStats.legendary || 0)}
               </ThemedText>
               <ThemedText style={styles.statLabel}>Rare+ Bugs</ThemedText>
             </View>
