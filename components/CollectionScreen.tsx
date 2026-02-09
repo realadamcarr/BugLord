@@ -53,12 +53,17 @@ export const CollectionScreen: React.FC<CollectionScreenProps> = ({ onClose }) =
     handleBugDetailsClose();
   };
 
-  const renderBugItem = ({ item: bug }: { item: Bug }) => (
+  const renderBugItem = ({ item: bug }: { item: Bug }) => {
+    const maxHp = bug.maxHp || bug.maxXp;
+    const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
+    const isFainted = currentHp <= 0;
+
+    return (
     <TouchableOpacity
       style={styles.bugCard}
       onPress={() => handleBugPress(bug)}
     >
-      <View style={styles.bugImageContainer}>
+      <View style={[styles.bugImageContainer, isFainted && { opacity: 0.4 }]}>
         {bug.photo ? (
           <Image source={{ uri: bug.photo }} style={styles.bugIcon} />
         ) : bug.pixelArt ? (
@@ -70,15 +75,16 @@ export const CollectionScreen: React.FC<CollectionScreenProps> = ({ onClose }) =
         )}
       </View>
       
-      <ThemedText style={styles.bugName} numberOfLines={2}>
-        {bug.nickname || bug.name}
+      <ThemedText style={[styles.bugName, isFainted && { opacity: 0.5 }]} numberOfLines={2}>
+        {isFainted ? '💀 ' : ''}{bug.nickname || bug.name}
       </ThemedText>
       
       <View style={styles.bugLevel}>
-        <Text style={styles.levelText}>Lv.{bug.level}</Text>
+        <Text style={styles.levelText}>{isFainted ? 'FAINTED' : `Lv.${bug.level}`}</Text>
       </View>
     </TouchableOpacity>
   );
+  };
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
@@ -140,93 +146,109 @@ const createStyles = (theme: any) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    paddingBottom: 16,
+    padding: 16,
+    paddingBottom: 14,
+    borderBottomWidth: 3,
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.card,
   },
   headerContent: {
     flex: 1,
   },
   closeButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 6,
     backgroundColor: theme.colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 16,
+    marginLeft: 12,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   closeButtonText: {
-    fontSize: 16,
+    fontSize: 14,
     color: theme.colors.text,
-    fontWeight: 'bold',
+    fontWeight: '900',
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 8,
+    fontSize: 20,
+    fontWeight: '900',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   subtitle: {
-    fontSize: 16,
-    opacity: 0.7,
+    fontSize: 12,
+    fontWeight: '700',
+    color: theme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   gridContainer: {
-    padding: 20,
-    paddingTop: 0,
+    padding: 16,
+    paddingTop: 12,
   },
   row: {
     justifyContent: 'space-between',
   },
   bugCard: {
     width: ITEM_SIZE,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 12,
-    padding: 12,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 10,
     alignItems: 'center',
-    marginBottom: 16,
-    borderWidth: 1,
+    marginBottom: 12,
+    borderWidth: 2,
     borderColor: theme.colors.border,
   },
   bugImageContainer: {
-    width: ITEM_SIZE - 24,
-    height: ITEM_SIZE - 24,
-    borderRadius: 8,
-    marginBottom: 8,
+    width: ITEM_SIZE - 20,
+    height: ITEM_SIZE - 20,
+    borderRadius: 6,
+    marginBottom: 6,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: theme.isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   bugIcon: {
     width: '100%',
     height: '100%',
-    borderRadius: 8,
+    borderRadius: 5,
   },
   placeholderIcon: {
     width: '100%',
     height: '100%',
-    borderRadius: 8,
+    borderRadius: 5,
     justifyContent: 'center',
     alignItems: 'center',
   },
   placeholderEmoji: {
-    fontSize: 32,
+    fontSize: 28,
   },
   bugName: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '800',
     textAlign: 'center',
     marginBottom: 4,
-    minHeight: 32, // Ensure consistent height for 2 lines
+    minHeight: 30,
   },
   bugLevel: {
     backgroundColor: theme.colors.primary,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: `${theme.colors.primary}80`,
   },
   levelText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: 'bold',
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   emptyState: {
     flex: 1,
@@ -235,19 +257,22 @@ const createStyles = (theme: any) => StyleSheet.create({
     padding: 40,
   },
   emptyEmoji: {
-    fontSize: 64,
-    marginBottom: 16,
+    fontSize: 56,
+    marginBottom: 14,
   },
   emptyTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 12,
+    fontSize: 18,
+    fontWeight: '900',
+    marginBottom: 10,
     textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   emptyDescription: {
-    fontSize: 16,
+    fontSize: 13,
     textAlign: 'center',
-    lineHeight: 22,
-    opacity: 0.7,
+    lineHeight: 20,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
   },
 });

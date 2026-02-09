@@ -55,11 +55,15 @@ export default function WalkModeScreen() {
   const stepsToNextXp = STEPS_PER_KM - (currentSteps % STEPS_PER_KM);
   const progressPercentage = ((currentSteps % STEPS_PER_KM) / STEPS_PER_KM) * 100;
 
-  // Get available bugs (party + collection)
+  // Get available bugs (party + collection) - only those with HP > 0
   const availableBugs = [
     ...collection.party.filter(bug => bug !== null),
     ...collection.bugs.filter(bug => !collection.party.some(partyBug => partyBug?.id === bug.id))
-  ];
+  ].filter(bug => {
+    const maxHp = bug.maxHp || bug.maxXp;
+    const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
+    return currentHp > 0;
+  });
 
   const handleBugSelection = (bug: Bug) => {
     setSelectedBug(bug);
@@ -69,6 +73,14 @@ export default function WalkModeScreen() {
   const handleStartWalkMode = async () => {
     if (!selectedBug) {
       Alert.alert('Select a Bug', 'Please select a bug to train before starting Walk Mode.');
+      return;
+    }
+
+    // Check if selected bug has HP
+    const maxHp = selectedBug.maxHp || selectedBug.maxXp;
+    const currentHp = selectedBug.currentHp !== undefined ? selectedBug.currentHp : maxHp;
+    if (currentHp <= 0) {
+      Alert.alert('Bug Fainted', `${selectedBug.nickname || selectedBug.name} has 0 HP and cannot train! Use a Revive item first.`);
       return;
     }
 
@@ -132,7 +144,7 @@ export default function WalkModeScreen() {
                   {bug.nickname || bug.name}
                 </ThemedText>
                 <ThemedText style={styles.bugListDetails}>
-                  Level {bug.level} • {bug.rarity} • {bug.xp}/{bug.maxXp} XP
+                  Level {bug.level} • HP: {bug.currentHp !== undefined ? bug.currentHp : (bug.maxHp || bug.maxXp)}/{bug.maxHp || bug.maxXp} • {bug.xp}/{bug.maxXp} XP
                 </ThemedText>
               </View>
               <View style={[
@@ -152,8 +164,8 @@ export default function WalkModeScreen() {
     const size = 200;
     const strokeWidth = 8;
     const halfSize = size / 2;
-    const fillColor = '#60A5FA';
-    const trackColor = 'rgba(255, 255, 255, 0.2)';
+    const fillColor = theme.colors.primary;
+    const trackColor = theme.colors.border;
 
     // Calculate progress within current milestone (0 to 1)
     const currentMilestoneSteps = currentSteps % STEPS_PER_KM;
@@ -432,37 +444,44 @@ export default function WalkModeScreen() {
 const createStyles = (theme: any) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1E3A8A', // Blue theme
+    backgroundColor: theme.colors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 60,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingTop: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    backgroundColor: theme.colors.card,
+    borderBottomWidth: 3,
+    borderBottomColor: theme.colors.border,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   backButtonText: {
-    color: 'white',
-    fontSize: 20,
-    fontWeight: '600',
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: '900',
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 20,
-    fontWeight: '700',
-    color: 'white',
+    fontSize: 18,
+    fontWeight: '900',
+    color: theme.colors.text,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   headerSpacer: {
-    width: 40,
+    width: 36,
   },
   scrollContainer: {
     paddingBottom: 40,
@@ -470,28 +489,37 @@ const createStyles = (theme: any) => StyleSheet.create({
   progressSection: {
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 30,
+    paddingVertical: 24,
+    backgroundColor: theme.colors.card,
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 10,
+    borderWidth: 3,
+    borderColor: theme.colors.border,
   },
   stepsToGoTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'white',
-    marginBottom: 8,
+    fontSize: 14,
+    fontWeight: '800',
+    color: theme.colors.textSecondary,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   stepsToGoNumber: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: 'white',
-    marginBottom: 4,
+    fontSize: 28,
+    fontWeight: '900',
+    color: theme.colors.warning,
+    marginBottom: 2,
   },
   stepsToGoSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
-    marginBottom: 30,
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    marginBottom: 24,
+    fontWeight: '600',
   },
   progressContainer: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 24,
   },
   progressInner: {
     position: 'absolute',
@@ -500,41 +528,48 @@ const createStyles = (theme: any) => StyleSheet.create({
     right: 8,
     bottom: 8,
     borderRadius: 100,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   selectedBugPhoto: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginBottom: 8,
+    width: 90,
+    height: 90,
+    borderRadius: 8,
+    marginBottom: 6,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   selectedBugEmoji: {
     width: 56,
     height: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   progressTextContainer: {
     alignItems: 'center',
-    marginTop: 4,
-  },
-  progressPercentage: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#60A5FA',
-  },
-  progressSteps: {
-    fontSize: 10,
-    color: 'rgba(255, 255, 255, 0.7)',
     marginTop: 2,
   },
+  progressPercentage: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: theme.colors.primary,
+  },
+  progressSteps: {
+    fontSize: 9,
+    color: theme.colors.textMuted,
+    marginTop: 1,
+    fontWeight: '700',
+  },
   selectBugText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
+    color: theme.colors.textMuted,
+    fontSize: 14,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   statsRow: {
     flexDirection: 'row',
@@ -543,54 +578,68 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   statItem: {
     alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+    minWidth: 90,
   },
   statNumber: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: 'white',
+    fontSize: 18,
+    fontWeight: '900',
+    color: theme.colors.primary,
   },
   statLabel: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.7)',
-    marginTop: 4,
+    fontSize: 10,
+    color: theme.colors.textMuted,
+    marginTop: 2,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   bugSection: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
+    paddingHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'white',
-    marginBottom: 0,
+    fontSize: 15,
+    fontWeight: '900',
+    color: theme.colors.text,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   sectionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
     gap: 8,
   },
   bugSelector: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 16,
     borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: theme.colors.border,
   },
   selectedBugContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   bugSelectorPhoto: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    marginRight: 16,
+    width: 52,
+    height: 52,
+    borderRadius: 6,
+    marginRight: 14,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   bugSelectorEmoji: {
     width: 36,
     height: 36,
-    marginRight: 16,
+    marginRight: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -598,92 +647,107 @@ const createStyles = (theme: any) => StyleSheet.create({
     flex: 1,
   },
   selectedBugName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'white',
-    marginBottom: 4,
+    fontSize: 16,
+    fontWeight: '800',
+    color: theme.colors.text,
+    marginBottom: 3,
   },
   selectedBugDetails: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    fontWeight: '600',
   },
   selectBugPrompt: {
     alignItems: 'center',
-    paddingVertical: 20,
+    paddingVertical: 16,
   },
   selectBugIcon: {
     width: 40,
     height: 40,
-    marginBottom: 12,
+    marginBottom: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   selectBugPromptText: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 14,
+    color: theme.colors.textMuted,
     textAlign: 'center',
+    fontWeight: '700',
   },
   actionSection: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
+    paddingHorizontal: 16,
+    marginBottom: 20,
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
-    borderRadius: 16,
+    padding: 18,
+    borderRadius: 8,
+    borderWidth: 3,
   },
   startButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: theme.colors.success,
+    borderColor: `${theme.colors.success}80`,
   },
   stopButton: {
-    backgroundColor: '#EF4444',
+    backgroundColor: theme.colors.error,
+    borderColor: `${theme.colors.error}80`,
   },
   actionButtonIcon: {
-    width: 26,
-    height: 26,
-    marginRight: 12,
+    width: 24,
+    height: 24,
+    marginRight: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   actionButtonText: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   startButtonText: {
-    color: 'white',
+    color: '#FFF',
   },
   stopButtonText: {
-    color: 'white',
+    color: '#FFF',
   },
   disabledButtonText: {
-    opacity: 0.5,
+    opacity: 0.4,
   },
   infoSection: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
+    backgroundColor: theme.colors.card,
+    marginHorizontal: 16,
+    borderRadius: 10,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   infoTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'white',
-    marginBottom: 0,
+    fontSize: 14,
+    fontWeight: '900',
+    color: theme.colors.text,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   infoItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   infoIconContainer: {
-    width: 30,
+    width: 28,
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 10,
   },
   infoText: {
     flex: 1,
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
-    lineHeight: 20,
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   // Modal Styles
   modalContainer: {
@@ -694,50 +758,59 @@ const createStyles = (theme: any) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingTop: 60,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 3,
     borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.card,
   },
   modalTitle: {
     flex: 1,
-    fontSize: 20,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '900',
     textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   closeButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 34,
+    height: 34,
+    borderRadius: 6,
     backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   closeButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '900',
     color: theme.colors.text,
   },
   bugList: {
     flex: 1,
-    padding: 20,
+    padding: 16,
   },
   bugListItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   bugListPhoto: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginRight: 16,
+    width: 46,
+    height: 46,
+    borderRadius: 6,
+    marginRight: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.colors.background,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   bugListEmoji: {
     width: 24,
@@ -749,22 +822,23 @@ const createStyles = (theme: any) => StyleSheet.create({
     flex: 1,
   },
   bugListName: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 3,
   },
   bugListDetails: {
-    fontSize: 12,
-    opacity: 0.7,
+    fontSize: 11,
+    fontWeight: '600',
+    color: theme.colors.textMuted,
   },
   rarityBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
   },
   rarityBadgeText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '800',
   },
 });

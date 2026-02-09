@@ -54,7 +54,13 @@ export default function TrainScreen() {
     handleCloseBugInfo();
   };
 
-  const renderPartyBug = (bug: Bug | null, index: number) => (
+  const renderPartyBug = (bug: Bug | null, index: number) => {
+    const maxHp = bug ? (bug.maxHp || bug.maxXp) : 0;
+    const currentHp = bug ? (bug.currentHp !== undefined ? bug.currentHp : maxHp) : 0;
+    const isFainted = bug ? currentHp <= 0 : false;
+    const hpPercent = maxHp > 0 ? currentHp / maxHp : 1;
+
+    return (
     <TouchableOpacity 
       key={index} 
       style={[styles.partySlot, !bug && styles.emptyPartySlot]}
@@ -63,13 +69,16 @@ export default function TrainScreen() {
       disabled={!bug}
     >
       {bug ? (
-        <View style={styles.bugInSlot}>
+        <View style={[styles.bugInSlot, isFainted && { opacity: 0.5 }]}>
           {bug.photo ? (
             <Image source={{ uri: bug.photo }} style={styles.bugPhoto} />
           ) : bug.pixelArt ? (
             <Image source={{ uri: bug.pixelArt }} style={styles.bugPhoto} />
           ) : (
             <PixelatedEmoji type="bug" size={32} color={theme.colors.text} />
+          )}
+          {isFainted && (
+            <Text style={{ fontSize: 12, color: '#FF6B6B', fontWeight: '700', marginTop: 2 }}>💀 FAINTED</Text>
           )}
           <ThemedText style={styles.bugName} numberOfLines={1}>
             {bug.nickname || bug.name}
@@ -78,18 +87,21 @@ export default function TrainScreen() {
             Lv.{bug.level}
           </Text>
           
-          {/* XP Progress Bar for each bug */}
+          {/* HP Bar */}
           <View style={styles.bugXpContainer}>
             <View style={styles.bugXpBar}>
               <View 
                 style={[
                   styles.bugXpFill,
-                  { width: `${(bug.xp / bug.maxXp) * 100}%` }
+                  { 
+                    width: `${Math.max(hpPercent * 100, 0)}%`,
+                    backgroundColor: isFainted ? '#666' : hpPercent > 0.5 ? '#51CF66' : hpPercent > 0.25 ? '#FCC419' : '#FF6B6B',
+                  }
                 ]}
               />
             </View>
             <ThemedText style={styles.bugXpText}>
-              {bug.xp}/{bug.maxXp}
+              {currentHp}/{maxHp} HP
             </ThemedText>
           </View>
         </View>
@@ -101,6 +113,7 @@ export default function TrainScreen() {
       )}
     </TouchableOpacity>
   );
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
@@ -249,84 +262,95 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   heroSection: {
     padding: 16,
-    gap: 16,
-    marginBottom: 8,
+    gap: 14,
+    marginBottom: 4,
   },
   heroButton: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: 24,
-    padding: 24,
+    backgroundColor: theme.colors.card,
+    borderRadius: 10,
+    padding: 22,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
+    borderWidth: 3,
+    borderColor: theme.colors.border,
+    shadowColor: theme.colors.shadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
     elevation: 4,
-    borderWidth: 2,
-    borderColor: 'transparent',
   },
   walkModeButton: {
-    minHeight: 160,
+    minHeight: 150,
+    borderLeftColor: theme.colors.primary,
+    borderLeftWidth: 5,
   },
   hiveModeButton: {
-    minHeight: 160,
+    minHeight: 150,
+    borderLeftColor: theme.colors.warning,
+    borderLeftWidth: 5,
   },
   heroButtonActive: {
     borderColor: theme.colors.primary,
-    backgroundColor: `${theme.colors.primary}10`,
+    backgroundColor: `${theme.colors.primaryLight}30`,
   },
   heroIconContainer: {
     position: 'relative',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   heroIcon: {
-    fontSize: 64,
+    fontSize: 56,
   },
   activePulse: {
     position: 'absolute',
     top: -4,
     right: -4,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#4CAF50',
-    shadowColor: '#4CAF50',
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: theme.colors.success,
+    borderWidth: 2,
+    borderColor: theme.colors.card,
+    shadowColor: theme.colors.success,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.6,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 4,
   },
   heroTitle: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '900',
-    marginBottom: 8,
+    marginBottom: 6,
     textAlign: 'center',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   heroSubtitle: {
-    fontSize: 16,
-    opacity: 0.7,
+    fontSize: 14,
+    color: theme.colors.textSecondary,
     textAlign: 'center',
   },
   activeIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    backgroundColor: '#4CAF50',
-    borderRadius: 16,
+    marginTop: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    backgroundColor: theme.colors.success,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: `${theme.colors.success}80`,
   },
   activeDot: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: 4,
     backgroundColor: '#FFF',
   },
   activeLabel: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '800',
     color: '#FFF',
+    letterSpacing: 1,
   },
   section: {
     padding: 16,
@@ -336,62 +360,74 @@ const createStyles = (theme: any) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   sectionTitle: {
-    fontSize: 22,
-    fontWeight: '800',
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   sectionCount: {
-    fontSize: 16,
-    fontWeight: '600',
-    opacity: 0.6,
+    fontSize: 14,
+    fontWeight: '700',
+    color: theme.colors.textMuted,
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+    overflow: 'hidden',
   },
   partyGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 10,
   },
   partySlot: {
-    width: (screenWidth - 56) / 3,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
-    padding: 12,
-    minHeight: 110,
+    width: (screenWidth - 52) / 3,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 10,
+    minHeight: 115,
     alignItems: 'center',
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: theme.colors.border,
   },
   emptyPartySlot: {
     backgroundColor: 'transparent',
     borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: theme.colors.border,
+    borderColor: theme.colors.separator,
     justifyContent: 'center',
   },
   bugInSlot: {
     alignItems: 'center',
   },
   bugPhoto: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    marginBottom: 6,
+    width: 46,
+    height: 46,
+    borderRadius: 6,
+    marginBottom: 5,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   bugName: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   rarityBadge: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#FFFFFF',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
-    marginBottom: 6,
+    marginBottom: 5,
+    overflow: 'hidden',
   },
   bugXpContainer: {
     width: '100%',
@@ -399,10 +435,12 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   bugXpBar: {
     width: '100%',
-    height: 4,
-    backgroundColor: theme.colors.border,
-    borderRadius: 2,
+    height: 5,
+    backgroundColor: theme.colors.xpBackground,
+    borderRadius: 3,
     marginBottom: 2,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   bugXpFill: {
     height: '100%',
@@ -411,72 +449,84 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   bugXpText: {
     fontSize: 8,
-    opacity: 0.7,
+    fontWeight: '700',
+    color: theme.colors.textMuted,
   },
   emptySlotContent: {
     alignItems: 'center',
   },
   emptySlotText: {
-    fontSize: 24,
+    fontSize: 22,
     color: theme.colors.textMuted,
+    fontWeight: '900',
     marginBottom: 2,
   },
   emptySlotLabel: {
     fontSize: 10,
-    opacity: 0.5,
+    fontWeight: '600',
+    color: theme.colors.textMuted,
   },
   quickActionsGrid: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
+    marginTop: 6,
   },
   quickActionCard: {
     flex: 1,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 18,
     alignItems: 'center',
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: theme.colors.border,
   },
   quickActionIcon: {
-    fontSize: 36,
-    marginBottom: 8,
+    fontSize: 32,
+    marginBottom: 6,
   },
   quickActionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 4,
-    opacity: 0.7,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 3,
+    color: theme.colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   quickActionValue: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 16,
+    fontWeight: '900',
+    color: theme.colors.primary,
   },
   statsGrid: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
+    marginTop: 6,
   },
   statIcon: {
-    fontSize: 24,
-    marginBottom: 8,
+    fontSize: 22,
+    marginBottom: 6,
   },
   statCard: {
     flex: 1,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 14,
     alignItems: 'center',
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: theme.colors.border,
   },
   statNumber: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '900',
-    marginBottom: 4,
+    color: theme.colors.warning,
+    marginBottom: 3,
   },
   statLabel: {
-    fontSize: 11,
-    opacity: 0.7,
+    fontSize: 10,
+    fontWeight: '700',
+    color: theme.colors.textMuted,
     textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
 });

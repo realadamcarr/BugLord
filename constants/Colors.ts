@@ -1,41 +1,33 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * BugLord Color Palette
+ * Pixel-art / nature RPG theme with warm parchment & bold forest tones.
  */
-
-// Green Nature Theme Colors
-const natureGreenLight = '#5c715e';  // Deep forest green for accents
-const natureGreenDark = '#b6cdbd';   // Softer green for dark mode
 
 export const Colors = {
   light: {
-    text: '#2c3e2d',           // Dark forest text
-    background: '#f2f9f1',     // Very light nature green
-    tint: natureGreenLight,    // Deep forest green
-    icon: '#5c715e',           // Deep forest green
-    tabIconDefault: '#8a9c8d', // Muted green
-    tabIconSelected: natureGreenLight,
-    
-    // Additional nature theme colors
-    cardBackground: '#ddeedf',  // Light sage green
-    cardBorder: '#b6cdbd',     // Medium green border
-    accent: '#5c715e',         // Deep forest accent
-    success: '#4a7c59',        // Success green
-    muted: '#8a9c8d',         // Muted sage
+    text: '#2A1F14',
+    background: '#F5F0E8',
+    tint: '#3D6B35',
+    icon: '#3D6B35',
+    tabIconDefault: '#9B8B73',
+    tabIconSelected: '#3D6B35',
+    cardBackground: '#EDE6D6',
+    cardBorder: '#C4B596',
+    accent: '#D4940A',
+    success: '#4A8C3F',
+    muted: '#9B8B73',
   },
   dark: {
-    text: '#e8f5e8',          // Very light green text
-    background: '#1a2e1d',     // Dark forest background
-    tint: natureGreenDark,     // Softer green
-    icon: '#b6cdbd',           // Medium sage green
-    tabIconDefault: '#6b8471', // Darker muted green
-    tabIconSelected: natureGreenDark,
-    
-    // Additional nature theme colors
-    cardBackground: '#2d4a32',  // Dark forest card background
-    cardBorder: '#5c715e',     // Deep forest border
-    accent: '#b6cdbd',         // Light sage accent
-    success: '#7fb069',        // Brighter success green
-    muted: '#6b8471',         // Dark muted sage
+    text: '#F0E8D8',
+    background: '#141210',
+    tint: '#6ABF5E',
+    icon: '#6ABF5E',
+    tabIconDefault: '#786A54',
+    tabIconSelected: '#6ABF5E',
+    cardBackground: '#1E1B16',
+    cardBorder: '#3A3327',
+    accent: '#F0B429',
+    success: '#6ABF5E',
+    muted: '#786A54',
   },
 };

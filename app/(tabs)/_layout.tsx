@@ -5,79 +5,50 @@ import { Platform } from 'react-native';
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import TabBarBackground from '@/components/ui/TabBarBackground';
-
-// Icon components moved outside for better performance
-const TrainIcon = ({ color, focused }: { color: string; focused: boolean }) => (
-  <IconSymbol 
-    size={focused ? 32 : 28} 
-    name="dumbbell" 
-    color={focused ? '#5c715e' : color}
-    style={{
-      transform: [{ scale: focused ? 1.1 : 1 }],
-    }}
-  />
-);
-
-const CaptureIcon = ({ color, focused }: { color: string; focused: boolean }) => (
-  <IconSymbol 
-    size={focused ? 36 : 32} 
-    name="camera" 
-    color={focused ? '#5c715e' : color}
-    style={{
-      transform: [{ scale: focused ? 1.2 : 1 }],
-    }}
-  />
-);
-
-const PlayerIcon = ({ color, focused }: { color: string; focused: boolean }) => (
-  <IconSymbol 
-    size={focused ? 32 : 28} 
-    name="person.circle" 
-    color={focused ? '#5c715e' : color}
-    style={{
-      transform: [{ scale: focused ? 1.1 : 1 }],
-    }}
-  />
-);
+import { useTheme } from '@/contexts/ThemeContext';
 
 export default function TabLayout() {
+  const { theme } = useTheme();
+
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#5c715e',
-        tabBarInactiveTintColor: '#8a9c8d',
+        tabBarActiveTintColor: theme.colors.primary,
+        tabBarInactiveTintColor: theme.colors.textMuted,
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarBackground: TabBarBackground,
         tabBarStyle: Platform.select({
           ios: {
             position: 'absolute',
-            backgroundColor: 'rgba(242, 249, 241, 0.95)',
-            borderTopWidth: 1,
-            borderTopColor: 'rgba(92, 113, 94, 0.2)',
+            backgroundColor: theme.colors.surface + 'F5',
+            borderTopWidth: 3,
+            borderTopColor: theme.colors.border,
             paddingTop: 8,
             paddingBottom: 20,
-            height: 90,
+            height: 88,
           },
           default: {
-            backgroundColor: '#f2f9f1',
-            borderTopWidth: 2,
-            borderTopColor: 'rgba(92, 113, 94, 0.3)',
-            paddingTop: 8,
-            paddingBottom: 8,
-            height: 80,
-            elevation: 8,
-            shadowColor: '#5c715e',
-            shadowOffset: { width: 0, height: -2 },
-            shadowOpacity: 0.1,
-            shadowRadius: 4,
+            backgroundColor: theme.colors.surface,
+            borderTopWidth: 3,
+            borderTopColor: theme.colors.border,
+            paddingTop: 6,
+            paddingBottom: 6,
+            height: 72,
+            elevation: 12,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -3 },
+            shadowOpacity: 0.15,
+            shadowRadius: 6,
           },
         }),
         tabBarLabelStyle: {
-          fontSize: 16,
-          fontWeight: '600',
+          fontSize: 13,
+          fontWeight: '800',
+          letterSpacing: 1,
+          textTransform: 'uppercase',
           textAlign: 'center',
-          marginTop: 4,
+          marginTop: 2,
         },
         tabBarIconStyle: {
           marginBottom: -2,
@@ -87,24 +58,27 @@ export default function TabLayout() {
         name="train"
         options={{
           title: 'Train',
-          tabBarIcon: TrainIcon,
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol size={focused ? 30 : 26} name="dumbbell" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="index"
         options={{
           title: 'Capture',
-          tabBarIcon: CaptureIcon,
-          tabBarIconStyle: {
-            marginBottom: -4, // Extra margin for larger capture icon
-          },
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol size={focused ? 34 : 30} name="camera" color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="player"
         options={{
           title: 'Player',
-          tabBarIcon: PlayerIcon,
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol size={focused ? 30 : 26} name="person.circle" color={color} />
+          ),
         }}
       />
     </Tabs>
