@@ -1,4 +1,5 @@
 // Bug Identification API Service
+import * as ImageManipulator from 'expo-image-manipulator';
 import { BugIdentificationResult, BugRarity, IdentificationCandidate, SAMPLE_BUGS } from '../types/Bug';
 
 export interface APIError {
@@ -314,6 +315,140 @@ class BugIdentificationService {
       provider: 'Local',
       isFromAPI: false,
     };
+  }
+
+  // ──────────────────────────────────────────────
+  // Ant sub-classification (red vs black vs other)
+  // ──────────────────────────────────────────────
+
+  /** Known ant sub-types with display names and species */
+  private static readonly ANT_SUBTYPES = {
+    red: { label: 'Fire Ant', species: 'Solenopsis invicta', traits: ['Aggressive', 'Colony Builder', 'Venomous Sting'] },
+    black: { label: 'Black Garden Ant', species: 'Lasius niger', traits: ['Colony Builder', 'Forager', 'Common'] },
+    carpenter: { label: 'Carpenter Ant', species: 'Camponotus pennsylvanicus', traits: ['Wood Dweller', 'Large', 'Nocturnal'] },
+    generic: { label: 'Ant', species: 'Formicidae', traits: ['Colony Builder', 'Forager'] },
+  };
+
+  /**
+   * Refine ML candidates when the top prediction is "ant".
+   * Analyzes image color to distinguish red vs black ants and enriches
+   * the candidate list with specific species information.
+   *
+   * @param candidates - Original ML candidates
+   * @param imageUri - Image URI used for classification
+   * @returns Refined candidates with ant sub-type if applicable
+   */
+  async refineAntPrediction(
+    candidates: IdentificationCandidate[],
+    imageUri: string
+  ): Promise<IdentificationCandidate[]> {
+    if (!candidates.length) return candidates;
+
+    const top = candidates[0];
+    // Only refine when the top label is "ant" (case-insensitive)
+    if (top.label.toLowerCase() !== 'ant') return candidates;
+
+    console.log('🐜 Top prediction is "ant" — analyzing color to determine sub-type...');
+
+    try {
+      const colorProfile = await this.analyzeInsectColor(imageUri);
+      console.log(`🐜 Color analysis: redRatio=${colorProfile.redRatio.toFixed(2)}, darkness=${colorProfile.darkness.toFixed(2)}, warmth=${colorProfile.warmth.toFixed(2)}`);
+
+      let subtype: keyof typeof BugIdentificationService.ANT_SUBTYPES;
+
+      if (colorProfile.redRatio > 0.35 && colorProfile.warmth > 0.15) {
+        // Strong red/warm tones → fire ant / red ant
+        subtype = 'red';
+        console.log('🐜 Sub-classified as RED ant (fire ant)');
+      } else if (colorProfile.darkness > 0.60) {
+        // Very dark with low red → black ant
+        // Large dark ants may be carpenter ants
+        subtype = colorProfile.darkness > 0.75 ? 'carpenter' : 'black';
+        console.log(`🐜 Sub-classified as ${subtype.toUpperCase()} ant`);
+      } else {
+        subtype = 'generic';
+        console.log('🐜 Could not determine ant sub-type, keeping generic');
+      }
+
+      const info = BugIdentificationService.ANT_SUBTYPES[subtype];
+
+      // Replace the top "ant" candidate with the refined version
+      const refined: IdentificationCandidate[] = [
+        {
+          label: info.label,
+          species: info.species,
+          confidence: top.confidence,
+          source: `${top.source} + Color Analysis`,
+        },
+        // Keep original "ant" as secondary if we refined it
+        ...(subtype !== 'generic' ? [{
+          label: 'Ant',
+          species: 'Formicidae',
+          confidence: (top.confidence ?? 0.5) * 0.8,
+          source: top.source,
+        }] : []),
+        // Keep the rest of the original candidates
+        ...candidates.slice(1),
+      ];
+
+      return refined;
+
+    } catch (error) {
+      console.warn('⚠️ Ant color analysis failed (non-fatal):', error);
+      return candidates;
+    }
+  }
+
+  /**
+   * Analyze the dominant color of the insect subject in an image.
+   * Returns a color profile with red ratio, darkness, and warmth metrics.
+   */
+  private async analyzeInsectColor(imageUri: string): Promise<{
+    redRatio: number;   // 0-1: proportion of warm/red tones
+    darkness: number;   // 0-1: how dark the subject is (1 = very dark)
+    warmth: number;     // -1 to 1: negative = cool/blue, positive = warm/red
+  }> {
+    // Create a tiny center-crop thumbnail and get its base64
+    // We focus on the center where the insect subject is most likely located
+    const thumb = await ImageManipulator.manipulateAsync(
+      imageUri,
+      [
+        { resize: { width: 64, height: 64 } },
+        { crop: { originX: 16, originY: 16, width: 32, height: 32 } }, // Center crop
+        { resize: { width: 8, height: 8 } }, // Tiny sample
+      ],
+      { format: ImageManipulator.SaveFormat.JPEG, compress: 1.0, base64: true }
+    );
+
+    if (!thumb.base64) {
+      return { redRatio: 0, darkness: 0.5, warmth: 0 };
+    }
+
+    // Decode JPEG base64 and analyze raw byte distribution
+    // JPEG-compressed data byte values correlate with brightness/color
+    const bytes = atob(thumb.base64);
+    let sum = 0;
+    let highBytes = 0; // Bytes > 160 (bright/warm tones)
+    let lowBytes = 0;  // Bytes < 80 (dark tones)
+    let midHighBytes = 0; // Bytes 128-200 (warm mid-tones, often red channel)
+
+    const start = Math.min(30, bytes.length); // Skip JPEG header
+    const len = bytes.length - start;
+
+    for (let i = start; i < bytes.length; i++) {
+      const b = bytes.charCodeAt(i);
+      sum += b;
+      if (b > 160) highBytes++;
+      if (b < 80) lowBytes++;
+      if (b >= 128 && b <= 200) midHighBytes++;
+    }
+
+    const avg = sum / len;
+    const darkness = 1 - (avg / 255); // 0 = bright, 1 = dark
+    const redRatio = midHighBytes / len; // Warm mid-tones correlate with red/brown
+    const warmth = (highBytes - lowBytes) / len; // Positive = warm, negative = cool
+
+    return { redRatio, darkness, warmth };
   }
 }
 

@@ -15,9 +15,7 @@
 
 import { BUG_TRAP, FULL_REVIVE, POTION, REVIVE_SEED, SUPER_POTION } from '@/constants/Items';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as BackgroundFetch from 'expo-background-fetch';
 import { Pedometer } from 'expo-sensors';
-import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
 // Background task name
@@ -27,10 +25,15 @@ const BACKGROUND_STEP_TASK = 'background-step-tracking';
 class MockPedometer {
   private stepCount = 0;
   private listeners: ((result: { steps: number }) => void)[] = [];
-  private interval: NodeJS.Timeout | null = null;
+  private interval: ReturnType<typeof setInterval> | null = null;
 
   static async isAvailableAsync(): Promise<boolean> {
     return Promise.resolve(true);
+  }
+
+  static async getStepCountAsync(_start: Date, _end: Date): Promise<{ steps: number }> {
+    // Simulate some steps taken while app was closed
+    return { steps: Math.floor(Math.random() * 50) };
   }
 
   static watchStepCount(callback: (result: { steps: number }) => void) {
@@ -109,6 +112,8 @@ export interface WalkModeState {
   totalXpEarned: number;          // Total XP earned from walking
   totalItemsDropped: number;       // Total items received from walking
   isActive: boolean;               // Whether walk mode is currently active
+  activeBugId: string | null;      // ID of the bug currently training in walk mode
+  activeBugName: string | null;    // Name of the bug currently training in walk mode
 }
 
 // Default Walk Mode State
@@ -120,6 +125,8 @@ const DEFAULT_WALK_MODE_STATE: WalkModeState = {
   totalXpEarned: 0,
   totalItemsDropped: 0,
   isActive: false,
+  activeBugId: null,
+  activeBugName: null,
 };
 
 // Walk Mode Reward Interface
@@ -137,6 +144,9 @@ class WalkModeService {
   private isInitialized = false;
   private pedometerSubscription: any = null;
   private rewardCallbacks: ((reward: WalkModeReward) => void)[] = [];
+  private _subscriptionBaseline = 0;
+  private _subscriptionBaselineSet = false;
+  private _saveTimer: ReturnType<typeof setTimeout> | null = null;
   private currentSession: {
     startTime: Date;
     startSteps: number;
@@ -167,6 +177,37 @@ class WalkModeService {
       if (!isAvailable) {
         this.log('⚠️ Pedometer not available on this device');
         throw new Error('Pedometer not available on this device');
+      }
+
+      // If walk mode was active before app closed, resume tracking
+      if (this.state.isActive && this.state.activeBugId) {
+        this.log('🔄 Resuming Walk Mode tracking for bug:', this.state.activeBugName);
+        
+        // Recover steps taken while the app was closed
+        await this.recoverMissedSteps();
+        
+        // Restore the in-memory session from persisted state
+        this.currentSession = {
+          startTime: new Date(),
+          startSteps: this.state.totalSteps,
+          bugId: this.state.activeBugId,
+          bugName: this.state.activeBugName,
+          xpGained: 0,
+          itemsFound: []
+        };
+        
+        // Reset subscription baseline for fresh delta tracking
+        this._subscriptionBaseline = 0;
+        this._subscriptionBaselineSet = false;
+        
+        // Re-subscribe to pedometer so steps are actually tracked
+        this.pedometerSubscription = PedometerAPI.watchStepCount((result) => {
+          if (result && typeof result.steps === 'number') {
+            this.handleStepUpdate(result.steps);
+          }
+        });
+        
+        this.log('✅ Walk Mode tracking resumed');
       }
 
       this.log('✅ Walk Mode service initialized');
@@ -205,9 +246,16 @@ class WalkModeService {
         itemsFound: []
       };
       
-      // Reset session steps
+      // Reset session steps and persist the active bug info
       this.state.sessionSteps = 0;
       this.state.isActive = true;
+      this.state.activeBugId = activeBugId || null;
+      this.state.activeBugName = activeBugName || null;
+      this.state.lastUpdateTimestamp = Date.now();
+      
+      // Reset subscription baseline for fresh delta tracking
+      this._subscriptionBaseline = 0;
+      this._subscriptionBaselineSet = false;
       
       // Start step tracking
       this.pedometerSubscription = PedometerAPI.watchStepCount((result) => {
@@ -222,24 +270,6 @@ class WalkModeService {
     } catch (error) {
       this.log('❌ Failed to start Walk Mode tracking:', error);
       throw error;
-    }
-  }
-      
-      // Start step counting from now
-      this.pedometerSubscription = PedometerAPI.watchStepCount((result) => {
-        this.handleStepUpdate(result.steps);
-      });
-
-      // Start background fetch if on device
-      if (Platform.OS !== 'web') {
-        await BackgroundFetch.setMinimumIntervalAsync(60 * 15); // 15 minutes
-      }
-
-      await this.saveState();
-      this.log('✅ Walk Mode tracking started (background enabled)');
-      
-    } catch (error) {
-      this.log('❌ Failed to start Walk Mode tracking:', error);
     }
   }
 
@@ -268,6 +298,8 @@ class WalkModeService {
       }
 
       this.state.isActive = false;
+      this.state.activeBugId = null;
+      this.state.activeBugName = null;
       this.currentSession = null;
       await this.saveState();
       
@@ -338,11 +370,65 @@ class WalkModeService {
   }
 
   /**
+   * Recover steps taken while the app was closed.
+   * Uses Pedometer.getStepCountAsync to query the OS for step history
+   * between the last persisted timestamp and now.
+   */
+  private async recoverMissedSteps(): Promise<void> {
+    try {
+      const lastUpdate = new Date(this.state.lastUpdateTimestamp);
+      const now = new Date();
+      const elapsed = now.getTime() - lastUpdate.getTime();
+
+      // Only attempt recovery if the gap is > 5 seconds and < 7 days
+      if (elapsed < 5000 || elapsed > 7 * 24 * 60 * 60 * 1000) {
+        this.log('⏭️ Skipping step recovery (gap too short or too long):', Math.round(elapsed / 1000), 's');
+        return;
+      }
+
+      const result = await PedometerAPI.getStepCountAsync(lastUpdate, now);
+      if (result && result.steps > 0) {
+        this.log(`🔄 Recovered ${result.steps} steps taken while app was closed`);
+        this.state.sessionSteps += result.steps;
+        this.state.totalSteps += result.steps;
+        this.state.lastUpdateTimestamp = now.getTime();
+
+        // Check for any XP milestones earned while away
+        const stepsSinceLastReward = this.state.totalSteps - this.state.lastProcessedSteps;
+        const xpMilestones = Math.floor(stepsSinceLastReward / WALK_MODE_CONFIG.STEPS_PER_XP_GAIN);
+        if (xpMilestones > 0) {
+          this.processRewards(xpMilestones);
+        } else {
+          await this.saveState();
+        }
+      } else {
+        this.log('🔄 No missed steps to recover');
+      }
+    } catch (error) {
+      this.log('⚠️ Failed to recover missed steps (non-fatal):', error);
+    }
+  }
+
+  /**
    * Process step updates and calculate rewards
    */
-  private handleStepUpdate(sessionSteps: number): void {
-    this.state.sessionSteps = sessionSteps;
-    this.state.totalSteps = this.state.lastProcessedSteps + sessionSteps;
+  private handleStepUpdate(newSessionSteps: number): void {
+    // newSessionSteps is steps since the current pedometer subscription started.
+    // We use a delta approach to avoid double-counting with recovered steps.
+    if (!this._subscriptionBaselineSet) {
+      this._subscriptionBaseline = newSessionSteps;
+      this._subscriptionBaselineSet = true;
+    }
+    const deltaFromSubscription = newSessionSteps - this._subscriptionBaseline;
+    if (deltaFromSubscription <= 0) return;
+
+    // Update the subscription baseline
+    this._subscriptionBaseline = newSessionSteps;
+
+    // Accumulate into persisted state
+    this.state.sessionSteps += deltaFromSubscription;
+    this.state.totalSteps += deltaFromSubscription;
+    this.state.lastUpdateTimestamp = Date.now();
     
     // Calculate how many XP milestones have been reached
     const stepsSinceLastReward = this.state.totalSteps - this.state.lastProcessedSteps;
@@ -350,6 +436,9 @@ class WalkModeService {
     
     if (xpMilestones > 0) {
       this.processRewards(xpMilestones);
+    } else {
+      // Persist state periodically even without milestones
+      this.throttledSave();
     }
   }
 
@@ -465,6 +554,18 @@ class WalkModeService {
   }
 
   /**
+   * Throttled save — persists state at most every 10 seconds
+   * to avoid excessive AsyncStorage writes on every step update
+   */
+  private throttledSave(): void {
+    if (this._saveTimer) return;
+    this._saveTimer = setTimeout(async () => {
+      this._saveTimer = null;
+      await this.saveState();
+    }, 10000);
+  }
+
+  /**
    * Get current Walk Mode state (read-only)
    */
   getState(): Readonly<WalkModeState> {
@@ -487,6 +588,8 @@ class WalkModeService {
       totalItemsDropped: this.state.totalItemsDropped,
       xpPerMilestone: WALK_MODE_CONFIG.XP_PER_MILESTONE,
       stepsPerXp: WALK_MODE_CONFIG.STEPS_PER_XP_GAIN,
+      activeBugId: this.state.activeBugId,
+      activeBugName: this.state.activeBugName,
     };
   }
 

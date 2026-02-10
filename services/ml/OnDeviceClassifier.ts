@@ -164,61 +164,42 @@ class OnDeviceClassifier {
       if (this.model && loadTensorflowModel) {
           console.log('🤖 USING REAL TENSORFLOW LITE INFERENCE (not stub mode)');
           
-          // Preprocess image to 224x224 RGB
-          const resized = await ImageManipulator.manipulateAsync(
-            imageUri,
-            [{ resize: { width: 224, height: 224 } }],
-            { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 }
-          );
-
-          // Run inference
-          // Note: react-native-fast-tflite handles image loading and tensor conversion
-          const outputs = await this.model.run(resized.uri);
-          
-          console.log(`🔧 Raw model outputs:`, outputs);
-          console.log(`🔧 Outputs type:`, typeof outputs);
-          console.log(`🔧 Outputs keys:`, Object.keys(outputs || {}));
-          
-          // Process output tensor into predictions
-          const predictions: MLCandidate[] = [];
-          let outputTensor;
-          
-          // Handle different output formats from react-native-fast-tflite
-          if (Array.isArray(outputs)) {
-            outputTensor = outputs[0];
-          } else if (outputs && typeof outputs === 'object' && outputs.data) {
-            outputTensor = outputs.data;
-          } else if (outputs && typeof outputs === 'object') {
-            // If outputs is an object with named keys, get the first value
-            const keys = Object.keys(outputs);
-            outputTensor = keys.length > 0 ? outputs[keys[0]] : outputs;
-          } else {
-            outputTensor = outputs;
-          }
-          
-          console.log(`🔢 Raw tensor outputs (first 10):`, Array.isArray(outputTensor) ? outputTensor.slice(0, 10) : outputTensor);
-          console.log(`📊 Tensor shape: length=${Array.isArray(outputTensor) ? outputTensor.length : 'not array'}`);
-          console.log(`📝 Available labels: ${this.labels.length} labels`);
-          
-          if (!Array.isArray(outputTensor)) {
-            throw new Error(`Expected array tensor output, got: ${typeof outputTensor}`);
-          }
-          
-          // Map output values to labels
-          for (let i = 0; i < this.labels.length && i < outputTensor.length; i++) {
-            predictions.push({
-              label: this.labels[i],
-              confidence: outputTensor[i],
-            });
-          }
-
-          // Sort and return top-K
-          const topPredictions = this.sortTopK(predictions, topK);
+          // First pass: standard preprocessing
+          const predictions = await this.runInference(imageUri);
+          let topPredictions = this.sortTopK(predictions, topK);
           
           console.log('🏆 TOP PREDICTIONS FROM REAL TENSORFLOW LITE MODEL:');
           topPredictions.forEach((pred, idx) => {
             console.log(`  ${idx + 1}. ${pred.label}: ${(pred.confidence * 100).toFixed(2)}%`);
           });
+
+          // Second pass: if top confidence is low, try enhanced preprocessing
+          // This helps with dark subjects like black ants on dark backgrounds
+          const LOW_CONFIDENCE_THRESHOLD = 0.45;
+          if (topPredictions.length > 0 && topPredictions[0].confidence < LOW_CONFIDENCE_THRESHOLD) {
+            console.log('🔆 Low confidence detected — trying enhanced preprocessing for dark subjects');
+            try {
+              const { mlPreprocessingService } = require('./MLPreprocessingService');
+              const enhancedUri = await mlPreprocessingService.preprocessWithEnhancement(imageUri, 224);
+              const enhancedPredictions = await this.runInference(enhancedUri);
+              const enhancedTop = this.sortTopK(enhancedPredictions, topK);
+              
+              console.log('🔆 ENHANCED PREDICTIONS:');
+              enhancedTop.forEach((pred, idx) => {
+                console.log(`  ${idx + 1}. ${pred.label}: ${(pred.confidence * 100).toFixed(2)}%`);
+              });
+              
+              // Use enhanced results if they're more confident
+              if (enhancedTop.length > 0 && enhancedTop[0].confidence > topPredictions[0].confidence) {
+                console.log('✅ Enhanced preprocessing gave better results — using those');
+                topPredictions = enhancedTop;
+              }
+            } catch (enhanceErr) {
+              console.warn('⚠️ Enhanced preprocessing failed (non-fatal):', enhanceErr);
+            }
+          }
+
+          return topPredictions;
           
       } else {
         // Fallback to stub if model not loaded
@@ -233,6 +214,52 @@ class OnDeviceClassifier {
       console.warn('⚠️  Falling back to stub predictions');
       return this.getStubPredictions(topK);
     }
+  }
+
+  /**
+   * Run a single inference pass on a preprocessed image URI.
+   * Returns raw predictions (unsorted) for all labels.
+   */
+  private async runInference(imageUri: string): Promise<MLCandidate[]> {
+    // Preprocess image to 224x224 RGB
+    const resized = await ImageManipulator.manipulateAsync(
+      imageUri,
+      [{ resize: { width: 224, height: 224 } }],
+      { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 }
+    );
+
+    // Run inference
+    const outputs = await this.model.run(resized.uri);
+    
+    // Process output tensor into predictions
+    const predictions: MLCandidate[] = [];
+    let outputTensor;
+    
+    // Handle different output formats from react-native-fast-tflite
+    if (Array.isArray(outputs)) {
+      outputTensor = outputs[0];
+    } else if (outputs && typeof outputs === 'object' && outputs.data) {
+      outputTensor = outputs.data;
+    } else if (outputs && typeof outputs === 'object') {
+      const keys = Object.keys(outputs);
+      outputTensor = keys.length > 0 ? outputs[keys[0]] : outputs;
+    } else {
+      outputTensor = outputs;
+    }
+    
+    if (!Array.isArray(outputTensor)) {
+      throw new Error(`Expected array tensor output, got: ${typeof outputTensor}`);
+    }
+    
+    // Map output values to labels
+    for (let i = 0; i < this.labels.length && i < outputTensor.length; i++) {
+      predictions.push({
+        label: this.labels[i],
+        confidence: outputTensor[i],
+      });
+    }
+
+    return predictions;
   }
 
   /**

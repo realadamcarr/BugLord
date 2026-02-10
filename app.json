@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#4CAF50"
+      "backgroundColor": "#3D8B37"
     },
     "ios": {
       "supportsTablet": true
@@ -20,7 +20,7 @@
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#4CAF50"
+        "backgroundColor": "#3D8B37"
       },
       "permissions": [
         "android.permission.WRITE_EXTERNAL_STORAGE",

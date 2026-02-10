@@ -1,0 +1,64 @@
+# ============================================
+# .easignore — Exclude files from EAS Build uploads
+# ============================================
+
+# Dependencies (installed fresh on EAS)
+node_modules/
+
+# Git
+.git/
+.github/
+BugLord-backup.git/
+
+# Python / ML Training
+.venv/
+training/
+runs/
+models/
+__pycache__/
+*.pyc
+*.pt
+*.pth
+*.onnx
+*.h5
+*.keras
+*.pkl
+*.joblib
+*.ckpt
+yolov8n.pt
+
+# Pre-built APKs (not needed on EAS)
+*.apk
+
+# Android directory — let EAS auto-prebuild (CNG approach)
+# This ensures compatible AGP/Gradle versions every time
+android/
+
+# Expo caches
+.expo/
+dist/
+web-build/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Docs (not needed for build)
+*.md
+github-setup.txt
+
+# Scripts not needed on EAS
+*.bat
+*.sh
+scripts/
+copy-model.js
+download_model.ps1
+install-real-tflite.bat
+update-icon.bat
+
+# Tests
+__tests__/
+
+# Keystore (already on EAS server)
+*.jks

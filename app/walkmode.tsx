@@ -17,12 +17,15 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useWalkMode } from '@/services/useWalkMode';
 import { Bug, RARITY_CONFIG } from '@/types/Bug';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { Pedometer } from 'expo-sensors';
+import React, { useEffect, useState } from 'react';
 import {
     Alert,
     Dimensions,
     Image,
+    Linking,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -47,6 +50,21 @@ export default function WalkModeScreen() {
 
   const [selectedBug, setSelectedBug] = useState<Bug | null>(null);
   const [showBugSelector, setShowBugSelector] = useState(false);
+
+  // Restore selected bug from persisted walk mode state on mount
+  useEffect(() => {
+    if (walkModeActive && walkStats.activeBugId && !selectedBug) {
+      // Look up the bug in party first, then in the full collection
+      const allBugs = [
+        ...collection.party.filter((b): b is Bug => b !== null),
+        ...collection.bugs,
+      ];
+      const restoredBug = allBugs.find(bug => bug.id === walkStats.activeBugId);
+      if (restoredBug) {
+        setSelectedBug(restoredBug);
+      }
+    }
+  }, [walkModeActive, walkStats.activeBugId, collection]);
 
   const styles = createStyles(theme);
 
@@ -82,6 +100,35 @@ export default function WalkModeScreen() {
     if (currentHp <= 0) {
       Alert.alert('Bug Fainted', `${selectedBug.nickname || selectedBug.name} has 0 HP and cannot train! Use a Revive item first.`);
       return;
+    }
+
+    // Request physical activity / pedometer permission (required on Android 10+)
+    if (Platform.OS !== 'web') {
+      try {
+        const { status, canAskAgain } = await Pedometer.requestPermissionsAsync();
+        if (status !== 'granted') {
+          if (!canAskAgain) {
+            // User permanently denied — guide them to settings
+            Alert.alert(
+              'Permission Required',
+              'BugLord needs Physical Activity permission to count your steps.\n\nPlease enable it in Settings → Apps → BugLord → Permissions.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              ]
+            );
+          } else {
+            Alert.alert(
+              'Permission Required',
+              'Walk Mode needs access to your physical activity data to track steps. Please grant the permission to continue.'
+            );
+          }
+          return;
+        }
+      } catch (permErr) {
+        console.warn('Failed to request pedometer permissions:', permErr);
+        // Continue anyway — some devices grant it implicitly
+      }
     }
 
     try {

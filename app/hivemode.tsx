@@ -700,8 +700,14 @@ export default function HiveModeScreen() {
 
     return (
       <Modal visible={showSwitchSelector} animationType="fade" transparent>
-        <View style={styles.itemModalOverlay}>
-          <View style={styles.switchModalContent}>
+        <TouchableOpacity
+          style={styles.itemModalOverlay}
+          activeOpacity={1}
+          onPress={() => {
+            if (!forcedSwitch) setShowSwitchSelector(false);
+          }}
+        >
+          <TouchableOpacity activeOpacity={1} style={styles.switchModalContent}>
             <ThemedText style={styles.itemModalTitle}>
               {forcedSwitch ? 'Choose Next Bug' : 'Switch Bug'}
             </ThemedText>
@@ -722,62 +728,72 @@ export default function HiveModeScreen() {
                 </TouchableOpacity>
               </View>
             ) : (
-              switchableBugs.map(bug => {
-                const hp = partyBugHp[bug.id];
-                const maxHp = hp?.max || bug.maxHp || bug.maxXp;
-                const currentHp = hp?.current ?? (bug.currentHp !== undefined ? bug.currentHp : maxHp);
-                const hpPercent = Math.round((currentHp / maxHp) * 100);
-                
-                return (
-                  <TouchableOpacity
-                    key={bug.id}
-                    style={styles.switchBugItem}
-                    onPress={() => switchBug(bug)}
-                  >
-                    {bug.photo ? (
-                      <Image source={{ uri: bug.photo }} style={styles.switchBugPhoto} />
-                    ) : bug.pixelArt ? (
-                      <Image source={{ uri: bug.pixelArt }} style={styles.switchBugPhoto} />
-                    ) : (
-                      <View style={styles.switchBugPhoto}>
-                        <PixelatedEmoji type="bug" size={20} color={theme.colors.text} />
-                      </View>
-                    )}
-                    <View style={styles.switchBugInfo}>
-                      <ThemedText style={styles.switchBugName}>
-                        {bug.nickname || bug.name}
-                      </ThemedText>
-                      <View style={styles.switchBugHpRow}>
-                        <ThemedText style={styles.switchBugLevel}>Lv.{bug.level}</ThemedText>
-                        <View style={styles.switchBugHpBar}>
-                          <View style={[
-                            styles.switchBugHpFill,
-                            { 
-                              width: `${hpPercent}%`,
-                              backgroundColor: hpPercent > 50 ? '#10B981' : hpPercent > 25 ? '#F59E0B' : '#EF4444',
-                            },
-                          ]} />
+              <ScrollView style={{ maxHeight: 300 }}>
+                {switchableBugs.map(bug => {
+                  const hp = partyBugHp[bug.id];
+                  const maxHp = hp?.max || bug.maxHp || bug.maxXp;
+                  const currentHp = hp?.current ?? (bug.currentHp !== undefined ? bug.currentHp : maxHp);
+                  const hpPercent = Math.round((currentHp / maxHp) * 100);
+                  
+                  return (
+                    <TouchableOpacity
+                      key={bug.id}
+                      style={styles.switchBugItem}
+                      onPress={() => switchBug(bug)}
+                    >
+                      {bug.photo ? (
+                        <Image source={{ uri: bug.photo }} style={styles.switchBugPhoto} />
+                      ) : bug.pixelArt ? (
+                        <Image source={{ uri: bug.pixelArt }} style={styles.switchBugPhoto} />
+                      ) : (
+                        <View style={styles.switchBugPhoto}>
+                          <PixelatedEmoji type="bug" size={20} color={theme.colors.text} />
                         </View>
-                        <ThemedText style={styles.switchBugHpText}>
-                          {currentHp}/{maxHp}
+                      )}
+                      <View style={styles.switchBugInfo}>
+                        <ThemedText style={styles.switchBugName}>
+                          {bug.nickname || bug.name}
                         </ThemedText>
+                        <View style={styles.switchBugHpRow}>
+                          <ThemedText style={styles.switchBugLevel}>Lv.{bug.level}</ThemedText>
+                          <View style={styles.switchBugHpBar}>
+                            <View style={[
+                              styles.switchBugHpFill,
+                              { 
+                                width: `${hpPercent}%`,
+                                backgroundColor: hpPercent > 50 ? '#10B981' : hpPercent > 25 ? '#F59E0B' : '#EF4444',
+                              },
+                            ]} />
+                          </View>
+                          <ThemedText style={styles.switchBugHpText}>
+                            {currentHp}/{maxHp}
+                          </ThemedText>
+                        </View>
                       </View>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
             )}
             
-            {!forcedSwitch && (
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setShowSwitchSelector(false)}
-              >
-                <ThemedText style={styles.cancelButtonText}>Cancel</ThemedText>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => {
+                if (forcedSwitch) {
+                  // Forced switch with no escape — end the run
+                  setShowSwitchSelector(false);
+                  handleRunCompletion(false);
+                } else {
+                  setShowSwitchSelector(false);
+                }
+              }}
+            >
+              <ThemedText style={styles.cancelButtonText}>
+                {forcedSwitch ? 'Forfeit Run' : 'Cancel'}
+              </ThemedText>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     );
   };

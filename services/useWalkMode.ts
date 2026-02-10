@@ -261,15 +261,3 @@ export function useWalkMode(): UseWalkModeReturn {
     error,
   };
 }
-    statistics,
-    
-    // Actions
-    startWalkMode,
-    stopWalkMode,
-    resetWalkMode,
-    
-    // Status
-    isAvailable,
-    error,
-  };
-}

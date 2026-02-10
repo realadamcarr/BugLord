@@ -13,7 +13,7 @@ import { appendScanLog } from '@/services/ScanLogService';
 import { mlPreprocessingService } from '@/services/ml/MLPreprocessingService';
 import { modelUpdateService } from '@/services/ml/ModelUpdateService';
 import { onDeviceClassifier } from '@/services/ml/OnDeviceClassifier';
-import { Bug, BugIdentificationResult, ConfirmationMethod, RARITY_CONFIG } from '@/types/Bug';
+import { Bug, BugIdentificationResult, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -349,8 +349,7 @@ export default function CaptureScreen() {
       }
 
       // VALIDATION: Check if insect is detected with minimum confidence
-      // Since model only detects generic "insect", use it for validation only
-      const MIN_CONFIDENCE = 0.3; // 30% minimum confidence
+      const MIN_CONFIDENCE = 0.5; // 50% minimum confidence
       const hasValidDetection = mlCandidates.length > 0 && mlCandidates[0].confidence >= MIN_CONFIDENCE;
 
       if (!hasValidDetection) {
@@ -370,13 +369,21 @@ export default function CaptureScreen() {
         console.log('✅ Using real TensorFlow Lite predictions:', mlCandidates);
         
         // Convert TensorFlow Lite predictions to BugIdentificationResult format
+        let candidates: IdentificationCandidate[] = mlCandidates.map(candidate => ({
+          label: candidate.label,
+          species: candidate.label, // Use label as species for now
+          confidence: candidate.confidence,
+          source: 'TensorFlow Lite ML Model'
+        }));
+
+        // Refine ant predictions using color analysis (red vs black vs carpenter)
+        if (candidates[0]?.label?.toLowerCase() === 'ant') {
+          console.log('🐜 Top prediction is ant — running sub-classification...');
+          candidates = await bugIdentificationService.refineAntPrediction(candidates, originalPhoto);
+        }
+
         result = {
-          candidates: mlCandidates.map(candidate => ({
-            label: candidate.label,
-            species: candidate.label, // Use label as species for now
-            confidence: candidate.confidence,
-            source: 'TensorFlow Lite ML Model'
-          })),
+          candidates,
           provider: 'TensorFlow Lite',
           isFromAPI: false
         };
