@@ -452,23 +452,14 @@ class OnDeviceClassifier {
     // Enhanced mock predictions using your trained 15-species model data
     console.log('🎭 Generating realistic mock predictions from trained model species');
     
-    // Weighted probabilities based on common insect sightings
+    // Weighted probabilities based on common insect sightings (matches trained model classes)
     const speciesWeights: { [key: string]: number } = {
-      'ant': 0.18,        // Very common
-      'beetle': 0.15,     // Very common  
-      'fly': 0.14,        // Very common
-      'spider': 0.12,     // Common
-      'mosquito': 0.10,   // Common
-      'ladybug': 0.08,    // Moderately common
-      'Butterfly': 0.07,  // Moderately common
-      'grasshopper': 0.06,// Moderately common
-      'Bees': 0.04,      // Less common
-      'wasp': 0.03,      // Less common
-      'cockroach': 0.01, // Rare in photos
-      'dragonfly': 0.01, // Rare in photos
-      'Mantis': 0.005,   // Very rare
-      'caterpillar': 0.003, // Very rare
-      'centipedes': 0.002  // Very rare
+      'ant': 0.25,        // Very common
+      'Bees': 0.20,       // Common
+      'Butterfly': 0.18,  // Common
+      'Ladybug': 0.15,    // Moderately common
+      'wasp': 0.12,       // Less common
+      'dragonfly': 0.10,  // Less common
     };
 
     // Select species based on weights (simulating YOLOv8 confidence scores)
@@ -476,9 +467,7 @@ class OnDeviceClassifier {
     
     // Ensure labels are available, fallback to default species if not loaded
     const fallbackLabels = [
-      "Bees", "Butterfly", "Mantis", "ant", "beetle", 
-      "caterpillar", "centipedes", "cockroach", "dragonfly", 
-      "fly", "grasshopper", "ladybug", "mosquito", "spider", "wasp"
+      "Bees", "Butterfly", "Ladybug", "ant", "dragonfly", "wasp"
     ];
     const labelsToUse = this.labels && this.labels.length > 0 ? this.labels : fallbackLabels;
     const availableSpecies = [...labelsToUse];

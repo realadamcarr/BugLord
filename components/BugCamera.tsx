@@ -1,4 +1,6 @@
 import { useTheme } from '@/contexts/ThemeContext';
+import { useScanStateMachine } from '@/hooks/useScanStateMachine';
+import { IdentificationCandidate } from '@/types/Bug';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import Constants from 'expo-constants';
 import * as MediaLibrary from 'expo-media-library';
@@ -6,19 +8,35 @@ import React, { useRef } from 'react';
 import { Alert, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+export type ScanMode = 'photo' | 'liveScan';
+
 interface BugCameraProps {
   onCapture: (photoUri: string) => void;
   onClose: () => void;
+  mode?: ScanMode;
+  /** Called every frame interval in liveScan mode — run ML classification on the URI and return candidates */
+  onClassifyFrame?: (photoUri: string) => Promise<IdentificationCandidate[]>;
+  /** Called when the user taps "Capture!" in liveScan mode after lock — receives the final photo URI and locked label */
+  onLiveScanConfirm?: (photoUri: string, label: string, confidence: number) => void;
 }
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
+export const BugCamera: React.FC<BugCameraProps> = ({
+  onCapture,
+  onClose,
+  mode = 'photo',
+  onClassifyFrame,
+  onLiveScanConfirm,
+}) => {
   const { theme } = useTheme();
   const facing: CameraType = 'back';
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const isExpoGo = Constants.appOwnership === 'expo';
+  const frameLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isProcessingRef = useRef(false);
+  const { ctx: scanCtx, send: scanSend, reset: scanReset, isActive: isScanActive } = useScanStateMachine();
 
   const styles = StyleSheet.create({
     container: {
@@ -202,6 +220,104 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
     }
   };
 
+  // ─── Live Scan: frame processing loop ─────────────────────────
+  const processFrame = useCallback(async () => {
+    if (isProcessingRef.current || !cameraRef.current || !onClassifyFrame) return;
+    if (scanCtx.state !== 'SCANNING') return;
+
+    isProcessingRef.current = true;
+    try {
+      // Take a low-quality snapshot for ML classification
+      const snap = await cameraRef.current.takePictureAsync({
+        quality: 0.3,
+        base64: false,
+        exif: false,
+      });
+
+      if (snap?.uri) {
+        const candidates = await onClassifyFrame(snap.uri);
+        if (candidates.length > 0 && candidates[0].confidence !== undefined) {
+          scanSend({
+            type: 'FRAME_RESULT',
+            label: candidates[0].label,
+            confidence: candidates[0].confidence,
+          });
+        } else {
+          scanSend({ type: 'NO_DETECTION' });
+        }
+      }
+    } catch (err) {
+      console.warn('Live scan frame error:', err);
+    } finally {
+      isProcessingRef.current = false;
+    }
+  }, [onClassifyFrame, scanCtx.state, scanSend]);
+
+  // Start / stop the frame loop when in liveScan mode
+  useEffect(() => {
+    if (mode !== 'liveScan') return;
+
+    // Auto-start scanning when camera opens in live mode
+    if (scanCtx.state === 'IDLE') {
+      scanSend({ type: 'START_SCAN' });
+    }
+
+    if (scanCtx.state === 'SCANNING') {
+      frameLoopRef.current = setInterval(processFrame, 400); // SCAN_CONFIG.FRAME_INTERVAL_MS
+    }
+
+    return () => {
+      if (frameLoopRef.current) {
+        clearInterval(frameLoopRef.current);
+        frameLoopRef.current = null;
+      }
+    };
+  }, [mode, scanCtx.state, processFrame]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (frameLoopRef.current) clearInterval(frameLoopRef.current);
+      scanReset();
+    };
+  }, []);
+
+  // Handle "Capture!" press in live scan locked state
+  const handleLiveScanConfirm = async () => {
+    if (!cameraRef.current) return;
+    scanSend({ type: 'CONFIRM' });
+
+    try {
+      // Take a high-quality photo for identification
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+        base64: true,
+        exif: true,
+      });
+
+      if (photo?.uri && onLiveScanConfirm) {
+        onLiveScanConfirm(photo.uri, scanCtx.currentLabel, scanCtx.currentConfidence);
+      }
+    } catch (error) {
+      console.error('Live scan capture failed:', error);
+      scanSend({ type: 'ERROR', message: 'Failed to capture photo' });
+    }
+  };
+
+  const handleLiveScanCancel = () => {
+    if (frameLoopRef.current) {
+      clearInterval(frameLoopRef.current);
+      frameLoopRef.current = null;
+    }
+    scanReset();
+    onClose();
+  };
+
+  const handleLiveScanRetry = () => {
+    scanReset();
+    scanSend({ type: 'START_SCAN' });
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <CameraView 
@@ -210,30 +326,40 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
         mode="picture"
         ref={cameraRef}
       >
-        <View style={styles.overlay}>
-          {/* Top controls */}
-          <View style={styles.topBar}>
-            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Text style={styles.buttonText}>✕</Text>
-            </TouchableOpacity>
-            
+        {mode === 'photo' ? (
+          /* ─── Photo Mode Overlay ─────────────── */
+          <View style={styles.overlay}>
+            {/* Top controls */}
+            <View style={styles.topBar}>
+              <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+                <Text style={styles.buttonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Targeting reticle */}
+            <View style={styles.reticle} />
+
+            {/* Instruction text */}
+            <Text style={styles.instructionText}>
+              🐛 Position the bug in the center circle and tap to capture
+            </Text>
+
+            {/* Bottom controls */}
+            <View style={styles.bottomBar}>
+              <TouchableOpacity style={styles.captureButton} onPress={takePicture}>
+                <View style={styles.captureIcon} />
+              </TouchableOpacity>
+            </View>
           </View>
-
-          {/* Targeting reticle */}
-          <View style={styles.reticle} />
-
-          {/* Instruction text */}
-          <Text style={styles.instructionText}>
-            🐛 Position the bug in the center circle and tap to capture
-          </Text>
-
-          {/* Bottom controls */}
-          <View style={styles.bottomBar}>
-            <TouchableOpacity style={styles.captureButton} onPress={takePicture}>
-              <View style={styles.captureIcon} />
-            </TouchableOpacity>
-          </View>
-        </View>
+        ) : (
+          /* ─── Live Scan Mode Overlay ─────────── */
+          <LiveScanOverlay
+            ctx={scanCtx}
+            onConfirm={handleLiveScanConfirm}
+            onCancel={handleLiveScanCancel}
+            onRetry={handleLiveScanRetry}
+          />
+        )}
       </CameraView>
     </SafeAreaView>
   );

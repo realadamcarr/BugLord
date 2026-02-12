@@ -1,4 +1,4 @@
-import { BugCamera } from '@/components/BugCamera';
+import { BugCamera, ScanMode } from '@/components/BugCamera';
 import { BugInfoModal } from '@/components/BugInfoModal';
 import { CollectionScreen } from '@/components/CollectionScreen';
 import PixelatedEmoji from '@/components/PixelatedEmoji';
@@ -14,7 +14,7 @@ import { mlPreprocessingService } from '@/services/ml/MLPreprocessingService';
 import { modelUpdateService } from '@/services/ml/ModelUpdateService';
 import { onDeviceClassifier } from '@/services/ml/OnDeviceClassifier';
 import { Bug, BugIdentificationResult, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -35,6 +35,7 @@ export default function CaptureScreen() {
   const [showRecentBugModal, setShowRecentBugModal] = useState(false);
   const [mlReady, setMlReady] = useState(false);
   const [modelVersion, setModelVersion] = useState<string | null>(null);
+  const [scanMode, setScanMode] = useState<ScanMode>('photo');
 
   const styles = createStyles(theme);
 
@@ -131,18 +132,14 @@ export default function CaptureScreen() {
               // Try to copy files from app bundle automatically
               console.log('📁 Attempting to copy from app bundle...');
               
-              // Create labels.json directly
-              const labelsContent = {
-                "labels": [
-                  "Bees", "Butterfly", "Mantis", "ant", "beetle", 
-                  "caterpillar", "centipedes", "cockroach", "dragonfly", 
-                  "fly", "grasshopper", "ladybug", "mosquito", "spider", "wasp"
-                ]
-              };
+              // Create labels.json directly (flat array matching model output classes)
+              const labelsContent = [
+                "Bees", "Butterfly", "Ladybug", "ant", "dragonfly", "wasp"
+              ];
               
               if (!labelsInfo.exists) {
                 await FileSystem.writeAsStringAsync(labelsPath, JSON.stringify(labelsContent, null, 2));
-                console.log('✅ Created labels.json with 15 species');
+                console.log('✅ Created labels.json with 6 species');
               }
               
               // Try to copy model from app bundle
@@ -527,6 +524,37 @@ export default function CaptureScreen() {
     setIdentifiedBug(null);
   };
 
+  // ─── Live Scan Callbacks ──────────────────────────────────────
+  /** Classify a single camera frame for the live scan loop */
+  const handleClassifyFrame = useCallback(async (photoUri: string): Promise<IdentificationCandidate[]> => {
+    if (!mlReady || !onDeviceClassifier.isReady()) return [];
+    try {
+      const mlInput = await mlPreprocessingService.preprocessForInference(photoUri, {
+        targetSize: 224,
+        quality: 0.5, // lower quality for speed
+      });
+      const candidates = await onDeviceClassifier.classifyImage(mlInput, 3);
+      return candidates.map((c: any) => ({
+        label: c.label,
+        species: c.label,
+        confidence: c.confidence,
+        source: 'TensorFlow Lite ML Model',
+      }));
+    } catch (err) {
+      console.warn('Frame classification error:', err);
+      return [];
+    }
+  }, [mlReady]);
+
+  /** Called when user taps "Capture!" after live scan lock */
+  const handleLiveScanConfirm = useCallback(async (photoUri: string, label: string, confidence: number) => {
+    setShowCamera(false);
+    setCapturedPhoto(photoUri);
+
+    // Run full identification pipeline on the high-quality photo
+    await processAndClassify(photoUri, photoUri);
+  }, []);
+
   const renderPartySlot = (bug: Bug | null, index: number) => (
     <TouchableOpacity
       key={index}
@@ -578,14 +606,46 @@ export default function CaptureScreen() {
 
         {/* Main Actions */}
         <View style={styles.actionsContainer}>
+          {/* Scan Mode Toggle */}
+          <View style={styles.scanModeToggle}>
+            <TouchableOpacity
+              style={[
+                styles.scanModeOption,
+                scanMode === 'photo' && { backgroundColor: theme.colors.primary },
+              ]}
+              onPress={() => setScanMode('photo')}
+            >
+              <Text style={[
+                styles.scanModeText,
+                scanMode === 'photo' && styles.scanModeTextActive,
+              ]}>📷 Photo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.scanModeOption,
+                scanMode === 'liveScan' && { backgroundColor: theme.colors.primary },
+              ]}
+              onPress={() => setScanMode('liveScan')}
+            >
+              <Text style={[
+                styles.scanModeText,
+                scanMode === 'liveScan' && styles.scanModeTextActive,
+              ]}>🎯 Live Scan</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Camera Button - Main Action */}
           <TouchableOpacity
             style={styles.cameraButton}
             onPress={() => setShowCamera(true)}
           >
-            <Text style={styles.cameraIcon}>📸</Text>
-            <ThemedText style={styles.cameraButtonText}>Capture Bug</ThemedText>
-            <ThemedText style={styles.cameraButtonSubtext}>Discover new species</ThemedText>
+            <Text style={styles.cameraIcon}>{scanMode === 'liveScan' ? '🎯' : '📸'}</Text>
+            <ThemedText style={styles.cameraButtonText}>
+              {scanMode === 'liveScan' ? 'Live Scan' : 'Capture Bug'}
+            </ThemedText>
+            <ThemedText style={styles.cameraButtonSubtext}>
+              {scanMode === 'liveScan' ? 'Real-time AI detection' : 'Discover new species'}
+            </ThemedText>
           </TouchableOpacity>
 
           {/* Quick Stats */}
@@ -676,6 +736,9 @@ export default function CaptureScreen() {
         <BugCamera
           onCapture={handleCameraCapture}
           onClose={() => setShowCamera(false)}
+          mode={scanMode}
+          onClassifyFrame={handleClassifyFrame}
+          onLiveScanConfirm={handleLiveScanConfirm}
         />
       </Modal>
 
@@ -913,6 +976,31 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   actionsContainer: {
     marginBottom: 20,
+  },
+  scanModeToggle: {
+    flexDirection: 'row',
+    backgroundColor: theme.colors.card,
+    borderRadius: 10,
+    padding: 4,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+  },
+  scanModeOption: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  scanModeText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: theme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  scanModeTextActive: {
+    color: '#FFFFFF',
   },
   cameraButton: {
     backgroundColor: theme.colors.primary,

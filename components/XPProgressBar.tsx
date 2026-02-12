@@ -132,7 +132,7 @@ export const XPProgressBar: React.FC<XPProgressBarProps> = ({
       {showTooltip && xpToNext > 0 && (
         <View style={styles.tooltip}>
           <ThemedText style={styles.tooltipText}>
-            {xpToNext} XP to Lv. {level + 1}! 🚀
+            {xpToNext} XP to Lv. {level + 1}! 
           </ThemedText>
         </View>
       )}

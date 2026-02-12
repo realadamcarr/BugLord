@@ -16,7 +16,7 @@
 import { BUG_TRAP, FULL_REVIVE, POTION, REVIVE_SEED, SUPER_POTION } from '@/constants/Items';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Pedometer } from 'expo-sensors';
-import { Platform } from 'react-native';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 
 // Background task name
 const BACKGROUND_STEP_TASK = 'background-step-tracking';
@@ -147,6 +147,8 @@ class WalkModeService {
   private _subscriptionBaseline = 0;
   private _subscriptionBaselineSet = false;
   private _saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private _appStateSubscription: any = null;
+  private _lastSavedSteps = 0;
   private currentSession: {
     startTime: Date;
     startSteps: number;
@@ -209,6 +211,14 @@ class WalkModeService {
         
         this.log('✅ Walk Mode tracking resumed');
       }
+
+      // Listen for app going to background — force-save state immediately
+      this._appStateSubscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+        if (nextState === 'background' || nextState === 'inactive') {
+          this.log('📱 App going to background — force-saving walk state');
+          this.forceSave();
+        }
+      });
 
       this.log('✅ Walk Mode service initialized');
       this.isInitialized = true;
@@ -295,6 +305,12 @@ class WalkModeService {
       if (this.pedometerSubscription) {
         this.pedometerSubscription.remove();
         this.pedometerSubscription = null;
+      }
+
+      // Clean up AppState listener
+      if (this._appStateSubscription) {
+        this._appStateSubscription.remove();
+        this._appStateSubscription = null;
       }
 
       this.state.isActive = false;
@@ -430,6 +446,8 @@ class WalkModeService {
     this.state.totalSteps += deltaFromSubscription;
     this.state.lastUpdateTimestamp = Date.now();
     
+    this.log(`📊 Steps delta: +${deltaFromSubscription}, session: ${this.state.sessionSteps}, total: ${this.state.totalSteps}`);
+
     // Calculate how many XP milestones have been reached
     const stepsSinceLastReward = this.state.totalSteps - this.state.lastProcessedSteps;
     const xpMilestones = Math.floor(stepsSinceLastReward / WALK_MODE_CONFIG.STEPS_PER_XP_GAIN);
@@ -437,8 +455,12 @@ class WalkModeService {
     if (xpMilestones > 0) {
       this.processRewards(xpMilestones);
     } else {
-      // Persist state periodically even without milestones
-      this.throttledSave();
+      // Save immediately on every step update so no steps are lost if app is killed.
+      // Pedometer events are infrequent enough that this won't cause perf issues.
+      if (this.state.sessionSteps !== this._lastSavedSteps) {
+        this.saveState();
+        this._lastSavedSteps = this.state.sessionSteps;
+      }
     }
   }
 
@@ -554,15 +576,16 @@ class WalkModeService {
   }
 
   /**
-   * Throttled save — persists state at most every 10 seconds
-   * to avoid excessive AsyncStorage writes on every step update
+   * Force save — called when app goes to background or is about to close.
+   * Flushes any pending state and writes immediately.
    */
-  private throttledSave(): void {
-    if (this._saveTimer) return;
-    this._saveTimer = setTimeout(async () => {
+  private forceSave(): void {
+    if (this._saveTimer) {
+      clearTimeout(this._saveTimer);
       this._saveTimer = null;
-      await this.saveState();
-    }, 10000);
+    }
+    this.saveState();
+    this._lastSavedSteps = this.state.sessionSteps;
   }
 
   /**
