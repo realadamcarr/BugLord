@@ -1,5 +1,5 @@
 @echo off
-echo Building Note Quest APK locally...
+echo Building BugLord APK locally...
 echo.
 echo This will create a release APK for testing
 echo Make sure you have Android Studio installed

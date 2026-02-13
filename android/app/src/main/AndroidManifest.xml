@@ -30,8 +30,8 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="note-quest"/>
-        <data android:scheme="exp+note-quest"/>
+        <data android:scheme="buglord"/>
+        <data android:scheme="exp+buglord"/>
       </intent-filter>
     </activity>
   </application>

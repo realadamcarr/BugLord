@@ -8,7 +8,7 @@ Purpose: Make AI coding agents immediately productive in this Expo React Native 
 - Lint: `npm run lint`.
 
 ## Build & APKs
-- Cloud builds (recommended): `eas build --platform android --profile preview` (see `eas.json`). Owner is `stackzilla`; projectId in `app.json` under `extra.eas.projectId`.
+- Cloud builds (recommended): `eas build --platform android --profile preview` (see `eas.json`). projectId in `app.json` under `extra.eas.projectId`.
 - Local APK: `cd android; gradlew assembleRelease` (see `build-local-apk.bat`). Prebuild native with `npx expo prebuild --platform android` if needed.
 - Helper scripts: `start-android.bat`, `build-apk.bat`, `build-test-apk.bat`, and guide `APK_BUILD_GUIDE.md`.
 
@@ -51,7 +51,7 @@ Purpose: Make AI coding agents immediately productive in this Expo React Native 
 - Show themed UI: wrap content in `ThemedView` and use `theme.colors.*` for styles; see `app/(tabs)/player.tsx` and `components/XPProgressBar.tsx`.
 
 ## Gotchas
-- `app.json.slug` is currently `note-quest` while the app name is BugLord; keep consistent if you change slugs since EAS uses it for project linking.
+- `app.json.slug` is `buglord` and must match the EAS project; do not change it without re-linking.
 - When enabling Google Vision, ensure requests use base64 content; the service already formats the payload.
 - Android builds may require prebuild if you introduce native modules: run `npx expo prebuild` and commit changes as needed.
 

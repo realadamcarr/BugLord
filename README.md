@@ -1,200 +1,170 @@
-# 🐛## ✨ Features
+# 🐛 BugLord
 
-### 📸 **Bug Photography & Identification**
+An immersive bug-collecting app built with React Native and Expo. Capture real-world insects with your camera, build your collection, and become the ultimate BugLord! Uses AI-powered identification to discover species, manage your 6-bug party, and level up as you explore the insect kingdom.
+
+---
+
+## ✨ Features
+
+### 📸 Bug Scanning & Identification
 - Real-time camera with targeting reticle for bug capture
-- AI-powered bug identification (species, rarity, traits)
-- Photo storage and gallery integration
-- Smart species recognition with confidence scoring
+- AI-powered multi-tier identification (iNaturalist → Google Vision → local heuristic)
+- On-device ML inference when TFLite model is available; falls back to API/stub otherwise
+- Photo storage and gallery integration via `expo-media-library`
 
-### 🐛 **Bug Collection System**
-- **Rarity System**: Common, Uncommon, Rare, Epic, Legendary bugs
+### 🐛 Collection & Logs
+- **Rarity System**: Common, Uncommon, Rare, Epic, Legendary
 - **Biome Classification**: Forest, Garden, Wetland, Desert, Urban, Mountain, Meadow
 - **Detailed Bug Cards**: Name, species, description, traits, catch location
 - **Persistent Collection**: All discoveries saved with AsyncStorage
 
-### 🏆 **Party Management**
-- **Active Party**: Maximum 6 bugs in your active lineup
-- **Strategic Selection**: Choose your best bugs for your party
-- **Quick Swap**: Easy party management interface
-- **Visual Display**: See your party bugs on the main hub
+### 🏆 Party Management
+- 6-slot active party lineup
+- Strategic selection and quick swap interface
+- Visual party display on the main hub
 
-### 🎮 **RPG Progression System**
-- **XP & Leveling**: Earn XP based on bug rarity (10-120 XP per catch)
-- **Explorer Levels**: Level up every 100 XP as a bug explorer
-- **Achievement System**: Track your collection milestones
-- **Visual Progress**: Beautiful XP bars and level displaysive bug collecting app built with React Native and Expo. Capture real-world insects with your camera, build your collection, and become the ultimate BugLord! Use AI-powered identification to discover species, manage your 6-bug party, and level up as you explore the insect kingdom.
+### 🎮 RPG Progression
+- XP & Leveling — earn XP based on bug rarity (10–120 XP per catch)
+- Explorer levels every 100 XP
+- XP progress bars and level displays
 
-## ✨ Features
+### 🚶 Walk Mode
+- GPS-driven encounters while walking
+- Step tracking with expo-sensors
+- Biome-aware spawns
 
-### � **Smart Note Taking**
-- Create, edit, and complete notes with a beautiful interface
-- Mark notes as complete to earn XP
-- Persistent storage using AsyncStorage
-
-### 🎮 **RPG Gamification System**
-- **XP & Leveling**: Earn 10 XP per completed note
-- **Character Progression**: Level up every 100 XP
-- **Cosmetic Unlocks**: Unlock hats, outfits, accessories, and backgrounds
-- **Visual Character**: Customizable sprite-based character display
-
-### 🎨 **Character Customization**
-- **Hats**: Baseball Cap, Crown, Wizard Hat, Party Hat
-- **Outfits**: Casual, Formal, Superhero, Ninja
-- **Accessories**: Sunglasses, Briefcase, Trophy
-- **Backgrounds**: Forest, City, Space
-- **Smart Sprite System**: Use custom sprites or emoji fallbacks
-
-### 📱 **Modern UI/UX**
-- Beautiful tab-based navigation
-- Parallax scrolling effects
-- Level-up celebrations with confetti
-- Character preview in cosmetics showcase
-- Responsive design for all screen sizes
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js (v16 or higher)
-- npm or yarn
-- Expo CLI
-- Android Studio (for Android builds) or Xcode (for iOS builds)
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/buglord.git
-   cd buglord
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Start the development server**
-   ```bash
-   npm start
-   ```
-
-4. **Run on device/simulator**
-   ```bash
-   # Android
-   npm run android
-   
-   # iOS
-   npm run ios
-   
-   # Web
-   npm run web
-   ```
-
-## 📱 Building APK
-
-To create an APK for testing:
-
-1. **Install EAS CLI**
-   ```bash
-   npm install -g eas-cli
-   ```
-
-2. **Login to Expo**
-   ```bash
-   eas login
-   ```
-
-3. **Build APK**
-   ```bash
-   eas build --platform android --profile preview
-   ```
-
-## 🎨 Custom Sprites
-
-The app supports custom character sprites! See [`SPRITE_GUIDE.md`](SPRITE_GUIDE.md) for detailed instructions on:
-- Adding your own sprite artwork
-- Recommended sprite specifications
-- File naming conventions
-- Enabling/disabling the sprite system
-
-## 🛠️ Project Structure
-
-```
-buglord/
-├── app/                    # Main app screens
-│   ├── (tabs)/            # Tab navigation screens
-│   │   ├── index.tsx      # Notes screen (main)
-│   │   ├── explore.tsx    # Character & stats screen
-│   │   └── _layout.tsx    # Tab layout configuration
-│   └── _layout.tsx        # Root layout
-├── components/            # Reusable components
-│   ├── Character.tsx      # Character display & logic
-│   ├── CosmeticsShowcase.tsx  # Cosmetics grid
-│   ├── SpriteAssets.ts    # Sprite loading system
-│   └── ui/               # UI components
-├── assets/               # Static assets
-│   ├── images/          # App icons & images
-│   └── sprites/         # Character sprite files
-├── constants/           # App constants & themes
-└── hooks/              # Custom React hooks
-```
-
-## 🎯 Key Components
-
-### Character System
-- **Character.tsx**: Main character display with cosmetics
-- **SpriteAssets.ts**: Sprite loading with emoji fallbacks
-- **CosmeticsShowcase.tsx**: Grid view of all cosmetics
-
-### Game Logic
-- **XP System**: 10 XP per completed note
-- **Leveling**: Level up every 100 XP
-- **Auto-equip**: Highest unlocked cosmetics are equipped
-- **Persistence**: All progress saved locally
-
-## 🔧 Configuration
-
-### App Settings
-- **app.json**: Expo configuration
-- **eas.json**: Build configuration
-- **tsconfig.json**: TypeScript settings
-
-### Customization
-- **Colors.ts**: App color scheme
-- **Character.tsx**: Cosmetics & unlock levels
-- **SpriteAssets.ts**: Sprite file mappings
-
-## 📦 Dependencies
-
-### Core
-- **Expo**: ~52.0.11
-- **React Native**: 0.76.3
-- **React**: 18.3.1
-- **TypeScript**: ^5.3.3
-
-### Features
-- **@react-native-async-storage/async-storage**: Data persistence
-- **expo-router**: Navigation
-- **react-native-reanimated**: Animations
-- **expo-haptics**: Tactile feedback
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
-## 🎉 Acknowledgments
-
-- Built with [Expo](https://expo.dev/)
-- Icons from [Expo Vector Icons](https://icons.expo.fyi/)
-- Inspired by RPG progression systems
+### ⚔️ Hive Mode *(planned)*
+- PvE battles using your bug party
+- Item system with loot and buffs
 
 ---
 
-**Turn your productivity into an adventure! 🗡️✨**
+## 🛠️ Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Expo SDK 54 / React Native 0.81 |
+| Navigation | Expo Router (file-based) |
+| State | React Context + AsyncStorage |
+| Camera | expo-camera |
+| Image Processing | expo-image-manipulator |
+| ML Inference | react-native-fast-tflite (stub until model ships) |
+| Theming | System-driven light/dark via ThemeContext |
+
+---
+
+## 🚀 Setup & Run
+
+### Prerequisites
+- Node.js ≥ 18, npm
+- Expo CLI (`npx expo`)
+- Android Studio (for Android builds) or Xcode (for iOS)
+
+### Install & Start
+```bash
+git clone https://github.com/yourusername/buglord.git
+cd buglord
+npm install
+npm start          # press 'a' for Android, 'w' for web
+```
+
+### Run on Device
+```bash
+npm run android    # Android emulator / device
+npm run web        # Web browser
+```
+
+---
+
+## 📦 Build Notes (EAS)
+
+Cloud builds are recommended:
+
+```bash
+npm install -g eas-cli
+eas login
+eas build --platform android --profile preview   # APK for testing
+eas build --platform android --profile production # release build
+```
+
+Local APK (requires Android SDK):
+```bash
+npx expo prebuild --platform android
+cd android && gradlew assembleRelease
+```
+
+See [APK_BUILD_GUIDE.md](APK_BUILD_GUIDE.md) for detailed instructions.
+
+> **Demo Mode**: In Expo Go, native modules (TFLite, dev-client) are unavailable. The app gracefully falls back to stub/API identification so the full UI flow still works.
+
+---
+
+## 📂 Project Structure
+
+```
+buglord/
+├── app/                        # Screens (Expo Router file-based)
+│   ├── _layout.tsx             # Root layout + providers
+│   ├── (tabs)/
+│   │   ├── _layout.tsx         # Tab bar config
+│   │   ├── index.tsx           # Capture screen
+│   │   ├── train.tsx           # Train / XP screen
+│   │   └── player.tsx          # Player profile
+│   ├── hivemode.tsx            # Hive Mode screen
+│   ├── inventory.tsx           # Inventory screen
+│   └── walkmode.tsx            # Walk Mode screen
+├── components/                 # Reusable UI components
+│   ├── BugCamera.tsx
+│   ├── BugInfoModal.tsx
+│   ├── ManualCropper.tsx
+│   ├── CollectionScreen.tsx
+│   └── ui/                     # Low-level UI primitives
+├── contexts/                   # React Context providers
+│   ├── BugCollectionContext.tsx # Collection, party, XP state
+│   ├── InventoryContext.tsx     # Item inventory state
+│   └── ThemeContext.tsx         # Light/dark theme
+├── services/                   # Business logic & APIs
+│   ├── BugIdentificationService.ts
+│   ├── ImageProcessingService.ts
+│   ├── WalkModeService.ts
+│   ├── HiveBattleService.ts
+│   └── ml/                     # ML inference pipeline
+│       ├── OnDeviceClassifier.ts
+│       ├── MLPreprocessingService.ts
+│       └── ModelUpdateService.ts
+├── types/                      # TypeScript domain types
+│   ├── Bug.ts
+│   ├── HiveMode.ts
+│   └── Item.ts
+├── constants/                  # Colors, item defs
+├── assets/                     # Images, fonts, sprites, ML labels
+├── app.json                    # Expo config
+├── eas.json                    # EAS build profiles
+└── package.json
+```
+
+---
+
+## ⚠️ Known Limitations
+
+- **TFLite stub mode**: On-device ML returns mock predictions until a trained model is bundled. The full capture → crop → classify UI still works.
+- **ManualCropper**: Simplified crop UI (no drag/pinch gestures yet).
+- **Upload / Model Update services**: Coded and ready but require a backend server to activate.
+- **Expo Go**: Native modules (TFLite, dev-client) are unavailable; the app falls back gracefully.
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Train and ship real TFLite insect classification model
+- [ ] Backend for dataset upload and model OTA updates
+- [ ] Full Hive Mode PvE battles with item integration
+- [ ] Walk Mode encounter polish and biome detection
+- [ ] iOS build support and App Store submission
+- [ ] Leaderboards and social features
+
+---
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE).

@@ -7,6 +7,8 @@ This document explains the complete implementation of custom TFLite-based object
 1. **Object Detection**: Locates insects in photos (bounding boxes)
 2. **Classification**: Identifies the species of the detected insect
 
+> **Note**: Both stages currently run in stub mode (returning mock data) until trained TFLite models are bundled. In Expo Go, native TFLite is unavailable; the app falls back to center-crop + API/heuristic identification automatically.
+
 ## Architecture
 
 ```

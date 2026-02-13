@@ -1,8 +1,8 @@
 #!/bin/bash
-# Note Quest APK Build Script
+# BugLord APK Build Script
 # Run these commands one by one in your terminal
 
-echo "Building Note Quest APK..."
+echo "Building BugLord APK..."
 echo "Step 1: Login to EAS"
 eas login
 

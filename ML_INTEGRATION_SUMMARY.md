@@ -4,6 +4,10 @@
 
 Successfully integrated on-device machine learning inference with continuous training loop into the BugLord Expo React Native app. The implementation provides a complete pipeline from photo capture to model updates while maintaining TypeScript type safety and compatibility with Expo SDK 54.
 
+> **Current Inference Mode**: On-device TFLite inference runs when a real model file is loaded via `react-native-fast-tflite`. When the model is unavailable (e.g., no `.tflite` bundled yet), the classifier falls back to stub predictions using `labels.json`. The API identification chain (iNaturalist → Google Vision → local heuristic) is always available as an additional fallback.
+
+> **Demo Mode (Expo Go)**: Expo Go does not support native modules like `react-native-fast-tflite`. In Expo Go the app automatically uses stub/API identification so the full capture → crop → classify → collect UI flow works without a development build.
+
 ---
 
 ## ✅ Completed Deliverables
@@ -190,7 +194,7 @@ Camera → Manual Crop → Preprocess → ML Classify → Confirm → Upload Que
 
 **Updated:** `app.json`
 
-- Changed slug from `note-quest` → `buglord` (cleanup)
+- Slug: `buglord`
 - Added camera permission plugin with custom message
 - Added media library permission plugin
 - Scheme: `buglord`

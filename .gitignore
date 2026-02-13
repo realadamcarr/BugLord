@@ -62,3 +62,30 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+# --------------------
+# Security / Secrets
+# --------------------
+*.jks
+*.keystore
+*.key
+*.p12
+*.pem
+key.properties
+keystore.properties
+google-services.json
+*.env.local
+*.env.production
+
+# --------------------
+# Backup repos (should never be committed)
+# --------------------
+**/BugLord-backup.git/**
+*.git-backup/
+
+# --------------------
+# Build outputs
+# --------------------
+android/app/build/
+android/build/
+android/.gradle/
