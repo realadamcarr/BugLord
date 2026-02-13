@@ -110,16 +110,19 @@ export function useWalkMode(): UseWalkModeReturn {
   async function handleXpReward(reward: WalkModeReward): Promise<void> {
     if (!reward.xpAmount) return;
 
-    // Find the first non-null bug in the party with HP > 0 (active bug)
+    // Only award XP to the specific bug being walked, and only if it has HP > 0
+    const walkBugId = walkModeService.getStatistics().activeBugId;
     const activeBug = collection.party.find(bug => {
       if (!bug) return false;
+      // If a specific bug is being walked, only give XP to that bug
+      if (walkBugId && bug.id !== walkBugId) return false;
       const maxHp = bug.maxHp || bug.maxXp;
       const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
       return currentHp > 0;
     });
     
     if (!activeBug) {
-      console.log('🚶‍♂️ No healthy bug in party, XP reward skipped');
+      console.log('🚶‍♂️ No healthy walk bug found (fainted or missing), XP reward skipped');
       return;
     }
 

@@ -525,24 +525,20 @@ export default function CaptureScreen() {
   };
 
   // ─── Live Scan Callbacks ──────────────────────────────────────
-  /** Classify a single camera frame for the live scan loop */
-  const handleClassifyFrame = useCallback(async (photoUri: string): Promise<IdentificationCandidate[]> => {
-    if (!mlReady || !onDeviceClassifier.isReady()) return [];
+  /** Classify a single photo using the on-device ML model */
+  const handleClassifyPhoto = useCallback(async (photoUri: string): Promise<{ label: string; confidence: number } | null> => {
+    if (!mlReady || !onDeviceClassifier.isReady()) return null;
     try {
       const mlInput = await mlPreprocessingService.preprocessForInference(photoUri, {
         targetSize: 224,
-        quality: 0.5, // lower quality for speed
+        quality: 0.7,
       });
       const candidates = await onDeviceClassifier.classifyImage(mlInput, 3);
-      return candidates.map((c: any) => ({
-        label: c.label,
-        species: c.label,
-        confidence: c.confidence,
-        source: 'TensorFlow Lite ML Model',
-      }));
+      if (candidates.length === 0 || candidates[0].confidence < 0.1) return null;
+      return { label: candidates[0].label, confidence: candidates[0].confidence };
     } catch (err) {
-      console.warn('Frame classification error:', err);
-      return [];
+      console.warn('Photo classification error:', err);
+      return null;
     }
   }, [mlReady]);
 
@@ -737,7 +733,7 @@ export default function CaptureScreen() {
           onCapture={handleCameraCapture}
           onClose={() => setShowCamera(false)}
           mode={scanMode}
-          onClassifyFrame={handleClassifyFrame}
+          onClassifyPhoto={handleClassifyPhoto}
           onLiveScanConfirm={handleLiveScanConfirm}
         />
       </Modal>

@@ -81,27 +81,24 @@ export default function HiveModeScreen() {
 
   // Start a new Hive run
   const startHiveRun = (selectedBug: Bug) => {
-    // Check if bug has HP
     const maxHp = selectedBug.maxHp || selectedBug.maxXp;
-    const currentHp = selectedBug.currentHp !== undefined ? selectedBug.currentHp : maxHp;
-    
-    if (currentHp <= 0) {
-      Alert.alert(
-        'Bug Fainted',
-        `${selectedBug.nickname || selectedBug.name} has 0 HP and cannot battle! Use a Heal or Revive item first.`,
-        [{ text: 'OK' }]
-      );
-      return;
-    }
     
     console.log('[Hive] Starting new run with', selectedBug.name);
+    
+    // Heal ALL party bugs to full HP at the start of each run (like a Pokémon Center)
+    collection.party.forEach(bug => {
+      if (bug) {
+        const bugMaxHp = bug.maxHp || bug.maxXp;
+        updateBugHp(bug.id, bugMaxHp);
+      }
+    });
     
     const playerBattleBug: BattleBug = {
       id: selectedBug.id,
       name: selectedBug.nickname || selectedBug.name,
       level: selectedBug.level,
       maxHp,
-      currentHp,
+      currentHp: maxHp, // Always start at full HP
       attack: Math.floor(10 + selectedBug.level * 2),
       sprite: selectedBug.pixelArt || selectedBug.photo,
       isEnemy: false,
@@ -110,17 +107,14 @@ export default function HiveModeScreen() {
     const firstRound = rounds[0];
     const enemyBattleBug = HiveBattleService.createEnemyBug(firstRound);
 
-    // Initialize HP tracking for all party bugs
+    // Initialize HP tracking for all party bugs — everyone starts at full HP
     const hpMap: Record<string, { current: number; max: number }> = {};
     collection.party.forEach(bug => {
       if (bug) {
         const mHp = bug.maxHp || bug.maxXp;
-        const cHp = bug.currentHp !== undefined ? bug.currentHp : mHp;
-        hpMap[bug.id] = { current: cHp, max: mHp };
+        hpMap[bug.id] = { current: mHp, max: mHp };
       }
     });
-    // Overwrite the selected bug's entry with the battle bug values
-    hpMap[playerBattleBug.id] = { current: playerBattleBug.currentHp, max: playerBattleBug.maxHp };
     setPartyBugHp(hpMap);
     setFaintedBugIds(new Set());
     setForcedSwitch(false);
@@ -583,12 +577,7 @@ export default function HiveModeScreen() {
     const availableBugs = [
       ...collection.party.filter(bug => bug !== null),
       ...collection.bugs.filter(bug => !collection.party.some(partyBug => partyBug?.id === bug.id))
-    ].filter(bug => {
-      // Only show bugs with HP > 0
-      const maxHp = bug.maxHp || bug.maxXp;
-      const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
-      return currentHp > 0;
-    });
+    ];
 
     return (
       <Modal visible={showBugSelector} animationType="slide" presentationStyle="pageSheet">
@@ -599,12 +588,19 @@ export default function HiveModeScreen() {
               <Text style={styles.closeButtonText}>✕</Text>
             </TouchableOpacity>
           </View>
+          <ThemedText style={{ textAlign: 'center', opacity: 0.6, fontSize: 13, marginBottom: 8, paddingHorizontal: 16 }}>
+            All bugs are healed to full HP when entering Hive Mode
+          </ThemedText>
 
           <ScrollView style={styles.bugList}>
-            {availableBugs.map(bug => (
+            {availableBugs.map(bug => {
+              const bugMaxHp = bug.maxHp || bug.maxXp;
+              const bugCurrentHp = bug.currentHp !== undefined ? bug.currentHp : bugMaxHp;
+              const isFainted = bugCurrentHp <= 0;
+              return (
               <TouchableOpacity
                 key={bug.id}
-                style={styles.bugListItem}
+                style={[styles.bugListItem, isFainted && { opacity: 0.6 }]}
                 onPress={() => startHiveRun(bug)}
               >
                 {bug.photo ? (
@@ -617,13 +613,16 @@ export default function HiveModeScreen() {
                   </View>
                 )}
                 <View style={styles.bugListInfo}>
-                  <ThemedText style={styles.bugListName}>{bug.nickname || bug.name}</ThemedText>
+                  <ThemedText style={styles.bugListName}>
+                    {bug.nickname || bug.name}{isFainted ? ' 💀' : ''}
+                  </ThemedText>
                   <ThemedText style={styles.bugListDetails}>
-                    Level {bug.level} • HP: {bug.currentHp !== undefined ? bug.currentHp : (bug.maxHp || bug.maxXp)}/{bug.maxHp || bug.maxXp} • ATK: {10 + bug.level * 2}
+                    Level {bug.level} • {isFainted ? 'FAINTED' : `HP: ${bugCurrentHp}/${bugMaxHp}`} • ATK: {10 + bug.level * 2}
                   </ThemedText>
                 </View>
               </TouchableOpacity>
-            ))}
+              );
+            })}
           </ScrollView>
         </View>
       </Modal>
