@@ -76,3 +76,5 @@ __pycache__/
 
 expo-env.d.ts
 # @end expo-cli
+# APK build artifacts
+*.apk
