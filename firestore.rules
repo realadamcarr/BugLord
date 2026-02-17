@@ -1,0 +1,114 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isMe(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function hasOnlyKeys(data, keys) {
+      return data.keys().hasOnly(keys);
+    }
+
+    // ── Default deny all ────────────────────────────────────────────
+
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ── Add collection rules below ──────────────────────────────────
+
+    // ── Users ───────────────────────────────────────────────────────
+
+    match /users/{uid} {
+      allow read: if true;
+      allow create: if isMe(uid)
+        && request.resource.data.createdAt is timestamp;
+      allow update: if isMe(uid)
+        && (!('createdAt' in request.resource.data)
+            || request.resource.data.createdAt == resource.data.createdAt);
+    }
+
+    // ── Friendships ─────────────────────────────────────────────────
+
+    match /friendships/{friendshipId} {
+      allow read: if isSignedIn()
+        && request.auth.uid in resource.data.uids;
+      allow create, update, delete: if false;
+    }
+
+    // ── Friend Requests ─────────────────────────────────────────────
+
+    match /friend_requests/{requestId} {
+      // Both sender and recipient can read
+      allow read: if isSignedIn()
+        && (request.auth.uid == resource.data.fromUid
+            || request.auth.uid == resource.data.toUid);
+
+      // Only the sender can create, must start as 'pending'
+      allow create: if isSignedIn()
+        && request.auth.uid == request.resource.data.fromUid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.fromUid != request.resource.data.toUid;
+
+      // toUid can accept or decline; fromUid can cancel
+      allow update: if isSignedIn()
+        && resource.data.status == 'pending'
+        && (
+          // toUid can accept or decline
+          (request.auth.uid == resource.data.toUid
+            && request.resource.data.status in ['accepted', 'declined'])
+          ||
+          // fromUid can cancel
+          (request.auth.uid == resource.data.fromUid
+            && request.resource.data.status == 'cancelled')
+        );
+
+      allow delete: if false;
+    }
+
+    // ── Inventories ─────────────────────────────────────────────────
+
+    match /inventories/{uid}/bugs/{bugId} {
+      allow read, write: if isMe(uid);
+    }
+
+    // ── Trades ──────────────────────────────────────────────────────
+
+    match /trades/{tradeId} {
+      // Only participants can read
+      allow read: if isSignedIn()
+        && (request.auth.uid == resource.data.fromUid
+            || request.auth.uid == resource.data.toUid);
+
+      // Only fromUid can create, must start as 'proposed'
+      allow create: if isSignedIn()
+        && request.auth.uid == request.resource.data.fromUid
+        && request.resource.data.status == 'proposed';
+
+      // Update rules: cancel (fromUid) or decline (toUid), never 'completed' from client
+      allow update: if isSignedIn()
+        && resource.data.status == 'proposed'
+        && request.resource.data.status != 'completed'
+        && (
+          // fromUid can cancel
+          (request.auth.uid == resource.data.fromUid
+            && request.resource.data.status == 'cancelled')
+          ||
+          // toUid can decline
+          (request.auth.uid == resource.data.toUid
+            && request.resource.data.status == 'declined')
+        );
+
+      allow delete: if false;
+    }
+  }
+}

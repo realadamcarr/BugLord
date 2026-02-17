@@ -78,3 +78,16 @@ expo-env.d.ts
 # @end expo-cli
 # APK build artifacts
 *.apk
+
+# --------------------
+# Security-sensitive files
+# --------------------
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+google-services.json
+GoogleService-Info.plist
+**/service-account*.json
+functions/node_modules/

@@ -81,6 +81,15 @@ export default function TabLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="social"
+        options={{
+          title: 'Social',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol size={focused ? 30 : 26} name="person.2.fill" color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

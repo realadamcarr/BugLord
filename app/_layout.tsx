@@ -31,6 +31,9 @@ export default function RootLayout() {
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                 <Stack.Screen name="inventory" options={{ title: 'Inventory' }} />
                 <Stack.Screen name="walkmode" options={{ headerShown: false }} />
+                <Stack.Screen name="social-auth" options={{ title: 'Sign In', presentation: 'modal' }} />
+                <Stack.Screen name="social-trade-create" options={{ title: 'Create Trade' }} />
+                <Stack.Screen name="social-trade-session" options={{ title: 'Trade Session' }} />
                 <Stack.Screen name="+not-found" />
               </Stack>
               <StatusBar 

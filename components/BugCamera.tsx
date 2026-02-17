@@ -4,13 +4,13 @@ import Constants from 'expo-constants';
 import * as MediaLibrary from 'expo-media-library';
 import React, { useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -121,7 +121,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
       // Run ML classification
       const result = await onClassifyPhoto(photo.uri);
 
-      if (result && result.confidence > 0) {
+      if (result && result.confidence >= 0.85) {
         setScanLabel(result.label);
         setScanConfidence(result.confidence);
         setLiveScanState('result');
@@ -129,7 +129,9 @@ export const BugCamera: React.FC<BugCameraProps> = ({
         setLiveScanState('idle');
         Alert.alert(
           'No Bug Detected',
-          'Could not identify a bug in this photo. Try getting closer or adjusting the angle.',
+          result && result.confidence > 0
+            ? `Low confidence (${Math.round(result.confidence * 100)}%). Try getting closer or adjusting the angle.`
+            : 'Could not identify a bug in this photo. Try getting closer or adjusting the angle.',
           [{ text: 'OK' }]
         );
       }

@@ -49,7 +49,7 @@ class ModelUpdateService {
       const dirInfo = await FileSystem.getInfoAsync(this.modelDir, { size: false });
       if (!dirInfo.exists) {
         try {
-          await FileSystem.StorageAccessFramework.makeDirectoryAsync(this.modelDir);
+          await FileSystem.makeDirectoryAsync(this.modelDir, { intermediates: true });
           console.log('📁 Created ml directory:', this.modelDir);
         } catch {
           console.warn('Could not create ML directory, may already exist:', this.modelDir);
@@ -58,7 +58,7 @@ class ModelUpdateService {
     } catch {
       // Directory doesn't exist, try to create it
       try {
-        await FileSystem.StorageAccessFramework.makeDirectoryAsync(this.modelDir);
+        await FileSystem.makeDirectoryAsync(this.modelDir, { intermediates: true });
         console.log('📁 Created ml directory:', this.modelDir);
       } catch {
         console.warn('Could not create ML directory, may already exist:', this.modelDir);

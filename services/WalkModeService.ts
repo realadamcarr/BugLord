@@ -212,11 +212,14 @@ class WalkModeService {
         this.log('✅ Walk Mode tracking resumed');
       }
 
-      // Listen for app going to background — force-save state immediately
+      // Listen for app state changes — save on background, recover steps on foreground
       this._appStateSubscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
         if (nextState === 'background' || nextState === 'inactive') {
           this.log('📱 App going to background — force-saving walk state');
           this.forceSave();
+        } else if (nextState === 'active' && this.state.isActive) {
+          this.log('📱 App returned to foreground — recovering missed steps');
+          this.recoverMissedSteps();
         }
       });
 
@@ -389,8 +392,9 @@ class WalkModeService {
    * Recover steps taken while the app was closed.
    * Uses Pedometer.getStepCountAsync to query the OS for step history
    * between the last persisted timestamp and now.
+   * Public so the walk mode screen can trigger recovery on app resume.
    */
-  private async recoverMissedSteps(): Promise<void> {
+  async recoverMissedSteps(): Promise<void> {
     try {
       const lastUpdate = new Date(this.state.lastUpdateTimestamp);
       const now = new Date();

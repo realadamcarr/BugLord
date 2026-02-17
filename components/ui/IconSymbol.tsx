@@ -22,6 +22,7 @@ const MAPPING = {
   'dumbbell': 'fitness-center',
   'person.circle': 'account-circle',
   'book.closed': 'menu-book',
+  'person.2.fill': 'people',
 } as IconMapping;
 
 /**

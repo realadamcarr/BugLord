@@ -306,7 +306,11 @@ export default function CaptureScreen() {
     handleCloseRecentBugModal();
   };
 
-  const processAndClassify = async (imageToClassify: string, originalPhoto: string) => {
+  const processAndClassify = async (
+    imageToClassify: string,
+    originalPhoto: string,
+    preConfirmedResult?: { label: string; confidence: number }
+  ) => {
     setShowBugIdentification(true);
     setIsIdentifying(true);
     
@@ -326,38 +330,44 @@ export default function CaptureScreen() {
       
       console.log('📸 Image processed:', processedImage);
 
-      // NEW: ML preprocessing for fixed input size
-      const mlInput = await mlPreprocessingService.preprocessForInference(imageToClassify, {
-        targetSize: 224,
-        quality: 0.9,
-      });
-
-      console.log('🧠 Running ML classification...');
-
-      // Try on-device ML first (if ready)
+      // If we already have a confirmed result from live scan, use it directly
       let mlCandidates: any[] = [];
-      if (mlReady && onDeviceClassifier.isReady()) {
-        try {
-          mlCandidates = await onDeviceClassifier.classifyImage(mlInput, 5);
-          console.log('✅ ML classification complete:', mlCandidates);
-        } catch (error) {
-          console.warn('⚠️  ML classification failed, falling back to API:', error);
+      if (preConfirmedResult) {
+        console.log('✅ Using pre-confirmed live scan result:', preConfirmedResult);
+        mlCandidates = [{ label: preConfirmedResult.label, confidence: preConfirmedResult.confidence }];
+      } else {
+        // NEW: ML preprocessing for fixed input size
+        const mlInput = await mlPreprocessingService.preprocessForInference(imageToClassify, {
+          targetSize: 224,
+          quality: 0.9,
+        });
+
+        console.log('🧠 Running ML classification...');
+
+        // Try on-device ML first (if ready)
+        if (mlReady && onDeviceClassifier.isReady()) {
+          try {
+            mlCandidates = await onDeviceClassifier.classifyImage(mlInput, 5);
+            console.log('✅ ML classification complete:', mlCandidates);
+          } catch (error) {
+            console.warn('⚠️  ML classification failed, falling back to API:', error);
+          }
         }
-      }
 
-      // VALIDATION: Check if insect is detected with minimum confidence
-      const MIN_CONFIDENCE = 0.5; // 50% minimum confidence
-      const hasValidDetection = mlCandidates.length > 0 && mlCandidates[0].confidence >= MIN_CONFIDENCE;
+        // VALIDATION: Check if insect is detected with minimum confidence
+        const MIN_CONFIDENCE = 0.85; // 85% minimum confidence
+        const hasValidDetection = mlCandidates.length > 0 && mlCandidates[0].confidence >= MIN_CONFIDENCE;
 
-      if (!hasValidDetection) {
-        Alert.alert(
-          'No Insect Detected',
-          'Please retake the photo with an insect clearly visible in the frame.',
-          [{ text: 'OK' }]
-        );
-        setIsIdentifying(false);
-        setShowBugIdentification(false);
-        return;
+        if (!hasValidDetection) {
+          Alert.alert(
+            'No Insect Detected',
+            'Please retake the photo with an insect clearly visible in the frame.',
+            [{ text: 'OK' }]
+          );
+          setIsIdentifying(false);
+          setShowBugIdentification(false);
+          return;
+        }
       }
 
       // USE REAL TENSORFLOW LITE PREDICTIONS WHEN AVAILABLE!
@@ -534,7 +544,7 @@ export default function CaptureScreen() {
         quality: 0.7,
       });
       const candidates = await onDeviceClassifier.classifyImage(mlInput, 3);
-      if (candidates.length === 0 || candidates[0].confidence < 0.1) return null;
+      if (candidates.length === 0 || candidates[0].confidence < 0.85) return null;
       return { label: candidates[0].label, confidence: candidates[0].confidence };
     } catch (err) {
       console.warn('Photo classification error:', err);
@@ -547,8 +557,8 @@ export default function CaptureScreen() {
     setShowCamera(false);
     setCapturedPhoto(photoUri);
 
-    // Run full identification pipeline on the high-quality photo
-    await processAndClassify(photoUri, photoUri);
+    // Pass the already-confirmed ML result to skip redundant re-classification
+    await processAndClassify(photoUri, photoUri, { label, confidence });
   }, []);
 
   const renderPartySlot = (bug: Bug | null, index: number) => (
@@ -556,7 +566,9 @@ export default function CaptureScreen() {
       key={index}
       style={[styles.partySlot, !bug && styles.emptyPartySlot]}
       onPress={() => {
-        // TODO: Open party management
+        if (bug) {
+          handleRecentBugTap(bug);
+        }
       }}
     >
       {bug ? (

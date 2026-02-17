@@ -20,17 +20,18 @@ import { router } from 'expo-router';
 import { Pedometer } from 'expo-sensors';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    Dimensions,
-    Image,
-    Linking,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  AppState,
+  Dimensions,
+  Image,
+  Linking,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -50,6 +51,74 @@ export default function WalkModeScreen() {
 
   const [selectedBug, setSelectedBug] = useState<Bug | null>(null);
   const [showBugSelector, setShowBugSelector] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<'checking' | 'granted' | 'denied' | 'na'>('checking');
+
+  // Check physical activity permission on screen open
+  useEffect(() => {
+    async function checkPermission() {
+      if (Platform.OS === 'web') {
+        setPermissionStatus('na');
+        return;
+      }
+      try {
+        const { status } = await Pedometer.getPermissionsAsync();
+        setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
+      } catch {
+        setPermissionStatus('na');
+      }
+    }
+    checkPermission();
+  }, []);
+
+  // Prompt for permission if denied
+  const handleRequestPermission = async () => {
+    if (Platform.OS === 'web') return;
+    try {
+      const { status, canAskAgain } = await Pedometer.requestPermissionsAsync();
+      if (status === 'granted') {
+        setPermissionStatus('granted');
+      } else if (!canAskAgain) {
+        Alert.alert(
+          'Permission Required',
+          'BugLord needs Physical Activity permission to count your steps.\n\nPlease enable it in Settings → Apps → BugLord → Permissions.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Permission Required',
+          'Walk Mode needs access to your physical activity data to track steps. Please grant the permission to continue.'
+        );
+      }
+    } catch {
+      // Some devices grant implicitly
+    }
+  };
+
+  // Re-check permission and recover missed steps when app returns to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (nextState: string) => {
+      if (nextState === 'active') {
+        // Re-check permission (user may have toggled in settings)
+        if (Platform.OS !== 'web') {
+          try {
+            const { status } = await Pedometer.getPermissionsAsync();
+            setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
+          } catch {}
+        }
+        // Recover steps taken while app was closed
+        if (walkModeActive) {
+          try {
+            const { walkModeService } = require('@/services/WalkModeService');
+            await walkModeService.recoverMissedSteps();
+          } catch {}
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [walkModeActive]);
 
   // Restore selected bug from persisted walk mode state on mount
   useEffect(() => {
@@ -106,6 +175,7 @@ export default function WalkModeScreen() {
     if (Platform.OS !== 'web') {
       try {
         const { status, canAskAgain } = await Pedometer.requestPermissionsAsync();
+        setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
         if (status !== 'granted') {
           if (!canAskAgain) {
             // User permanently denied — guide them to settings
@@ -327,6 +397,24 @@ export default function WalkModeScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContainer}>
+        {/* Permission Warning Banner */}
+        {permissionStatus === 'denied' && (
+          <TouchableOpacity
+            style={styles.permissionBanner}
+            onPress={handleRequestPermission}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.permissionBannerIcon}>⚠️</Text>
+            <View style={styles.permissionBannerTextContainer}>
+              <Text style={styles.permissionBannerTitle}>Step Tracking Disabled</Text>
+              <Text style={styles.permissionBannerSubtitle}>
+                Tap to enable physical activity permission
+              </Text>
+            </View>
+            <Text style={styles.permissionBannerArrow}>→</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Progress Section */}
         <View style={styles.progressSection}>
           <ThemedText style={styles.stepsToGoTitle}>
@@ -532,6 +620,44 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   scrollContainer: {
     paddingBottom: 40,
+  },
+  permissionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#7B5E00',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 10,
+    borderWidth: 3,
+    borderColor: '#A67C00',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  permissionBannerIcon: {
+    fontSize: 22,
+    marginRight: 10,
+  },
+  permissionBannerTextContainer: {
+    flex: 1,
+  },
+  permissionBannerTitle: {
+    color: '#FFF8DC',
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  permissionBannerSubtitle: {
+    color: '#FFE4A0',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  permissionBannerArrow: {
+    color: '#FFE4A0',
+    fontSize: 20,
+    fontWeight: '900',
+    marginLeft: 8,
   },
   progressSection: {
     alignItems: 'center',

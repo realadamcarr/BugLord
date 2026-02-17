@@ -47,15 +47,13 @@ class OnDeviceClassifier {
     try {
       const dirInfo = await FileSystem.getInfoAsync(mlDir, { size: false });
       if (!dirInfo.exists) {
-        await FileSystem.StorageAccessFramework.makeDirectoryAsync(mlDir).catch(() => {
-          // Fallback for non-SAF systems
-          throw new Error('Directory creation not supported');
+        await FileSystem.makeDirectoryAsync(mlDir, { intermediates: true }).catch(() => {
+          console.warn('Could not create ML directory, may already exist:', mlDir);
         });
       }
     } catch (error) {
-      // For most cases, try creating with legacy API wrapped in try-catch
       try {
-        await FileSystem.StorageAccessFramework.makeDirectoryAsync(mlDir);
+        await FileSystem.makeDirectoryAsync(mlDir, { intermediates: true });
       } catch {
         console.warn('Could not create ML directory, may already exist:', mlDir);
       }
@@ -211,8 +209,8 @@ class OnDeviceClassifier {
 
     } catch (error) {
       console.error('❌ Classification failed:', error);
-      console.warn('⚠️  Falling back to stub predictions');
-      return this.getStubPredictions(topK);
+      // Do NOT fall back to stubs — return empty so validation rejects the photo
+      return [];
     }
   }
 
@@ -221,18 +219,10 @@ class OnDeviceClassifier {
    * Returns raw predictions (unsorted) for all labels.
    */
   private async runInference(imageUri: string): Promise<MLCandidate[]> {
-    // Preprocess image to 224x224 RGB
-    const resized = await ImageManipulator.manipulateAsync(
-      imageUri,
-      [{ resize: { width: 224, height: 224 } }],
-      { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 }
-    );
-
-    // Run inference
-    const outputs = await this.model.run(resized.uri);
+    // Run inference directly — input should already be preprocessed to 224x224
+    const outputs = await this.model.run(imageUri);
     
     // Process output tensor into predictions
-    const predictions: MLCandidate[] = [];
     let outputTensor;
     
     // Handle different output formats from react-native-fast-tflite
@@ -250,12 +240,46 @@ class OnDeviceClassifier {
     if (!Array.isArray(outputTensor)) {
       throw new Error(`Expected array tensor output, got: ${typeof outputTensor}`);
     }
+
+    // Apply softmax normalization to convert logits → proper probabilities
+    const maxVal = Math.max(...outputTensor);
+    const exps = outputTensor.map((v: number) => Math.exp(v - maxVal)); // subtract max for numerical stability
+    const sumExps = exps.reduce((a: number, b: number) => a + b, 0);
+    const softmaxValues = exps.map((e: number) => e / sumExps);
+
+    // Compute entropy to measure prediction uncertainty
+    // High entropy = spread across classes (likely not a real bug)
+    // Low entropy = confident single-class prediction
+    let entropy = 0;
+    for (const p of softmaxValues) {
+      if (p > 1e-10) {
+        entropy -= p * Math.log2(p);
+      }
+    }
+    const maxEntropy = Math.log2(this.labels.length); // uniform distribution
+    const normalizedEntropy = entropy / maxEntropy; // 0 = certain, 1 = uniform/random
+    console.log(`📊 Prediction entropy: ${entropy.toFixed(3)} / ${maxEntropy.toFixed(3)} (normalized: ${(normalizedEntropy * 100).toFixed(1)}%)`);
+
+    // If entropy is very high (>0.85), the model is uncertain — likely not a real bug photo
+    if (normalizedEntropy > 0.85) {
+      console.log('⚠️ High entropy detected — model is very uncertain, likely not a bug photo');
+      // Return predictions with dampened confidence to trigger rejection
+      const predictions: MLCandidate[] = [];
+      for (let i = 0; i < this.labels.length && i < softmaxValues.length; i++) {
+        predictions.push({
+          label: this.labels[i],
+          confidence: softmaxValues[i] * 0.3, // dampen so it fails threshold
+        });
+      }
+      return predictions;
+    }
     
-    // Map output values to labels
-    for (let i = 0; i < this.labels.length && i < outputTensor.length; i++) {
+    // Map softmax values to labels
+    const predictions: MLCandidate[] = [];
+    for (let i = 0; i < this.labels.length && i < softmaxValues.length; i++) {
       predictions.push({
         label: this.labels[i],
-        confidence: outputTensor[i],
+        confidence: softmaxValues[i],
       });
     }
 
@@ -472,10 +496,10 @@ class OnDeviceClassifier {
     const labelsToUse = this.labels && this.labels.length > 0 ? this.labels : fallbackLabels;
     const availableSpecies = [...labelsToUse];
     
-    // Primary prediction (60-85% confidence)
+    // Primary prediction (30-55% confidence — stubs should never pass the 85% threshold)
     const primaryIdx = this.getWeightedRandomIndex(availableSpecies, speciesWeights);
     const primarySpecies = availableSpecies[primaryIdx];
-    const primaryConfidence = 0.60 + Math.random() * 0.25; // 60-85%
+    const primaryConfidence = 0.30 + Math.random() * 0.25; // 30-55%
     
     predictions.push({
       label: primarySpecies,

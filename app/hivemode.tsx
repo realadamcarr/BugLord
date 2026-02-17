@@ -845,9 +845,7 @@ export default function HiveModeScreen() {
   return (
     <ThemedView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>←</Text>
-        </TouchableOpacity>
+        <View style={styles.headerSpacer} />
         <ThemedText style={styles.headerTitle}>
           Round {hiveState.currentRound}/{hiveState.maxRounds}
         </ThemedText>
