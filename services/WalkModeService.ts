@@ -403,15 +403,31 @@ class WalkModeService {
       // Only attempt recovery if the gap is > 5 seconds and < 7 days
       if (elapsed < 5000 || elapsed > 7 * 24 * 60 * 60 * 1000) {
         this.log('⏭️ Skipping step recovery (gap too short or too long):', Math.round(elapsed / 1000), 's');
+        // Still update timestamp so we don't keep retrying the same stale range
+        this.state.lastUpdateTimestamp = now.getTime();
+        await this.saveState();
         return;
       }
 
-      const result = await PedometerAPI.getStepCountAsync(lastUpdate, now);
-      if (result && result.steps > 0) {
-        this.log(`🔄 Recovered ${result.steps} steps taken while app was closed`);
-        this.state.sessionSteps += result.steps;
-        this.state.totalSteps += result.steps;
-        this.state.lastUpdateTimestamp = now.getTime();
+      let recoveredSteps = 0;
+      try {
+        const result = await PedometerAPI.getStepCountAsync(lastUpdate, now);
+        if (result && result.steps > 0) {
+          recoveredSteps = result.steps;
+        }
+      } catch (pedometerError) {
+        // getStepCountAsync can fail on Android without Health Connect / Google Fit
+        this.log('⚠️ Pedometer.getStepCountAsync failed (platform limitation):', pedometerError);
+      }
+
+      // Always advance the timestamp so the next recovery attempt
+      // starts from now, regardless of whether we recovered steps.
+      this.state.lastUpdateTimestamp = now.getTime();
+
+      if (recoveredSteps > 0) {
+        this.log(`🔄 Recovered ${recoveredSteps} steps taken while app was closed`);
+        this.state.sessionSteps += recoveredSteps;
+        this.state.totalSteps += recoveredSteps;
 
         // Check for any XP milestones earned while away
         const stepsSinceLastReward = this.state.totalSteps - this.state.lastProcessedSteps;
@@ -422,10 +438,14 @@ class WalkModeService {
           await this.saveState();
         }
       } else {
-        this.log('🔄 No missed steps to recover');
+        this.log('🔄 No missed steps to recover (pedometer returned 0)');
+        await this.saveState();
       }
     } catch (error) {
       this.log('⚠️ Failed to recover missed steps (non-fatal):', error);
+      // Even on total failure, advance the timestamp so we don't loop
+      this.state.lastUpdateTimestamp = Date.now();
+      await this.saveState();
     }
   }
 

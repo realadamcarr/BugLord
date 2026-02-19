@@ -14,7 +14,7 @@ BugLord-backup.git/
 .venv/
 training/
 runs/
-models/
+/models/
 __pycache__/
 *.pyc
 *.pt

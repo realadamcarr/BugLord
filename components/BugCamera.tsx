@@ -121,7 +121,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
       // Run ML classification
       const result = await onClassifyPhoto(photo.uri);
 
-      if (result && result.confidence >= 0.85) {
+      if (result && result.confidence >= 0.45) {
         setScanLabel(result.label);
         setScanConfidence(result.confidence);
         setLiveScanState('result');

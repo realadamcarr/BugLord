@@ -355,18 +355,14 @@ export default function CaptureScreen() {
         }
 
         // VALIDATION: Check if insect is detected with minimum confidence
-        const MIN_CONFIDENCE = 0.85; // 85% minimum confidence
+        const MIN_CONFIDENCE = 0.30; // 30% — allows reasonable ML detections through
         const hasValidDetection = mlCandidates.length > 0 && mlCandidates[0].confidence >= MIN_CONFIDENCE;
 
         if (!hasValidDetection) {
-          Alert.alert(
-            'No Insect Detected',
-            'Please retake the photo with an insect clearly visible in the frame.',
-            [{ text: 'OK' }]
-          );
-          setIsIdentifying(false);
-          setShowBugIdentification(false);
-          return;
+          // ML didn't detect anything confidently — fall through to fallback identification
+          // instead of hard-rejecting (the API/local fallback may still identify something)
+          console.log('⚠️ ML confidence too low, falling through to fallback identification...');
+          mlCandidates = []; // Clear so the fallback path runs below
         }
       }
 
@@ -544,7 +540,7 @@ export default function CaptureScreen() {
         quality: 0.7,
       });
       const candidates = await onDeviceClassifier.classifyImage(mlInput, 3);
-      if (candidates.length === 0 || candidates[0].confidence < 0.85) return null;
+      if (candidates.length === 0 || candidates[0].confidence < 0.45) return null;
       return { label: candidates[0].label, confidence: candidates[0].confidence };
     } catch (err) {
       console.warn('Photo classification error:', err);

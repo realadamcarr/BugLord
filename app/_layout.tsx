@@ -2,6 +2,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } fro
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import React, { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -9,12 +10,22 @@ import { BugCollectionProvider } from '@/contexts/BugCollectionContext';
 import { InventoryProvider } from '@/contexts/InventoryContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { walkModeService } from '@/services/WalkModeService';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const [loaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
+
+  // Auto-initialize Walk Mode on app startup so the pedometer
+  // re-subscribes immediately after an app kill, rather than waiting
+  // for the user to navigate to the Walk Mode screen.
+  useEffect(() => {
+    walkModeService.initialize().catch((err) =>
+      console.warn('Walk mode auto-init skipped:', err)
+    );
+  }, []);
 
   if (!loaded) {
     // Async font loading only occurs in development.
