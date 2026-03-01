@@ -22,6 +22,12 @@ import {
     registerBackgroundStepTracking,
     unregisterBackgroundStepTracking,
 } from './BackgroundStepTracking';
+import {
+    dismissWalkModeNotification,
+    requestNotificationPermission,
+    showWalkModeNotification,
+    updateWalkModeNotification,
+} from './WalkModeNotification';
 
 // Mock Pedometer for web/simulator
 class MockPedometer {
@@ -151,6 +157,7 @@ class WalkModeService {
   private _saveTimer: ReturnType<typeof setTimeout> | null = null;
   private _appStateSubscription: any = null;
   private _lastSavedSteps = 0;
+  private _notifInterval: ReturnType<typeof setInterval> | null = null;
   private currentSession: {
     startTime: Date;
     startSteps: number;
@@ -210,6 +217,9 @@ class WalkModeService {
             this.handleStepUpdate(result.steps);
           }
         });
+
+        // Re-show the persistent notification and start periodic updates
+        this.startNotification();
         
         this.log('✅ Walk Mode tracking resumed');
       }
@@ -282,6 +292,9 @@ class WalkModeService {
       // Register background fetch task so steps are tracked even when app is killed
       await registerBackgroundStepTracking();
 
+      // Show persistent notification (keeps Android from killing the app)
+      this.startNotification();
+
       await this.saveState();
       this.log('✅ Walk Mode tracking started');
       
@@ -323,6 +336,9 @@ class WalkModeService {
 
       // Unregister background step tracking
       await unregisterBackgroundStepTracking();
+
+      // Dismiss the persistent notification
+      this.stopNotification();
 
       this.state.isActive = false;
       this.state.activeBugId = null;
@@ -633,6 +649,42 @@ class WalkModeService {
     }
     this.saveState();
     this._lastSavedSteps = this.state.sessionSteps;
+  }
+
+  /**
+   * Show the persistent walk mode notification and start periodic updates.
+   * Requests notification permission if not already granted.
+   */
+  private startNotification(): void {
+    // Request permission then show the notification
+    requestNotificationPermission()
+      .then((granted: boolean) => {
+        if (!granted) {
+          this.log('⚠️ Notification permission not granted — walk mode notification skipped');
+          return;
+        }
+        showWalkModeNotification(this.state.activeBugName, this.state.sessionSteps);
+      })
+      .catch((e: unknown) => this.log('⚠️ Notification setup failed:', e));
+
+    // Update the notification every 30 seconds with the latest step count
+    if (this._notifInterval) clearInterval(this._notifInterval);
+    this._notifInterval = setInterval(() => {
+      if (this.state.isActive) {
+        updateWalkModeNotification(this.state.activeBugName, this.state.sessionSteps).catch(() => {});
+      }
+    }, 30_000);
+  }
+
+  /**
+   * Dismiss the walk mode notification and stop periodic updates.
+   */
+  private stopNotification(): void {
+    if (this._notifInterval) {
+      clearInterval(this._notifInterval);
+      this._notifInterval = null;
+    }
+    dismissWalkModeNotification().catch(() => {});
   }
 
   /**

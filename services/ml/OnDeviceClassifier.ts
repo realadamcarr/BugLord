@@ -200,11 +200,11 @@ class OnDeviceClassifier {
           return topPredictions;
           
       } else {
-        // Fallback to stub if model not loaded
-        console.warn('🎭 USING STUB PREDICTIONS - TensorFlow Lite not available!');
-        console.warn('🔧 This means you are getting FAKE predictions, not real AI inference');
-        console.warn('💡 To fix: Ensure the APK was built with react-native-fast-tflite');
-        return this.getStubPredictions(topK);
+        // No real model available — return empty so the caller can show a proper message.
+        // Never return fake stub predictions — they cause false identifications.
+        console.warn('⚠️ TensorFlow Lite not available — returning empty predictions');
+        console.warn('💡 To fix: Build a production APK with react-native-fast-tflite');
+        return [];
       }
 
     } catch (error) {
@@ -291,6 +291,14 @@ class OnDeviceClassifier {
    */
   isReady(): boolean {
     return this.modelLoaded;
+  }
+
+  /**
+   * Returns true only when the real TFLite native module is available AND the model
+   * is loaded — i.e. classifyImage() will run real inference, not stubs.
+   */
+  isUsingRealModel(): boolean {
+    return this.modelLoaded && this.model != null && loadTensorflowModel != null;
   }
 
   /**

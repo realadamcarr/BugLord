@@ -119,7 +119,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
           'The on-device model is still loading. Try again in a moment, or switch to Photo mode.',
           [{ text: 'OK' }]
         );
-      } else if (result.confidence >= 0.8) {
+      } else if (result.confidence >= 0.5) {
         setScanLabel(result.label);
         setScanConfidence(result.confidence);
         setLiveScanState('result');
@@ -128,7 +128,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
         Alert.alert(
           'No Bug Detected',
           result.confidence > 0
-            ? `Low confidence (${Math.round(result.confidence * 100)}%). The model needs at least 80% confidence. Try getting closer, improving lighting, or adjusting the angle.`
+            ? `Low confidence (${Math.round(result.confidence * 100)}%). Try getting closer, improving lighting, or adjusting the angle.`
             : 'Could not identify a bug in this photo. Try getting closer or adjusting the angle.',
           [{ text: 'Try Again' }]
         );

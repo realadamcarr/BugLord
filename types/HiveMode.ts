@@ -50,6 +50,9 @@ export interface HiveRunState {
   enemyBug: BattleBug | null;
   battleLog: BattleTurn[];
   bugsCaught: Bug[];
+  bugsDefeated: string[];        // names of defeated enemies
+  itemsUsed: { id: string; name: string }[];   // items consumed during run
+  itemsGained: { id: string; name: string }[];  // items dropped by enemies
   roundsWon: number;
   isPlayerTurn: boolean;
   runCompleted: boolean;

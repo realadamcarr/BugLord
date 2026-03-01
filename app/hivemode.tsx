@@ -1,11 +1,13 @@
 /**
  * Hive Mode Screen
- * 
- * Turn-based bug battle mode for BugLord MVP
- * - Select bug to fight
- * - 10 rounds max
- * - Use items (trap, heal, revive)
- * - Boss encounter on final round
+ *
+ * Turn-based bug battle mode for BugLord
+ * - Only party bugs with >0 HP can enter
+ * - Bugs keep their current HP (no full heal)
+ * - Edit party before entering
+ * - Bug Traps catch at 40% → nickname prompt
+ * - Defeated enemies can drop items
+ * - End-of-run summary (caught, defeated, items used/gained)
  */
 
 import PixelatedEmoji from '@/components/PixelatedEmoji';
@@ -29,25 +31,70 @@ import {
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
 
 const { width: screenWidth } = Dimensions.get('window');
 
+/** Helper: get currentHp with fallback to maxHp */
+const getBugHp = (bug: Bug): { currentHp: number; maxHp: number } => {
+  const maxHp = bug.maxHp || bug.maxXp;
+  const currentHp = bug.currentHp ?? maxHp;
+  return { currentHp, maxHp };
+};
+
+/** Helper: render a bug sprite (photo / pixelArt / fallback) */
+const BugSpriteImage = ({ bug, style, fallbackSize, theme }: { bug: Bug; style: any; fallbackSize: number; theme: any }) => {
+  if (bug.photo) return <Image source={{ uri: bug.photo }} style={style} />;
+  if (bug.pixelArt) return <Image source={{ uri: bug.pixelArt }} style={style} />;
+  return (
+    <View style={style}>
+      <PixelatedEmoji type="bug" size={fallbackSize} color={theme.colors.text} />
+    </View>
+  );
+};
+
+/** Helper: HP bar color */
+const hpColor = (percent: number) => {
+  if (percent > 50) return '#10B981';
+  if (percent > 25) return '#F59E0B';
+  return '#EF4444';
+};
+
+/** Helper: render a battle bug sprite (string URI or emoji) */
+const BattleSpriteImage = ({ sprite, imageStyle, emojiStyle }: { sprite?: string; imageStyle: any; emojiStyle: any }) => {
+  if (
+    typeof sprite === 'string' &&
+    (sprite.startsWith('data:') || sprite.startsWith('file:') || sprite.startsWith('http'))
+  ) {
+    return <Image source={{ uri: sprite }} style={imageStyle} />;
+  }
+  return <Text style={emojiStyle}>{sprite ?? '🐛'}</Text>;
+};
+
 export default function HiveModeScreen() {
   const { theme } = useTheme();
-  const { collection, addBugToCollection, gainXP, updateBugHp } = useBugCollection();
-  const { inventory, useItem: consumeItem } = useInventory();
+  const {
+    collection,
+    addBugToCollection,
+    addBugToParty,
+    removeBugFromParty,
+    updateBugNickname,
+    gainXP,
+    updateBugHp,
+  } = useBugCollection();
+  const { inventory, useItem: consumeItem, addItem } = useInventory();
   const styles = createStyles(theme);
 
-  // Animation refs
+  // ── Animation refs ──
   const playerAnimX = useRef(new Animated.Value(0)).current;
   const playerAnimY = useRef(new Animated.Value(0)).current;
   const enemyAnimX = useRef(new Animated.Value(0)).current;
   const enemyAnimY = useRef(new Animated.Value(0)).current;
 
-  // Hive run state
+  // ── Core state ──
   const [hiveState, setHiveState] = useState<HiveRunState>({
     isActive: false,
     currentRound: 0,
@@ -56,6 +103,9 @@ export default function HiveModeScreen() {
     enemyBug: null,
     battleLog: [],
     bugsCaught: [],
+    bugsDefeated: [],
+    itemsUsed: [],
+    itemsGained: [],
     roundsWon: 0,
     isPlayerTurn: true,
     runCompleted: false,
@@ -66,57 +116,73 @@ export default function HiveModeScreen() {
   const [showBugSelector, setShowBugSelector] = useState(false);
   const [showItemSelector, setShowItemSelector] = useState(false);
   const [showSwitchSelector, setShowSwitchSelector] = useState(false);
-  const [battleMessage, setBattleMessage] = useState<string>('');
+  const [showPartyEditor, setShowPartyEditor] = useState(false);
+  const [showRunSummary, setShowRunSummary] = useState(false);
+  const [battleMessage, setBattleMessage] = useState('');
   const [isProcessingTurn, setIsProcessingTurn] = useState(false);
   const [faintedBugIds, setFaintedBugIds] = useState<Set<string>>(new Set());
-  const [partyBugHp, setPartyBugHp] = useState<Record<string, { current: number; max: number }>>({}); 
+  const [partyBugHp, setPartyBugHp] = useState<Record<string, { current: number; max: number }>>({});
   const [forcedSwitch, setForcedSwitch] = useState(false);
 
-  // Initialize rounds when component mounts
+  // Nickname prompt state
+  const [nicknameModalVisible, setNicknameModalVisible] = useState(false);
+  const [pendingCaughtBug, setPendingCaughtBug] = useState<Bug | null>(null);
+  const [nicknameInput, setNicknameInput] = useState('');
+
+  // ── Init rounds ──
   useEffect(() => {
     if (rounds.length === 0) {
       setRounds(generateHiveRounds(10));
     }
   }, []);
 
-  // Start a new Hive run
+  // ═══════════════════════════════════════
+  //  START RUN — no full-heal, party only
+  // ═══════════════════════════════════════
   const startHiveRun = (selectedBug: Bug) => {
-    const maxHp = selectedBug.maxHp || selectedBug.maxXp;
-    
-    console.log('[Hive] Starting new run with', selectedBug.name);
-    
-    // Heal ALL party bugs to full HP at the start of each run (like a Pokémon Center)
-    collection.party.forEach(bug => {
-      if (bug) {
-        const bugMaxHp = bug.maxHp || bug.maxXp;
-        updateBugHp(bug.id, bugMaxHp);
-      }
-    });
-    
+    const { currentHp, maxHp } = getBugHp(selectedBug);
+
+    if (currentHp <= 0) {
+      Alert.alert('Bug Fainted', `${selectedBug.nickname || selectedBug.name} has 0 HP and cannot enter Hive Mode!`);
+      return;
+    }
+
+    console.log('[Hive] Starting run with', selectedBug.name, 'HP:', currentHp, '/', maxHp);
+
     const playerBattleBug: BattleBug = {
       id: selectedBug.id,
       name: selectedBug.nickname || selectedBug.name,
       level: selectedBug.level,
       maxHp,
-      currentHp: maxHp, // Always start at full HP
+      currentHp, // Use actual HP — no full heal
       attack: Math.floor(10 + selectedBug.level * 2),
       sprite: selectedBug.pixelArt || selectedBug.photo,
       isEnemy: false,
     };
-    
+
     const firstRound = rounds[0];
     const enemyBattleBug = HiveBattleService.createEnemyBug(firstRound);
 
-    // Initialize HP tracking for all party bugs — everyone starts at full HP
+    // Build HP map from real party HP — no healing
     const hpMap: Record<string, { current: number; max: number }> = {};
     collection.party.forEach(bug => {
       if (bug) {
-        const mHp = bug.maxHp || bug.maxXp;
-        hpMap[bug.id] = { current: mHp, max: mHp };
+        const hp = getBugHp(bug);
+        hpMap[bug.id] = { current: hp.currentHp, max: hp.maxHp };
       }
     });
+
+    // Mark already-fainted bugs
+    const alreadyFainted = new Set<string>();
+    collection.party.forEach(bug => {
+      if (bug) {
+        const cHp = hpMap[bug.id]?.current ?? 0;
+        if (cHp <= 0) alreadyFainted.add(bug.id);
+      }
+    });
+
     setPartyBugHp(hpMap);
-    setFaintedBugIds(new Set());
+    setFaintedBugIds(alreadyFainted);
     setForcedSwitch(false);
 
     setHiveState({
@@ -127,6 +193,9 @@ export default function HiveModeScreen() {
       enemyBug: enemyBattleBug,
       battleLog: [],
       bugsCaught: [],
+      bugsDefeated: [],
+      itemsUsed: [],
+      itemsGained: [],
       roundsWon: 0,
       isPlayerTurn: true,
       runCompleted: false,
@@ -137,104 +206,69 @@ export default function HiveModeScreen() {
     setShowBugSelector(false);
   };
 
-  // Execute player attack action
+  // ═══════════════════════════════
+  //  ATTACK
+  // ═══════════════════════════════
   const executeAttack = () => {
     if (!hiveState.playerBug || !hiveState.enemyBug || isProcessingTurn) return;
-    
+
     setIsProcessingTurn(true);
-    
-    // Animate player bug attacking enemy
+
+    // Animate player lunge
     Animated.sequence([
       Animated.parallel([
-        Animated.timing(playerAnimX, {
-          toValue: screenWidth * 0.3,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(playerAnimY, {
-          toValue: -20,
-          duration: 150,
-          useNativeDriver: true,
-        }),
+        Animated.timing(playerAnimX, { toValue: screenWidth * 0.3, duration: 300, useNativeDriver: true }),
+        Animated.timing(playerAnimY, { toValue: -20, duration: 150, useNativeDriver: true }),
       ]),
       Animated.parallel([
-        Animated.timing(playerAnimX, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(playerAnimY, {
-          toValue: 0,
-          duration: 150,
-          useNativeDriver: true,
-        }),
+        Animated.timing(playerAnimX, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(playerAnimY, { toValue: 0, duration: 150, useNativeDriver: true }),
       ]),
     ]).start();
-    
-    // Player attacks
+
     const { damage: playerDamage, enemyHpRemaining } = HiveBattleService.executePlayerAttack(
       hiveState.playerBug,
-      hiveState.enemyBug
+      hiveState.enemyBug,
     );
-    
+
     const updatedEnemyBug = { ...hiveState.enemyBug, currentHp: enemyHpRemaining };
-    
     setBattleMessage(`${hiveState.playerBug.name} attacks for ${playerDamage} damage!`);
-    
-    // Check if enemy defeated
+
     if (enemyHpRemaining <= 0) {
       handleRoundVictory(playerDamage, updatedEnemyBug);
       return;
     }
-    
-    // Enemy counterattacks after delay
+
     setTimeout(() => {
       executeEnemyTurn(playerDamage, updatedEnemyBug);
     }, 1000);
   };
 
-  // Execute enemy attack
+  // ═══════════════════════════════
+  //  ENEMY TURN
+  // ═══════════════════════════════
   const executeEnemyTurn = (playerDamage: number, updatedEnemyBug: BattleBug) => {
     if (!hiveState.playerBug) return;
-    
-    // Animate enemy bug attacking player
+
     Animated.sequence([
       Animated.parallel([
-        Animated.timing(enemyAnimX, {
-          toValue: -screenWidth * 0.3,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(enemyAnimY, {
-          toValue: 20,
-          duration: 150,
-          useNativeDriver: true,
-        }),
+        Animated.timing(enemyAnimX, { toValue: -screenWidth * 0.3, duration: 300, useNativeDriver: true }),
+        Animated.timing(enemyAnimY, { toValue: 20, duration: 150, useNativeDriver: true }),
       ]),
       Animated.parallel([
-        Animated.timing(enemyAnimX, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(enemyAnimY, {
-          toValue: 0,
-          duration: 150,
-          useNativeDriver: true,
-        }),
+        Animated.timing(enemyAnimX, { toValue: 0, duration: 300, useNativeDriver: true }),
+        Animated.timing(enemyAnimY, { toValue: 0, duration: 150, useNativeDriver: true }),
       ]),
     ]).start();
-    
+
     const { damage: enemyDamage, playerHpRemaining } = HiveBattleService.executeEnemyAttack(
       updatedEnemyBug,
-      hiveState.playerBug
+      hiveState.playerBug,
     );
-    
+
     const updatedPlayerBug = { ...hiveState.playerBug, currentHp: playerHpRemaining };
-    
     setBattleMessage(`${updatedEnemyBug.name} attacks for ${enemyDamage} damage!`);
-    
-    // Log turn
+
     const turnLog = HiveBattleService.createTurnLog({
       roundNumber: hiveState.currentRound,
       turnNumber: hiveState.battleLog.length + 1,
@@ -244,14 +278,12 @@ export default function HiveModeScreen() {
       playerHpRemaining,
       enemyHpRemaining: updatedEnemyBug.currentHp,
     });
-    
-    // Check if player defeated
+
     if (playerHpRemaining <= 0) {
       handlePlayerDefeat(updatedPlayerBug, updatedEnemyBug, turnLog);
       return;
     }
-    
-    // Update state for next turn
+
     setHiveState(prev => ({
       ...prev,
       playerBug: updatedPlayerBug,
@@ -259,55 +291,71 @@ export default function HiveModeScreen() {
       battleLog: [...prev.battleLog, turnLog],
       isPlayerTurn: true,
     }));
-    
     setIsProcessingTurn(false);
   };
 
-  // Handle round victory
+  // ═══════════════════════════════
+  //  ROUND VICTORY + item drop
+  // ═══════════════════════════════
   const handleRoundVictory = (playerDamage: number, defeatedEnemy: BattleBug) => {
     console.log('[Hive] Round victory! Round:', hiveState.currentRound);
-    
+
     const newRoundsWon = hiveState.roundsWon + 1;
-    
-    // Award XP to player
     const xpGained = Math.floor(defeatedEnemy.level * 10);
     gainXP(xpGained);
-    
-    setBattleMessage(`Victory! ${defeatedEnemy.name} defeated! +${xpGained} XP`);
-    
-    // Check if run completed
+
+    // Roll for item drop
+    const droppedItemId = HiveBattleService.rollItemDrop();
+    let dropMsg = '';
+    if (droppedItemId) {
+      const itemDef = getItemDefinition(droppedItemId);
+      if (itemDef) {
+        addItem(droppedItemId, 1);
+        dropMsg = `\n${defeatedEnemy.name} dropped ${itemDef.name}!`;
+        setHiveState(prev => ({
+          ...prev,
+          itemsGained: [...prev.itemsGained, { id: droppedItemId, name: itemDef.name }],
+        }));
+      }
+    }
+
+    // Track defeated enemy
+    setHiveState(prev => ({
+      ...prev,
+      bugsDefeated: [...prev.bugsDefeated, defeatedEnemy.name],
+      roundsWon: newRoundsWon,
+    }));
+
+    setBattleMessage(`Victory! ${defeatedEnemy.name} defeated! +${xpGained} XP${dropMsg}`);
+
     if (hiveState.currentRound >= hiveState.maxRounds) {
-      setTimeout(() => {
-        handleRunCompletion(true);
-      }, 2000);
+      setTimeout(() => handleRunCompletion(true), 2500);
       return;
     }
-    
-    // Advance to next round
-    setTimeout(() => {
-      advanceToNextRound(newRoundsWon);
-    }, 2000);
+
+    setTimeout(() => advanceToNextRound(newRoundsWon), 2500);
   };
 
-  // Advance to next round
+  // ═══════════════════════════════
+  //  NEXT ROUND
+  // ═══════════════════════════════
   const advanceToNextRound = (roundsWon: number) => {
     const nextRoundNumber = hiveState.currentRound + 1;
     const nextRound = rounds[nextRoundNumber - 1];
-    
+
     if (!nextRound) {
       handleRunCompletion(true);
       return;
     }
-    
+
     const newEnemyBug = HiveBattleService.createEnemyBug(nextRound);
-    
-    // Restore player HP slightly between rounds
+
+    // Restore 20% HP between rounds
     const restoredHp = Math.min(
       hiveState.playerBug!.maxHp,
-      hiveState.playerBug!.currentHp + Math.floor(hiveState.playerBug!.maxHp * 0.2)
+      hiveState.playerBug!.currentHp + Math.floor(hiveState.playerBug!.maxHp * 0.2),
     );
-    
-    // Persist HP after each round
+
     if (hiveState.playerBug) {
       updateBugHp(hiveState.playerBug.id, restoredHp);
       setPartyBugHp(prev => ({
@@ -315,7 +363,7 @@ export default function HiveModeScreen() {
         [hiveState.playerBug!.id]: { ...prev[hiveState.playerBug!.id], current: restoredHp },
       }));
     }
-    
+
     setHiveState(prev => ({
       ...prev,
       currentRound: nextRoundNumber,
@@ -324,28 +372,23 @@ export default function HiveModeScreen() {
       roundsWon,
       isPlayerTurn: true,
     }));
-    
+
     setBattleMessage(
       nextRound.isBoss
         ? `Final Round: BOSS ${newEnemyBug.name} appears!`
-        : `Round ${nextRoundNumber}: ${newEnemyBug.name} appears!`
+        : `Round ${nextRoundNumber}: ${newEnemyBug.name} appears!`,
     );
-    
     setIsProcessingTurn(false);
   };
 
-  // Handle player defeat
-  const handlePlayerDefeat = (
-    defeatedPlayer: BattleBug,
-    enemy: BattleBug,
-    turnLog: BattleTurn
-  ) => {
+  // ═══════════════════════════════
+  //  PLAYER DEFEAT
+  // ═══════════════════════════════
+  const handlePlayerDefeat = (defeatedPlayer: BattleBug, enemy: BattleBug, turnLog: BattleTurn) => {
     console.log('[Hive] Player bug defeated:', defeatedPlayer.name);
-    
-    // Persist HP to collection
+
     updateBugHp(defeatedPlayer.id, 0);
-    
-    // Track fainted bug and update HP map
+
     const newFaintedIds = new Set(faintedBugIds);
     newFaintedIds.add(defeatedPlayer.id);
     setFaintedBugIds(newFaintedIds);
@@ -353,9 +396,9 @@ export default function HiveModeScreen() {
       ...prev,
       [defeatedPlayer.id]: { ...prev[defeatedPlayer.id], current: 0 },
     }));
-    
+
     setBattleMessage(`${defeatedPlayer.name} fainted!`);
-    
+
     setHiveState(prev => ({
       ...prev,
       playerBug: { ...defeatedPlayer, currentHp: 0 },
@@ -363,76 +406,50 @@ export default function HiveModeScreen() {
       battleLog: [...prev.battleLog, turnLog],
       isPlayerTurn: false,
     }));
-    
     setIsProcessingTurn(false);
-    
-    // Check if any other party bugs are alive
+
+    // Check alive party bugs
     const aliveBugs = collection.party.filter(bug => {
       if (!bug) return false;
       if (bug.id === defeatedPlayer.id) return false;
       if (newFaintedIds.has(bug.id)) return false;
       const hp = partyBugHp[bug.id];
       if (hp && hp.current <= 0) return false;
-      // If not tracked yet, check collection HP
-      const maxHp = bug.maxHp || bug.maxXp;
-      const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
-      return currentHp > 0;
+      if (!hp) {
+        const fallback = getBugHp(bug);
+        return fallback.currentHp > 0;
+      }
+      return true;
     });
-    
+
     setTimeout(() => {
       if (aliveBugs.length > 0) {
-        // Force switch to another bug
         setForcedSwitch(true);
         setShowSwitchSelector(true);
       } else {
-        // All bugs fainted - run is over
-        Alert.alert(
-          'All Bugs Fainted!',
-          'All your party bugs have been defeated. The hive run is over.',
-          [{
-            text: 'End Run',
-            onPress: () => handleRunCompletion(false),
-          }]
-        );
+        Alert.alert('All Bugs Fainted!', 'All your party bugs have been defeated.', [
+          { text: 'End Run', onPress: () => handleRunCompletion(false) },
+        ]);
       }
     }, 1200);
   };
 
-  // Attempt to revive player bug
-  const tryRevive = async () => {
-    const reviveSlot = inventory.find(slot => slot.itemId === 'revive-item' && slot.quantity > 0);
-    
-    if (!reviveSlot || !hiveState.playerBug) {
-      Alert.alert('No Revive Items', 'You don\'t have any Revive items!');
-      handleRunCompletion(false);
-      return;
-    }
-    
-    const revivedBug = HiveBattleService.reviveBug(hiveState.playerBug);
-    await consumeItem('revive-item');
-    
-    setHiveState(prev => ({
-      ...prev,
-      playerBug: revivedBug,
-      isPlayerTurn: true,
-    }));
-    
-    setBattleMessage(`${revivedBug.name} was revived!`);
-  };
-
-  // Switch to a different bug from party
+  // ═══════════════════════════════
+  //  SWITCH BUG — party only
+  // ═══════════════════════════════
   const switchBug = (newBug: Bug) => {
     if (!hiveState.enemyBug) return;
-    
+
     const maxHp = partyBugHp[newBug.id]?.max || newBug.maxHp || newBug.maxXp;
-    const currentHp = partyBugHp[newBug.id]?.current ?? (newBug.currentHp !== undefined ? newBug.currentHp : maxHp);
-    
+    const fallbackHp = getBugHp(newBug);
+    const currentHp = partyBugHp[newBug.id]?.current ?? fallbackHp.currentHp;
+
     if (currentHp <= 0) {
       Alert.alert('Bug Fainted', `${newBug.nickname || newBug.name} has 0 HP and cannot battle!`);
       return;
     }
-    
-    // Save current bug's HP before switching out
+
+    // Save current bug's HP
     if (hiveState.playerBug && hiveState.playerBug.currentHp > 0) {
       updateBugHp(hiveState.playerBug.id, hiveState.playerBug.currentHp);
       setPartyBugHp(prev => ({
@@ -440,7 +457,7 @@ export default function HiveModeScreen() {
         [hiveState.playerBug!.id]: { ...prev[hiveState.playerBug!.id], current: hiveState.playerBug!.currentHp },
       }));
     }
-    
+
     const newBattleBug: BattleBug = {
       id: newBug.id,
       name: newBug.nickname || newBug.name,
@@ -451,133 +468,163 @@ export default function HiveModeScreen() {
       sprite: newBug.pixelArt || newBug.photo,
       isEnemy: false,
     };
-    
+
     const wasForcedSwitch = forcedSwitch;
     setShowSwitchSelector(false);
     setForcedSwitch(false);
-    
+
     setBattleMessage(`Go, ${newBattleBug.name}!`);
-    
-    setHiveState(prev => ({
-      ...prev,
-      playerBug: newBattleBug,
-      isPlayerTurn: true,
-    }));
-    
-    // If forced switch (after fainting), don't give enemy a free hit
-    // If voluntary switch, enemy gets a free attack
-    if (!wasForcedSwitch) {
-      setIsProcessingTurn(true);
-      setTimeout(() => {
-        executeEnemyTurn(0, hiveState.enemyBug!);
-      }, 1000);
-    } else {
+    setHiveState(prev => ({ ...prev, playerBug: newBattleBug, isPlayerTurn: true }));
+
+    if (wasForcedSwitch) {
       setIsProcessingTurn(false);
+    } else {
+      setIsProcessingTurn(true);
+      setTimeout(() => executeEnemyTurn(0, hiveState.enemyBug!), 1000);
     }
   };
 
-  // Handle item usage
+  // ═══════════════════════════════
+  //  USE ITEM — correct item IDs
+  // ═══════════════════════════════
   const handleUseItem = async (itemId: string) => {
     if (!hiveState.playerBug || !hiveState.enemyBug || isProcessingTurn) return;
-    
+
     setIsProcessingTurn(true);
     setShowItemSelector(false);
-    
-    // Bug Trap - attempt to catch
-    if (itemId === 'bug-trap') {
+
+    const itemDef = getItemDefinition(itemId);
+    const itemName = itemDef?.name ?? itemId;
+
+    // Track item usage
+    setHiveState(prev => ({
+      ...prev,
+      itemsUsed: [...prev.itemsUsed, { id: itemId, name: itemName }],
+    }));
+
+    // ── Bug Trap ──
+    if (itemDef?.type === 'trap') {
       const { success, catchChance } = HiveBattleService.attemptCatch(hiveState.enemyBug);
-      
       await consumeItem(itemId);
-      
+
       if (success) {
         const caughtBug = HiveBattleService.convertEnemyToBug(hiveState.enemyBug);
-        addBugToCollection(caughtBug);
-        
-        setBattleMessage(`Caught ${hiveState.enemyBug.name}!`);
-        
-        setHiveState(prev => ({
-          ...prev,
-          bugsCaught: [...prev.bugsCaught, caughtBug],
-        }));
-        
-        // Treat as round victory
-        setTimeout(() => {
-          handleRoundVictory(0, hiveState.enemyBug!);
-        }, 2000);
+
+        setBattleMessage(`Caught ${hiveState.enemyBug.name}! 🎉`);
+        setHiveState(prev => ({ ...prev, bugsCaught: [...prev.bugsCaught, caughtBug] }));
+
+        // Show nickname prompt
+        setPendingCaughtBug(caughtBug);
+        setNicknameInput('');
+        setNicknameModalVisible(true);
+        // Round-advance logic is called after the nickname modal closes
       } else {
         setBattleMessage(`Catch failed! (${(catchChance * 100).toFixed(0)}% chance)`);
-        
-        // Enemy attacks after failed catch
-        setTimeout(() => {
-          executeEnemyTurn(0, hiveState.enemyBug!);
-        }, 1500);
+        setTimeout(() => executeEnemyTurn(0, hiveState.enemyBug!), 1500);
       }
+      return;
     }
-    
-    // Heal Item
-    else if (itemId === 'heal-item') {
-      const healAmount = Math.floor(hiveState.playerBug.maxHp * 0.5);
+
+    // ── Heal items (Potion / Super Potion) ──
+    if (itemDef?.type === 'heal') {
+      const healAmount = itemDef.effect.healAmount ?? Math.floor(hiveState.playerBug.maxHp * 0.5);
       const newHp = HiveBattleService.healBug(hiveState.playerBug, healAmount);
-      
       await consumeItem(itemId);
-      
+
       const updatedPlayerBug = { ...hiveState.playerBug, currentHp: newHp };
-      
       setBattleMessage(`${hiveState.playerBug.name} healed for ${healAmount} HP!`);
-      
-      // Enemy attacks after heal
-      setTimeout(() => {
-        executeEnemyTurn(0, hiveState.enemyBug!);
-      }, 1500);
-      
-      setHiveState(prev => ({
-        ...prev,
-        playerBug: updatedPlayerBug,
-      }));
+
+      setHiveState(prev => ({ ...prev, playerBug: updatedPlayerBug }));
+      setTimeout(() => executeEnemyTurn(0, hiveState.enemyBug!), 1500);
+      return;
+    }
+
+    // ── Revive items ──
+    if (itemDef?.type === 'revive') {
+      const faintedPartyBugs = collection.party.filter(bug => {
+        if (!bug) return false;
+        if (faintedBugIds.has(bug.id)) return true;
+        const hp = partyBugHp[bug.id];
+        return hp && hp.current <= 0;
+      }) as Bug[];
+
+      if (faintedPartyBugs.length === 0) {
+        Alert.alert('No Fainted Bugs', 'No party bugs need reviving!');
+        setIsProcessingTurn(false);
+        return;
+      }
+
+      const target = faintedPartyBugs[0];
+      const mHp = partyBugHp[target.id]?.max || target.maxHp || target.maxXp;
+      const revivePercent = itemDef.effect.reviveHpPercent ?? 0.5;
+      const revivedHp = Math.floor(mHp * revivePercent);
+
+      await consumeItem(itemId);
+      updateBugHp(target.id, revivedHp);
+
+      const newFainted = new Set(faintedBugIds);
+      newFainted.delete(target.id);
+      setFaintedBugIds(newFainted);
+      setPartyBugHp(prev => ({ ...prev, [target.id]: { ...prev[target.id], current: revivedHp } }));
+
+      setBattleMessage(`${target.nickname || target.name} revived with ${revivedHp} HP!`);
+      setTimeout(() => executeEnemyTurn(0, hiveState.enemyBug!), 1500);
+      return;
+    }
+
+    // Fallback
+    setIsProcessingTurn(false);
+  };
+
+  // ═══════════════════════════════
+  //  NICKNAME prompt callback
+  // ═══════════════════════════════
+  const handleNicknameConfirm = async () => {
+    if (!pendingCaughtBug) return;
+
+    const addedBug = await addBugToCollection(pendingCaughtBug);
+
+    if (nicknameInput.trim()) {
+      updateBugNickname(addedBug.id, nicknameInput.trim());
+    }
+
+    setNicknameModalVisible(false);
+    setPendingCaughtBug(null);
+
+    // Continue: treat catch as round victory
+    if (hiveState.enemyBug) {
+      setTimeout(() => handleRoundVictory(0, hiveState.enemyBug!), 500);
     }
   };
 
-  // Handle run completion
+  // ═══════════════════════════════
+  //  RUN COMPLETION → summary
+  // ═══════════════════════════════
   const handleRunCompletion = (won: boolean) => {
     console.log('[Hive] Run completed. Won:', won);
-    
-    // Persist final HP to collection
+
     if (hiveState.playerBug) {
       updateBugHp(hiveState.playerBug.id, hiveState.playerBug.currentHp);
     }
-    
+
     const totalXp = hiveState.roundsWon * 50;
-    
+    if (won) gainXP(totalXp);
+
     setHiveState(prev => ({
       ...prev,
       isActive: false,
       runCompleted: true,
       runWon: won,
     }));
-    
-    Alert.alert(
-      won ? 'Hive Run Complete!' : 'Hive Run Ended',
-      won
-        ? `Congratulations! You defeated all ${hiveState.maxRounds} rounds!\n\nRounds Won: ${hiveState.roundsWon}\nBugs Caught: ${hiveState.bugsCaught.length}\nBonus XP: +${totalXp}`
-        : `Run ended at round ${hiveState.currentRound}.\n\nRounds Won: ${hiveState.roundsWon}\nBugs Caught: ${hiveState.bugsCaught.length}`,
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            if (won) gainXP(totalXp);
-            router.back();
-          },
-        },
-      ]
-    );
+
+    setShowRunSummary(true);
   };
 
-  // Render bug selector modal
+  // ═══════════════════════════════════════════
+  //  RENDER: Bug selector (party only, no heal)
+  // ═══════════════════════════════════════════
   const renderBugSelector = () => {
-    const availableBugs = [
-      ...collection.party.filter(bug => bug !== null),
-      ...collection.bugs.filter(bug => !collection.party.some(partyBug => partyBug?.id === bug.id))
-    ];
+    const partyBugs = collection.party.filter((b): b is Bug => b !== null);
 
     return (
       <Modal visible={showBugSelector} animationType="slide" presentationStyle="pageSheet">
@@ -589,38 +636,39 @@ export default function HiveModeScreen() {
             </TouchableOpacity>
           </View>
           <ThemedText style={{ textAlign: 'center', opacity: 0.6, fontSize: 13, marginBottom: 8, paddingHorizontal: 16 }}>
-            All bugs are healed to full HP when entering Hive Mode
+            Only party bugs with HP &gt; 0 can enter. Bugs keep their current HP.
           </ThemedText>
 
           <ScrollView style={styles.bugList}>
-            {availableBugs.map(bug => {
-              const bugMaxHp = bug.maxHp || bug.maxXp;
-              const bugCurrentHp = bug.currentHp !== undefined ? bug.currentHp : bugMaxHp;
-              const isFainted = bugCurrentHp <= 0;
+            {partyBugs.length === 0 && (
+              <ThemedText style={styles.noItemsText}>Your party is empty! Add bugs to your party first.</ThemedText>
+            )}
+            {partyBugs.map(bug => {
+              const hp = getBugHp(bug);
+              const isFainted = hp.currentHp <= 0;
               return (
-              <TouchableOpacity
-                key={bug.id}
-                style={[styles.bugListItem, isFainted && { opacity: 0.6 }]}
-                onPress={() => startHiveRun(bug)}
-              >
-                {bug.photo ? (
-                  <Image source={{ uri: bug.photo }} style={styles.bugListPhoto} />
-                ) : bug.pixelArt ? (
-                  <Image source={{ uri: bug.pixelArt }} style={styles.bugListPhoto} />
-                ) : (
-                  <View style={styles.bugListPhoto}>
-                    <PixelatedEmoji type="bug" size={24} color={theme.colors.text} />
+                <TouchableOpacity
+                  key={bug.id}
+                  style={[styles.bugListItem, isFainted && { opacity: 0.4 }]}
+                  onPress={() => {
+                    if (isFainted) {
+                      Alert.alert('Bug Fainted', `${bug.nickname || bug.name} has 0 HP and cannot enter Hive Mode!`);
+                    } else {
+                      startHiveRun(bug);
+                    }
+                  }}
+                  disabled={isFainted}
+                >
+                  <BugSpriteImage bug={bug} style={styles.bugListPhoto} fallbackSize={24} theme={theme} />
+                  <View style={styles.bugListInfo}>
+                    <ThemedText style={styles.bugListName}>
+                      {bug.nickname || bug.name}{isFainted ? ' 💀' : ''}
+                    </ThemedText>
+                    <ThemedText style={styles.bugListDetails}>
+                      Level {bug.level} • {isFainted ? 'FAINTED' : `HP: ${hp.currentHp}/${hp.maxHp}`} • ATK: {10 + bug.level * 2}
+                    </ThemedText>
                   </View>
-                )}
-                <View style={styles.bugListInfo}>
-                  <ThemedText style={styles.bugListName}>
-                    {bug.nickname || bug.name}{isFainted ? ' 💀' : ''}
-                  </ThemedText>
-                  <ThemedText style={styles.bugListDetails}>
-                    Level {bug.level} • {isFainted ? 'FAINTED' : `HP: ${bugCurrentHp}/${bugMaxHp}`} • ATK: {10 + bug.level * 2}
-                  </ThemedText>
-                </View>
-              </TouchableOpacity>
+                </TouchableOpacity>
               );
             })}
           </ScrollView>
@@ -629,33 +677,43 @@ export default function HiveModeScreen() {
     );
   };
 
-  // Render item selector modal
+  // ═══════════════════════════════════════════
+  //  RENDER: Item selector — correct catalog IDs
+  // ═══════════════════════════════════════════
   const renderItemSelector = () => {
-    const usableItemIds = ['bug-trap', 'heal-item', 'revive-item'];
-    const usableSlots = inventory.filter(
-      slot => slot.quantity > 0 && usableItemIds.includes(slot.itemId)
-    );
+    const usableSlots = inventory.filter(slot => {
+      if (slot.quantity <= 0) return false;
+      const def = getItemDefinition(slot.itemId);
+      if (!def) return false;
+      return ['trap', 'heal', 'revive'].includes(def.type);
+    });
+
+    const getItemEmoji = (type: string) => {
+      if (type === 'trap') return '🪤';
+      if (type === 'heal') return '💊';
+      if (type === 'revive') return '✨';
+      return '📦';
+    };
 
     return (
       <Modal visible={showItemSelector} animationType="fade" transparent>
         <View style={styles.itemModalOverlay}>
           <View style={styles.itemModalContent}>
             <ThemedText style={styles.itemModalTitle}>Use Item</ThemedText>
-            
+
             {usableSlots.length === 0 ? (
               <ThemedText style={styles.noItemsText}>No usable items!</ThemedText>
             ) : (
               usableSlots.map(slot => {
                 const itemDef = getItemDefinition(slot.itemId);
                 if (!itemDef) return null;
-                const emoji = slot.itemId === 'bug-trap' ? '🪤' : slot.itemId === 'heal-item' ? '💊' : '✨';
                 return (
                   <TouchableOpacity
                     key={slot.itemId}
                     style={styles.itemSlotButton}
                     onPress={() => handleUseItem(slot.itemId)}
                   >
-                    <Text style={styles.itemEmoji}>{emoji}</Text>
+                    <Text style={styles.itemEmoji}>{getItemEmoji(itemDef.type)}</Text>
                     <View style={styles.itemInfo}>
                       <ThemedText style={styles.itemName}>{itemDef.name}</ThemedText>
                       <ThemedText style={styles.itemQuantity}>x{slot.quantity}</ThemedText>
@@ -664,11 +722,8 @@ export default function HiveModeScreen() {
                 );
               })
             )}
-            
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={() => setShowItemSelector(false)}
-            >
+
+            <TouchableOpacity style={styles.cancelButton} onPress={() => setShowItemSelector(false)}>
               <ThemedText style={styles.cancelButtonText}>Cancel</ThemedText>
             </TouchableOpacity>
           </View>
@@ -677,22 +732,19 @@ export default function HiveModeScreen() {
     );
   };
 
-  // Render switch bug selector modal
+  // ═══════════════════════════════════════════
+  //  RENDER: Switch selector — party only
+  // ═══════════════════════════════════════════
   const renderSwitchSelector = () => {
     const switchableBugs = collection.party.filter(bug => {
       if (!bug) return false;
-      // Exclude the current battling bug
-      if (hiveState.playerBug && bug.id === hiveState.playerBug.id) return false;
-      // Exclude fainted bugs
+      if (bug.id === hiveState.playerBug?.id) return false;
       if (faintedBugIds.has(bug.id)) return false;
-      // Check tracked HP
       const hp = partyBugHp[bug.id];
       if (hp && hp.current <= 0) return false;
-      // If not tracked, check collection HP
       if (!hp) {
-        const maxHp = bug.maxHp || bug.maxXp;
-        const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
-        if (currentHp <= 0) return false;
+        const fallback = getBugHp(bug);
+        if (fallback.currentHp <= 0) return false;
       }
       return true;
     }) as Bug[];
@@ -702,9 +754,7 @@ export default function HiveModeScreen() {
         <TouchableOpacity
           style={styles.itemModalOverlay}
           activeOpacity={1}
-          onPress={() => {
-            if (!forcedSwitch) setShowSwitchSelector(false);
-          }}
+          onPress={() => { if (!forcedSwitch) setShowSwitchSelector(false); }}
         >
           <TouchableOpacity activeOpacity={1} style={styles.switchModalContent}>
             <ThemedText style={styles.itemModalTitle}>
@@ -712,13 +762,13 @@ export default function HiveModeScreen() {
             </ThemedText>
             {forcedSwitch && (
               <ThemedText style={styles.switchSubtitle}>
-                Your bug fainted! Select another to continue.
+                Your bug fainted! Select another party bug to continue.
               </ThemedText>
             )}
-            
+
             {switchableBugs.length === 0 ? (
               <View>
-                <ThemedText style={styles.noItemsText}>No available bugs to switch to!</ThemedText>
+                <ThemedText style={styles.noItemsText}>No available party bugs to switch to!</ThemedText>
                 <TouchableOpacity
                   style={styles.endRunButton}
                   onPress={() => { setShowSwitchSelector(false); handleRunCompletion(false); }}
@@ -731,42 +781,29 @@ export default function HiveModeScreen() {
                 {switchableBugs.map(bug => {
                   const hp = partyBugHp[bug.id];
                   const maxHp = hp?.max || bug.maxHp || bug.maxXp;
-                  const currentHp = hp?.current ?? (bug.currentHp !== undefined ? bug.currentHp : maxHp);
+                  const fallback = getBugHp(bug);
+                  const currentHp = hp?.current ?? fallback.currentHp;
                   const hpPercent = Math.round((currentHp / maxHp) * 100);
-                  
+
                   return (
-                    <TouchableOpacity
-                      key={bug.id}
-                      style={styles.switchBugItem}
-                      onPress={() => switchBug(bug)}
-                    >
-                      {bug.photo ? (
-                        <Image source={{ uri: bug.photo }} style={styles.switchBugPhoto} />
-                      ) : bug.pixelArt ? (
-                        <Image source={{ uri: bug.pixelArt }} style={styles.switchBugPhoto} />
-                      ) : (
-                        <View style={styles.switchBugPhoto}>
-                          <PixelatedEmoji type="bug" size={20} color={theme.colors.text} />
-                        </View>
-                      )}
+                    <TouchableOpacity key={bug.id} style={styles.switchBugItem} onPress={() => switchBug(bug)}>
+                      <BugSpriteImage bug={bug} style={styles.switchBugPhoto} fallbackSize={20} theme={theme} />
                       <View style={styles.switchBugInfo}>
-                        <ThemedText style={styles.switchBugName}>
-                          {bug.nickname || bug.name}
-                        </ThemedText>
+                        <ThemedText style={styles.switchBugName}>{bug.nickname || bug.name}</ThemedText>
                         <View style={styles.switchBugHpRow}>
                           <ThemedText style={styles.switchBugLevel}>Lv.{bug.level}</ThemedText>
                           <View style={styles.switchBugHpBar}>
-                            <View style={[
-                              styles.switchBugHpFill,
-                              { 
-                                width: `${hpPercent}%`,
-                                backgroundColor: hpPercent > 50 ? '#10B981' : hpPercent > 25 ? '#F59E0B' : '#EF4444',
-                              },
-                            ]} />
+                            <View
+                              style={[
+                                styles.switchBugHpFill,
+                                {
+                                  width: `${hpPercent}%`,
+                                  backgroundColor: hpColor(hpPercent),
+                                },
+                              ]}
+                            />
                           </View>
-                          <ThemedText style={styles.switchBugHpText}>
-                            {currentHp}/{maxHp}
-                          </ThemedText>
+                          <ThemedText style={styles.switchBugHpText}>{currentHp}/{maxHp}</ThemedText>
                         </View>
                       </View>
                     </TouchableOpacity>
@@ -774,12 +811,11 @@ export default function HiveModeScreen() {
                 })}
               </ScrollView>
             )}
-            
+
             <TouchableOpacity
               style={styles.cancelButton}
               onPress={() => {
                 if (forcedSwitch) {
-                  // Forced switch with no escape — end the run
                   setShowSwitchSelector(false);
                   handleRunCompletion(false);
                 } else {
@@ -787,9 +823,7 @@ export default function HiveModeScreen() {
                 }
               }}
             >
-              <ThemedText style={styles.cancelButtonText}>
-                {forcedSwitch ? 'Forfeit Run' : 'Cancel'}
-              </ThemedText>
+              <ThemedText style={styles.cancelButtonText}>{forcedSwitch ? 'Forfeit Run' : 'Cancel'}</ThemedText>
             </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -797,7 +831,242 @@ export default function HiveModeScreen() {
     );
   };
 
-  // Pre-battle screen
+  // ═══════════════════════════════════════════
+  //  RENDER: Nickname modal
+  // ═══════════════════════════════════════════
+  const renderNicknameModal = () => (
+    <Modal visible={nicknameModalVisible} animationType="fade" transparent>
+      <View style={styles.itemModalOverlay}>
+        <View style={styles.itemModalContent}>
+          <ThemedText style={styles.itemModalTitle}>Bug Caught! 🎉</ThemedText>
+          <ThemedText style={{ textAlign: 'center', marginBottom: 12, color: theme.colors.textSecondary, fontSize: 13 }}>
+            Give {pendingCaughtBug?.name} a nickname? (Leave blank to skip)
+          </ThemedText>
+          <TextInput
+            style={{
+              borderWidth: 2,
+              borderColor: theme.colors.border,
+              borderRadius: 8,
+              padding: 12,
+              fontSize: 16,
+              color: theme.colors.text,
+              backgroundColor: theme.colors.surface,
+              marginBottom: 14,
+            }}
+            placeholder="Enter nickname…"
+            placeholderTextColor={theme.colors.textMuted}
+            value={nicknameInput}
+            onChangeText={setNicknameInput}
+            maxLength={20}
+            autoFocus
+          />
+          <TouchableOpacity
+            style={[styles.startButton, { marginBottom: 0 }]}
+            onPress={handleNicknameConfirm}
+          >
+            <ThemedText style={styles.startButtonText}>
+              {nicknameInput.trim() ? 'Confirm Nickname' : 'Skip'}
+            </ThemedText>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // ═══════════════════════════════════════════
+  //  RENDER: Party editor modal
+  // ═══════════════════════════════════════════
+  const renderPartyEditor = () => {
+    const nonPartyBugs = collection.bugs.filter(
+      bug => !collection.party.some(p => p?.id === bug.id),
+    );
+
+    return (
+      <Modal visible={showPartyEditor} animationType="slide" presentationStyle="pageSheet">
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <ThemedText style={styles.modalTitle}>Edit Party</ThemedText>
+            <TouchableOpacity style={styles.closeButton} onPress={() => setShowPartyEditor(false)}>
+              <Text style={styles.closeButtonText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.bugList}>
+            <ThemedText style={[styles.sectionLabel, { color: theme.colors.primary }]}>Current Party</ThemedText>
+            {collection.party.map((bug, idx) => {
+              if (!bug) {
+                return (
+                  <View key={`empty-slot-${String(idx)}`} style={[styles.bugListItem, { opacity: 0.4 }]}>
+                    <View style={styles.bugListPhoto}>
+                      <ThemedText style={{ fontSize: 18 }}>—</ThemedText>
+                    </View>
+                    <ThemedText style={{ flex: 1, fontWeight: '600', color: theme.colors.textMuted }}>
+                      Empty Slot {idx + 1}
+                    </ThemedText>
+                  </View>
+                );
+              }
+              const hp = getBugHp(bug);
+              return (
+                <View key={bug.id} style={styles.bugListItem}>
+                  <BugSpriteImage bug={bug} style={styles.bugListPhoto} fallbackSize={24} theme={theme} />
+                  <View style={styles.bugListInfo}>
+                    <ThemedText style={styles.bugListName}>{bug.nickname || bug.name}</ThemedText>
+                    <ThemedText style={styles.bugListDetails}>
+                      Lv.{bug.level} • HP: {hp.currentHp}/{hp.maxHp}
+                    </ThemedText>
+                  </View>
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: theme.colors.error,
+                      borderRadius: 6,
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                    }}
+                    onPress={() => removeBugFromParty(idx)}
+                  >
+                    <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 11 }}>REMOVE</Text>
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+
+            {nonPartyBugs.length > 0 && (
+              <>
+                <ThemedText style={[styles.sectionLabel, { color: theme.colors.warning, marginTop: 16 }]}>
+                  Collection (tap to add)
+                </ThemedText>
+                {nonPartyBugs.map(bug => {
+                  const partyFull = collection.party.every(p => p !== null);
+                  const hp = getBugHp(bug);
+                  return (
+                    <TouchableOpacity
+                      key={bug.id}
+                      style={[styles.bugListItem, partyFull && { opacity: 0.4 }]}
+                      disabled={partyFull}
+                      onPress={() => addBugToParty(bug)}
+                    >
+                      <BugSpriteImage bug={bug} style={styles.bugListPhoto} fallbackSize={24} theme={theme} />
+                      <View style={styles.bugListInfo}>
+                        <ThemedText style={styles.bugListName}>{bug.nickname || bug.name}</ThemedText>
+                        <ThemedText style={styles.bugListDetails}>
+                          Lv.{bug.level} • HP: {hp.currentHp}/{hp.maxHp}
+                        </ThemedText>
+                      </View>
+                      {!partyFull && (
+                        <Text style={{ fontSize: 18, color: theme.colors.primary, fontWeight: '900' }}>+</Text>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
+    );
+  };
+
+  // ═══════════════════════════════════════════
+  //  RENDER: End-of-run summary
+  // ═══════════════════════════════════════════
+  const renderRunSummary = () => {
+    const totalXp = hiveState.roundsWon * 50;
+
+    // Aggregate items used
+    const usedCounts: Record<string, { name: string; count: number }> = {};
+    hiveState.itemsUsed.forEach(i => {
+      if (usedCounts[i.id]) usedCounts[i.id].count++;
+      else usedCounts[i.id] = { name: i.name, count: 1 };
+    });
+    // Aggregate items gained
+    const gainedCounts: Record<string, { name: string; count: number }> = {};
+    hiveState.itemsGained.forEach(i => {
+      if (gainedCounts[i.id]) gainedCounts[i.id].count++;
+      else gainedCounts[i.id] = { name: i.name, count: 1 };
+    });
+
+    return (
+      <Modal visible={showRunSummary} animationType="slide" transparent>
+        <View style={styles.itemModalOverlay}>
+          <View style={[styles.itemModalContent, { maxHeight: '80%' }]}>
+            <ThemedText style={[styles.itemModalTitle, { fontSize: 20 }]}>
+              {hiveState.runWon ? '🏆 Hive Run Complete!' : '💀 Run Ended'}
+            </ThemedText>
+
+            <ScrollView style={{ marginBottom: 10 }}>
+              {/* Rounds */}
+              <View style={styles.summaryRow}>
+                <ThemedText style={styles.summaryLabel}>Rounds Won</ThemedText>
+                <ThemedText style={styles.summaryValue}>{hiveState.roundsWon} / {hiveState.maxRounds}</ThemedText>
+              </View>
+
+              {hiveState.runWon && (
+                <View style={styles.summaryRow}>
+                  <ThemedText style={styles.summaryLabel}>Bonus XP</ThemedText>
+                  <ThemedText style={[styles.summaryValue, { color: '#10B981' }]}>+{totalXp}</ThemedText>
+                </View>
+              )}
+
+              {/* Bugs defeated */}
+              <ThemedText style={styles.summarySection}>Bugs Defeated ({hiveState.bugsDefeated.length})</ThemedText>
+              {hiveState.bugsDefeated.length === 0 ? (
+                <ThemedText style={styles.summaryEmpty}>None</ThemedText>
+              ) : (
+                hiveState.bugsDefeated.map((name, i) => (
+                  <ThemedText key={`def-${name}-${String(i)}`} style={styles.summaryListItem}>⚔️ {name}</ThemedText>
+                ))
+              )}
+
+              {/* Bugs caught */}
+              <ThemedText style={styles.summarySection}>Bugs Caught ({hiveState.bugsCaught.length})</ThemedText>
+              {hiveState.bugsCaught.length === 0 ? (
+                <ThemedText style={styles.summaryEmpty}>None</ThemedText>
+              ) : (
+                hiveState.bugsCaught.map((bug, i) => (
+                  <ThemedText key={`cat-${bug.id}`} style={styles.summaryListItem}>🪤 {bug.nickname || bug.name} (Lv.{bug.level})</ThemedText>
+                ))
+              )}
+
+              {/* Items used */}
+              <ThemedText style={styles.summarySection}>Items Used ({hiveState.itemsUsed.length})</ThemedText>
+              {Object.keys(usedCounts).length === 0 ? (
+                <ThemedText style={styles.summaryEmpty}>None</ThemedText>
+              ) : (
+                Object.values(usedCounts).map(entry => (
+                  <ThemedText key={entry.name} style={styles.summaryListItem}>📦 {entry.name} ×{entry.count}</ThemedText>
+                ))
+              )}
+
+              {/* Items gained */}
+              <ThemedText style={styles.summarySection}>Items Gained ({hiveState.itemsGained.length})</ThemedText>
+              {Object.keys(gainedCounts).length === 0 ? (
+                <ThemedText style={styles.summaryEmpty}>None</ThemedText>
+              ) : (
+                Object.values(gainedCounts).map(entry => (
+                  <ThemedText key={entry.name} style={styles.summaryListItem}>🎁 {entry.name} ×{entry.count}</ThemedText>
+                ))
+              )}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[styles.startButton, { marginTop: 4 }]}
+              onPress={() => {
+                setShowRunSummary(false);
+                router.back();
+              }}
+            >
+              <ThemedText style={styles.startButtonText}>Done</ThemedText>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  // ═══════════════════════════════════════════
+  //  PRE-BATTLE SCREEN
+  // ═══════════════════════════════════════════
   if (!hiveState.isActive && !hiveState.runCompleted) {
     return (
       <ThemedView style={styles.container}>
@@ -812,7 +1081,6 @@ export default function HiveModeScreen() {
         <ScrollView contentContainerStyle={styles.scrollContainer}>
           <View style={styles.welcomeSection}>
             <PixelatedEmoji type="hive" size={64} color={theme.colors.primary} />
-            
             <ThemedText style={styles.welcomeTitle}>Enter the Hive</ThemedText>
             <ThemedText style={styles.welcomeDescription}>
               Battle through 10 rounds of increasingly difficult wild bugs!
@@ -823,25 +1091,39 @@ export default function HiveModeScreen() {
             <ThemedText style={styles.rulesTitle}>Rules:</ThemedText>
             <ThemedText style={styles.ruleText}>• 10 rounds, scaling difficulty</ThemedText>
             <ThemedText style={styles.ruleText}>• Final round is a Boss battle</ThemedText>
-            <ThemedText style={styles.ruleText}>• Use items to catch, heal, or revive</ThemedText>
-            <ThemedText style={styles.ruleText}>• Defeat all rounds to win!</ThemedText>
+            <ThemedText style={styles.ruleText}>• Only party bugs with HP can enter</ThemedText>
+            <ThemedText style={styles.ruleText}>• Bugs keep their current HP — no full heal</ThemedText>
+            <ThemedText style={styles.ruleText}>• Use Bug Traps to catch wild bugs (40%)</ThemedText>
+            <ThemedText style={styles.ruleText}>• Defeated enemies may drop items</ThemedText>
           </View>
 
+          {/* Edit Party button */}
+          <TouchableOpacity
+            style={[styles.startButton, { backgroundColor: theme.colors.primary, borderColor: `${theme.colors.primary}80`, marginBottom: 12 }]}
+            onPress={() => setShowPartyEditor(true)}
+          >
+            <ThemedText style={styles.startButtonText}>✏️ Edit Party</ThemedText>
+          </TouchableOpacity>
+
+          {/* Enter Hive button */}
           <TouchableOpacity
             style={styles.startButton}
             onPress={() => setShowBugSelector(true)}
           >
             <PixelatedEmoji type="bug" size={24} color="#ffffff" />
-            <ThemedText style={styles.startButtonText}>Select Fighter</ThemedText>
+            <ThemedText style={styles.startButtonText}>Enter Hive</ThemedText>
           </TouchableOpacity>
         </ScrollView>
 
         {renderBugSelector()}
+        {renderPartyEditor()}
       </ThemedView>
     );
   }
 
-  // Battle screen
+  // ═══════════════════════════════════════════
+  //  BATTLE SCREEN
+  // ═══════════════════════════════════════════
   return (
     <ThemedView style={styles.container}>
       <View style={styles.header}>
@@ -872,29 +1154,13 @@ export default function HiveModeScreen() {
           <ThemedText style={styles.hpText}>
             HP: {hiveState.enemyBug?.currentHp}/{hiveState.enemyBug?.maxHp}
           </ThemedText>
-          
-          <Animated.View style={[
-            styles.bugSprite,
-            {
-              transform: [
-                { translateX: enemyAnimX },
-                { translateY: enemyAnimY },
-              ],
-            },
-          ]}>
-            {hiveState.enemyBug?.sprite ? (
-              typeof hiveState.enemyBug.sprite === 'string' &&
-              (hiveState.enemyBug.sprite.startsWith('data:') || 
-               hiveState.enemyBug.sprite.startsWith('file:') ||
-               hiveState.enemyBug.sprite.startsWith('http:') ||
-               hiveState.enemyBug.sprite.startsWith('https:')) ? (
-                <Image source={{ uri: hiveState.enemyBug.sprite }} style={styles.enemyBugImage} />
-              ) : (
-                <Text style={styles.enemySprite}>{hiveState.enemyBug.sprite}</Text>
-              )
-            ) : (
-              <Text style={styles.enemySprite}>🐛</Text>
-            )}
+
+          <Animated.View style={[styles.bugSprite, { transform: [{ translateX: enemyAnimX }, { translateY: enemyAnimY }] }]}>
+            <BattleSpriteImage
+              sprite={hiveState.enemyBug?.sprite}
+              imageStyle={styles.enemyBugImage}
+              emojiStyle={styles.enemySprite}
+            />
           </Animated.View>
         </View>
 
@@ -905,30 +1171,14 @@ export default function HiveModeScreen() {
 
         {/* Player Bug */}
         <View style={styles.playerSection}>
-          <Animated.View style={[
-            styles.bugSprite,
-            {
-              transform: [
-                { translateX: playerAnimX },
-                { translateY: playerAnimY },
-              ],
-            },
-          ]}>
-            {hiveState.playerBug?.sprite ? (
-              typeof hiveState.playerBug.sprite === 'string' &&
-              (hiveState.playerBug.sprite.startsWith('data:') || 
-               hiveState.playerBug.sprite.startsWith('file:') ||
-               hiveState.playerBug.sprite.startsWith('http:') ||
-               hiveState.playerBug.sprite.startsWith('https:')) ? (
-                <Image source={{ uri: hiveState.playerBug.sprite }} style={styles.playerBugImage} />
-              ) : (
-                <Text style={styles.playerSprite}>{hiveState.playerBug.sprite}</Text>
-              )
-            ) : (
-              <PixelatedEmoji type="bug" size={48} color={theme.colors.text} />
-            )}
+          <Animated.View style={[styles.bugSprite, { transform: [{ translateX: playerAnimX }, { translateY: playerAnimY }] }]}>
+            <BattleSpriteImage
+              sprite={hiveState.playerBug?.sprite}
+              imageStyle={styles.playerBugImage}
+              emojiStyle={styles.playerSprite}
+            />
           </Animated.View>
-          
+
           <ThemedText style={styles.bugName}>
             {hiveState.playerBug?.name} Lv.{hiveState.playerBug?.level}
           </ThemedText>
@@ -975,499 +1225,192 @@ export default function HiveModeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Stats */}
+        {/* Stats footer */}
         <View style={styles.statsSection}>
           <ThemedText style={styles.statText}>Rounds Won: {hiveState.roundsWon}</ThemedText>
-          <ThemedText style={styles.statText}>Bugs Caught: {hiveState.bugsCaught.length}</ThemedText>
+          <ThemedText style={styles.statText}>Caught: {hiveState.bugsCaught.length}</ThemedText>
+          <ThemedText style={styles.statText}>Items: {hiveState.itemsGained.length}</ThemedText>
         </View>
       </ScrollView>
 
       {renderItemSelector()}
       {renderSwitchSelector()}
+      {renderNicknameModal()}
+      {renderRunSummary()}
     </ThemedView>
   );
 }
 
-const createStyles = (theme: any) => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    backgroundColor: theme.colors.card,
-    borderBottomWidth: 3,
-    borderBottomColor: theme.colors.warning,
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 6,
-    backgroundColor: theme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  backButtonText: {
-    color: theme.colors.text,
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 18,
-    fontWeight: '900',
-    color: theme.colors.text,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  headerSpacer: {
-    width: 36,
-  },
-  scrollContainer: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  welcomeSection: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  welcomeTitle: {
-    fontSize: 24,
-    fontWeight: '900',
-    marginTop: 14,
-    marginBottom: 6,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  welcomeDescription: {
-    fontSize: 14,
-    textAlign: 'center',
-    color: theme.colors.textSecondary,
-  },
-  rulesSection: {
-    backgroundColor: theme.colors.card,
-    borderRadius: 10,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  rulesTitle: {
-    fontSize: 15,
-    fontWeight: '900',
-    marginBottom: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  ruleText: {
-    fontSize: 13,
-    marginBottom: 6,
-    color: theme.colors.textSecondary,
-    fontWeight: '600',
-  },
-  startButton: {
-    flexDirection: 'row',
-    backgroundColor: theme.colors.warning,
-    borderRadius: 8,
-    padding: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    borderWidth: 3,
-    borderColor: `${theme.colors.warning}80`,
-  },
-  startButtonText: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#FFF',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  battleContainer: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  enemySection: {
-    alignItems: 'center',
-    marginBottom: 16,
-    padding: 14,
-    backgroundColor: theme.colors.card,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: theme.colors.error,
-    borderLeftWidth: 5,
-  },
-  playerSection: {
-    alignItems: 'center',
-    marginBottom: 16,
-    padding: 14,
-    backgroundColor: theme.colors.card,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: theme.colors.primary,
-    borderLeftWidth: 5,
-  },
-  bugName: {
-    fontSize: 16,
-    fontWeight: '900',
-    marginBottom: 6,
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  hpBar: {
-    width: '100%',
-    height: 18,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 3,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  hpBarFill: {
-    height: '100%',
-    borderRadius: 2,
-  },
-  hpText: {
-    fontSize: 12,
-    fontWeight: '800',
-    marginBottom: 10,
-    color: theme.colors.textSecondary,
-  },
-  bugSprite: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 6,
-  },
-  enemySprite: {
-    fontSize: 56,
-  },
-  enemyBugImage: {
-    width: 72,
-    height: 72,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  playerSprite: {
-    fontSize: 42,
-  },
-  playerBugImage: {
-    width: 58,
-    height: 58,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  messageBox: {
-    backgroundColor: theme.colors.warning,
-    borderRadius: 8,
-    padding: 14,
-    marginBottom: 16,
-    minHeight: 52,
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: `${theme.colors.warning}80`,
-  },
-  messageText: {
-    fontSize: 14,
-    fontWeight: '800',
-    textAlign: 'center',
-    color: '#FFF',
-    letterSpacing: 0.3,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
-  },
-  actionButton: {
-    flex: 1,
-    padding: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-  },
-  attackButton: {
-    backgroundColor: theme.colors.error,
-    borderColor: `${theme.colors.error}80`,
-  },
-  switchButton: {
-    backgroundColor: theme.colors.warning,
-    borderColor: `${theme.colors.warning}80`,
-  },
-  itemButton: {
-    backgroundColor: theme.colors.primary,
-    borderColor: `${theme.colors.primary}80`,
-  },
-  actionButtonText: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: '#FFF',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  statsSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: theme.colors.card,
-    borderRadius: 8,
-    padding: 14,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  statText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: theme.colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 3,
-    borderBottomColor: theme.colors.border,
-    backgroundColor: theme.colors.card,
-  },
-  modalTitle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '900',
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  closeButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 6,
-    backgroundColor: theme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  closeButtonText: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: theme.colors.text,
-  },
-  bugList: {
-    flex: 1,
-    padding: 16,
-  },
-  bugListItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.card,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  bugListPhoto: {
-    width: 46,
-    height: 46,
-    borderRadius: 6,
-    marginRight: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.colors.surface,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  bugListInfo: {
-    flex: 1,
-  },
-  bugListName: {
-    fontSize: 14,
-    fontWeight: '800',
-    marginBottom: 3,
-  },
-  bugListDetails: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: theme.colors.textMuted,
-  },
-  itemModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  itemModalContent: {
-    width: screenWidth - 64,
-    backgroundColor: theme.colors.card,
-    borderRadius: 10,
-    padding: 16,
-    borderWidth: 3,
-    borderColor: theme.colors.border,
-  },
-  itemModalTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    marginBottom: 14,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  noItemsText: {
-    fontSize: 14,
-    textAlign: 'center',
-    color: theme.colors.textMuted,
-    marginBottom: 14,
-    fontWeight: '600',
-  },
-  itemSlotButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 8,
-    marginBottom: 8,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  itemEmoji: {
-    fontSize: 22,
-    marginRight: 10,
-  },
-  itemInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  itemName: {
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  itemQuantity: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: theme.colors.textMuted,
-  },
-  cancelButton: {
-    padding: 14,
-    alignItems: 'center',
-    borderTopWidth: 2,
-    borderTopColor: theme.colors.border,
-    marginTop: 6,
-  },
-  cancelButtonText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: theme.colors.error,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  switchModalContent: {
-    width: screenWidth - 48,
-    backgroundColor: theme.colors.card,
-    borderRadius: 10,
-    padding: 16,
-    maxHeight: '70%',
-    borderWidth: 3,
-    borderColor: theme.colors.border,
-  },
-  switchSubtitle: {
-    fontSize: 12,
-    textAlign: 'center',
-    color: theme.colors.textMuted,
-    marginBottom: 14,
-    fontWeight: '600',
-  },
-  switchBugItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.surface,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  switchBugPhoto: {
-    width: 40,
-    height: 40,
-    borderRadius: 6,
-    marginRight: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.colors.card,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-  },
-  switchBugInfo: {
-    flex: 1,
-  },
-  switchBugName: {
-    fontSize: 13,
-    fontWeight: '800',
-    marginBottom: 3,
-  },
-  switchBugHpRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  switchBugLevel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: theme.colors.textMuted,
-    width: 36,
-  },
-  switchBugHpBar: {
-    flex: 1,
-    height: 7,
-    backgroundColor: theme.colors.xpBackground,
-    borderRadius: 4,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  switchBugHpFill: {
-    height: '100%',
-    borderRadius: 3,
-  },
-  switchBugHpText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: theme.colors.textMuted,
-    width: 56,
-    textAlign: 'right',
-  },
-  endRunButton: {
-    padding: 14,
-    backgroundColor: theme.colors.error,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 6,
-    borderWidth: 3,
-    borderColor: `${theme.colors.error}80`,
-  },
-  endRunButtonText: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#FFF',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-});
+// ════════════════════════════════════════
+//  STYLES
+// ════════════════════════════════════════
+const createStyles = (theme: any) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: theme.colors.background },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingTop: 8,
+      paddingHorizontal: 16,
+      paddingBottom: 14,
+      backgroundColor: theme.colors.card,
+      borderBottomWidth: 3,
+      borderBottomColor: theme.colors.warning,
+    },
+    backButton: {
+      width: 36, height: 36, borderRadius: 6,
+      backgroundColor: theme.colors.surface,
+      alignItems: 'center', justifyContent: 'center',
+      borderWidth: 2, borderColor: theme.colors.border,
+    },
+    backButtonText: { color: theme.colors.text, fontSize: 18, fontWeight: '900' },
+    headerTitle: {
+      flex: 1, textAlign: 'center', fontSize: 18, fontWeight: '900',
+      color: theme.colors.text, letterSpacing: 1, textTransform: 'uppercase',
+    },
+    headerSpacer: { width: 36 },
+    scrollContainer: { padding: 16, paddingBottom: 40 },
+    welcomeSection: { alignItems: 'center', marginBottom: 24 },
+    welcomeTitle: { fontSize: 24, fontWeight: '900', marginTop: 14, marginBottom: 6, letterSpacing: 1, textTransform: 'uppercase' },
+    welcomeDescription: { fontSize: 14, textAlign: 'center', color: theme.colors.textSecondary },
+    rulesSection: {
+      backgroundColor: theme.colors.card, borderRadius: 10, padding: 16, marginBottom: 20,
+      borderWidth: 2, borderColor: theme.colors.border,
+    },
+    rulesTitle: { fontSize: 15, fontWeight: '900', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
+    ruleText: { fontSize: 13, marginBottom: 6, color: theme.colors.textSecondary, fontWeight: '600' },
+    startButton: {
+      flexDirection: 'row', backgroundColor: theme.colors.warning, borderRadius: 8, padding: 18,
+      alignItems: 'center', justifyContent: 'center', gap: 10,
+      borderWidth: 3, borderColor: `${theme.colors.warning}80`,
+    },
+    startButtonText: { fontSize: 16, fontWeight: '900', color: '#FFF', letterSpacing: 1, textTransform: 'uppercase' },
+    battleContainer: { padding: 16, paddingBottom: 40 },
+    enemySection: {
+      alignItems: 'center', marginBottom: 16, padding: 14,
+      backgroundColor: theme.colors.card, borderRadius: 10,
+      borderWidth: 2, borderColor: theme.colors.error, borderLeftWidth: 5,
+    },
+    playerSection: {
+      alignItems: 'center', marginBottom: 16, padding: 14,
+      backgroundColor: theme.colors.card, borderRadius: 10,
+      borderWidth: 2, borderColor: theme.colors.primary, borderLeftWidth: 5,
+    },
+    bugName: { fontSize: 16, fontWeight: '900', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.3 },
+    hpBar: {
+      width: '100%', height: 18, backgroundColor: theme.colors.surface,
+      borderRadius: 4, overflow: 'hidden', marginBottom: 3,
+      borderWidth: 2, borderColor: theme.colors.border,
+    },
+    hpBarFill: { height: '100%', borderRadius: 2 },
+    hpText: { fontSize: 12, fontWeight: '800', marginBottom: 10, color: theme.colors.textSecondary },
+    bugSprite: { alignItems: 'center', justifyContent: 'center', marginTop: 6 },
+    enemySprite: { fontSize: 56 },
+    enemyBugImage: { width: 72, height: 72, borderRadius: 8, borderWidth: 2, borderColor: theme.colors.border },
+    playerSprite: { fontSize: 42 },
+    playerBugImage: { width: 58, height: 58, borderRadius: 6, borderWidth: 2, borderColor: theme.colors.border },
+    messageBox: {
+      backgroundColor: theme.colors.warning, borderRadius: 8, padding: 14, marginBottom: 16,
+      minHeight: 52, justifyContent: 'center', borderWidth: 2, borderColor: `${theme.colors.warning}80`,
+    },
+    messageText: { fontSize: 14, fontWeight: '800', textAlign: 'center', color: '#FFF', letterSpacing: 0.3 },
+    actionButtons: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+    actionButton: { flex: 1, padding: 14, borderRadius: 8, alignItems: 'center', justifyContent: 'center', borderWidth: 3 },
+    attackButton: { backgroundColor: theme.colors.error, borderColor: `${theme.colors.error}80` },
+    switchButton: { backgroundColor: theme.colors.warning, borderColor: `${theme.colors.warning}80` },
+    itemButton: { backgroundColor: theme.colors.primary, borderColor: `${theme.colors.primary}80` },
+    actionButtonText: { fontSize: 13, fontWeight: '900', color: '#FFF', textTransform: 'uppercase', letterSpacing: 0.5 },
+    statsSection: {
+      flexDirection: 'row', justifyContent: 'space-around',
+      backgroundColor: theme.colors.card, borderRadius: 8, padding: 14,
+      borderWidth: 2, borderColor: theme.colors.border,
+    },
+    statText: { fontSize: 12, fontWeight: '800', color: theme.colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3 },
+    // ── Modals ──
+    modalContainer: { flex: 1, backgroundColor: theme.colors.background },
+    modalHeader: {
+      flexDirection: 'row', alignItems: 'center', paddingTop: 60, paddingHorizontal: 16,
+      paddingBottom: 16, borderBottomWidth: 3, borderBottomColor: theme.colors.border,
+      backgroundColor: theme.colors.card,
+    },
+    modalTitle: { flex: 1, fontSize: 18, fontWeight: '900', textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0.5 },
+    closeButton: {
+      width: 34, height: 34, borderRadius: 6,
+      backgroundColor: theme.colors.surface, alignItems: 'center', justifyContent: 'center',
+      borderWidth: 2, borderColor: theme.colors.border,
+    },
+    closeButtonText: { fontSize: 14, fontWeight: '900', color: theme.colors.text },
+    bugList: { flex: 1, padding: 16 },
+    bugListItem: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: theme.colors.card, borderRadius: 8, padding: 12, marginBottom: 8,
+      borderWidth: 2, borderColor: theme.colors.border,
+    },
+    bugListPhoto: {
+      width: 46, height: 46, borderRadius: 6, marginRight: 12,
+      alignItems: 'center', justifyContent: 'center',
+      backgroundColor: theme.colors.surface, borderWidth: 2, borderColor: theme.colors.border,
+    },
+    bugListInfo: { flex: 1 },
+    bugListName: { fontSize: 14, fontWeight: '800', marginBottom: 3 },
+    bugListDetails: { fontSize: 11, fontWeight: '600', color: theme.colors.textMuted },
+    sectionLabel: { fontSize: 14, fontWeight: '900', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+    itemModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+    itemModalContent: {
+      width: screenWidth - 64, backgroundColor: theme.colors.card, borderRadius: 10, padding: 16,
+      borderWidth: 3, borderColor: theme.colors.border,
+    },
+    itemModalTitle: { fontSize: 18, fontWeight: '900', marginBottom: 14, textAlign: 'center', textTransform: 'uppercase', letterSpacing: 0.5 },
+    noItemsText: { fontSize: 14, textAlign: 'center', color: theme.colors.textMuted, marginBottom: 14, fontWeight: '600' },
+    itemSlotButton: {
+      flexDirection: 'row', alignItems: 'center', padding: 12,
+      backgroundColor: theme.colors.surface, borderRadius: 8, marginBottom: 8,
+      borderWidth: 2, borderColor: theme.colors.border,
+    },
+    itemEmoji: { fontSize: 22, marginRight: 10 },
+    itemInfo: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    itemName: { fontSize: 14, fontWeight: '800' },
+    itemQuantity: { fontSize: 12, fontWeight: '700', color: theme.colors.textMuted },
+    cancelButton: { padding: 14, alignItems: 'center', borderTopWidth: 2, borderTopColor: theme.colors.border, marginTop: 6 },
+    cancelButtonText: { fontSize: 14, fontWeight: '800', color: theme.colors.error, textTransform: 'uppercase', letterSpacing: 0.5 },
+    switchModalContent: {
+      width: screenWidth - 48, backgroundColor: theme.colors.card, borderRadius: 10, padding: 16,
+      maxHeight: '70%', borderWidth: 3, borderColor: theme.colors.border,
+    },
+    switchSubtitle: { fontSize: 12, textAlign: 'center', color: theme.colors.textMuted, marginBottom: 14, fontWeight: '600' },
+    switchBugItem: {
+      flexDirection: 'row', alignItems: 'center',
+      backgroundColor: theme.colors.surface, borderRadius: 8, padding: 12, marginBottom: 8,
+      borderWidth: 2, borderColor: theme.colors.border,
+    },
+    switchBugPhoto: {
+      width: 40, height: 40, borderRadius: 6, marginRight: 10,
+      alignItems: 'center', justifyContent: 'center',
+      backgroundColor: theme.colors.card, borderWidth: 2, borderColor: theme.colors.border,
+    },
+    switchBugInfo: { flex: 1 },
+    switchBugName: { fontSize: 13, fontWeight: '800', marginBottom: 3 },
+    switchBugHpRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    switchBugLevel: { fontSize: 11, fontWeight: '700', color: theme.colors.textMuted, width: 36 },
+    switchBugHpBar: {
+      flex: 1, height: 7, backgroundColor: theme.colors.surface,
+      borderRadius: 4, overflow: 'hidden', borderWidth: 1, borderColor: theme.colors.border,
+    },
+    switchBugHpFill: { height: '100%', borderRadius: 3 },
+    switchBugHpText: { fontSize: 10, fontWeight: '700', color: theme.colors.textMuted, width: 56, textAlign: 'right' },
+    endRunButton: {
+      padding: 14, backgroundColor: theme.colors.error, borderRadius: 8, alignItems: 'center',
+      marginTop: 6, borderWidth: 3, borderColor: `${theme.colors.error}80`,
+    },
+    endRunButtonText: { fontSize: 14, fontWeight: '900', color: '#FFF', textTransform: 'uppercase', letterSpacing: 0.5 },
+    // ── Summary ──
+    summaryRow: {
+      flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6,
+      borderBottomWidth: 1, borderBottomColor: theme.colors.border,
+    },
+    summaryLabel: { fontSize: 14, fontWeight: '700', color: theme.colors.text },
+    summaryValue: { fontSize: 14, fontWeight: '900', color: theme.colors.text },
+    summarySection: { fontSize: 13, fontWeight: '900', marginTop: 14, marginBottom: 4, textTransform: 'uppercase', color: theme.colors.primary },
+    summaryEmpty: { fontSize: 12, color: theme.colors.textMuted, marginBottom: 4, fontStyle: 'italic' },
+    summaryListItem: { fontSize: 13, fontWeight: '600', marginBottom: 3, color: theme.colors.text },
+  });

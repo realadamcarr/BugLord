@@ -29,7 +29,9 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.ACTIVITY_RECOGNITION",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.RECEIVE_BOOT_COMPLETED"
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
       ],
       "navigationBar": {
         "visible": "immersive"
@@ -66,7 +68,8 @@
         {
           "motionPermission": "Allow BugLord to track your steps for Walk Mode"
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true

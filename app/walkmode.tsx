@@ -20,18 +20,18 @@ import { router } from 'expo-router';
 import { Pedometer } from 'expo-sensors';
 import React, { useEffect, useState } from 'react';
 import {
-  Alert,
-  AppState,
-  Dimensions,
-  Image,
-  Linking,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    Alert,
+    AppState,
+    Dimensions,
+    Image,
+    Linking,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -203,10 +203,23 @@ export default function WalkModeScreen() {
 
     try {
       await startWalkMode();
-      Alert.alert(
-        'Walk Mode Started!',
-        `${selectedBug.name} is now training!\n\n• Walk 1 kilometer to gain XP\n• You may find items while walking\n• Progress is tracked even when the app is closed`
-      );
+
+      // On Android, prompt the user to disable battery optimization for reliable tracking
+      if (Platform.OS === 'android') {
+        Alert.alert(
+          'Walk Mode Started!',
+          `${selectedBug.name} is now training!\n\n• Walk 1 kilometer to gain XP\n• You may find items while walking\n\n⚡ TIP: For reliable background tracking, disable battery optimization for BugLord in your device Settings → Battery → App restrictions.`,
+          [
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            { text: 'Got it', style: 'cancel' },
+          ],
+        );
+      } else {
+        Alert.alert(
+          'Walk Mode Started!',
+          `${selectedBug.name} is now training!\n\n• Walk 1 kilometer to gain XP\n• You may find items while walking\n• Progress is tracked even when the app is closed`
+        );
+      }
     } catch (error) {
       Alert.alert('Error', walkModeError || 'Failed to start Walk Mode');
     }

@@ -70,14 +70,28 @@ export default function SocialScreen() {
   // Subscribe to friend requests
   useEffect(() => {
     if (!user) return;
-    const unsub = subscribeIncomingFriendRequests(user.uid, setFriendRequests);
+    const unsub = subscribeIncomingFriendRequests(
+      user.uid,
+      setFriendRequests,
+      (error) => {
+        console.error('Incoming friend requests subscription failed:', error);
+        Alert.alert('Friend Requests Error', `Could not load incoming requests: ${error.message}. The Firestore index may still be building — try again in a few minutes.`);
+      },
+    );
     return unsub;
   }, [user]);
 
   // Subscribe to outgoing sent requests
   useEffect(() => {
     if (!user) return;
-    const unsub = subscribeOutgoingFriendRequests(user.uid, setSentRequests);
+    const unsub = subscribeOutgoingFriendRequests(
+      user.uid,
+      setSentRequests,
+      (error) => {
+        console.error('Outgoing friend requests subscription failed:', error);
+        Alert.alert('Sent Requests Error', `Could not load sent requests: ${error.message}. The Firestore index may still be building — try again in a few minutes.`);
+      },
+    );
     return unsub;
   }, [user]);
 

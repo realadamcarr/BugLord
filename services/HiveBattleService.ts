@@ -6,6 +6,7 @@
  * - HP management
  * - Item usage (catch, heal, revive)
  * - Battle state transitions
+ * - Item drops from defeated enemies
  */
 
 import { Bug } from '@/types/Bug';
@@ -16,6 +17,18 @@ import {
     ENEMY_BUG_TEMPLATES,
     HiveRound
 } from '@/types/HiveMode';
+
+/** Items that can drop from defeated enemies */
+const ENEMY_DROP_TABLE = [
+  { itemId: 'item_potion', weight: 40 },
+  { itemId: 'item_super_potion', weight: 20 },
+  { itemId: 'item_bug_trap', weight: 25 },
+  { itemId: 'item_revive_seed', weight: 12 },
+  { itemId: 'item_full_revive', weight: 3 },
+] as const;
+
+/** Chance (0-1) that a defeated enemy drops an item */
+const ENEMY_DROP_CHANCE = 0.35;
 
 export class HiveBattleService {
   // Convert player Bug to BattleBug for battle system
@@ -79,23 +92,15 @@ export class HiveBattleService {
     return { damage, playerHpRemaining };
   }
 
-  // Attempt to catch enemy bug
+  /**
+   * Attempt to catch enemy bug using a Bug Trap.
+   * Fixed 40% base success rate.
+   */
   static attemptCatch(enemyBug: BattleBug): {
     success: boolean;
     catchChance: number;
   } {
-    // Base catch chance: 20%
-    let catchChance = 0.2;
-    
-    // Increase chance if enemy HP is low
-    const hpPercent = enemyBug.currentHp / enemyBug.maxHp;
-    if (hpPercent < 0.5) {
-      catchChance += 0.15; // +15% if below 50% HP
-    }
-    if (hpPercent < 0.25) {
-      catchChance += 0.15; // +15% more if below 25% HP
-    }
-    
+    const catchChance = 0.4; // Fixed 40% catch rate
     const success = Math.random() < catchChance;
     
     console.log(`[Battle] Catch attempt: ${(catchChance * 100).toFixed(1)}% chance - ${success ? 'SUCCESS' : 'FAILED'}`);
@@ -137,15 +142,36 @@ export class HiveBattleService {
     return {
       id: `caught-${enemyBug.id}`,
       name: enemyBug.name.replace('Wild ', '').replace('Boss ', ''),
+      species: enemyBug.name.replace('Wild ', '').replace('Boss ', ''),
+      description: `A wild bug caught in the Hive at Level ${enemyBug.level}.`,
       rarity,
       biome: 'forest',
       level: enemyBug.level,
       xp: 0,
       maxXp: enemyBug.maxHp,
+      xpValue: enemyBug.level * 10,
       traits: [`Caught at Level ${enemyBug.level}`],
-      captureDate: new Date().toISOString(),
+      size: 'medium' as const,
+      caughtAt: new Date(),
+      capturedAt: new Date().toISOString(),
       pixelArt: enemyBug.sprite,
     };
+  }
+
+  /**
+   * Roll for an item drop after defeating an enemy.
+   * Returns the item ID or null if nothing dropped.
+   */
+  static rollItemDrop(): string | null {
+    if (Math.random() > ENEMY_DROP_CHANCE) return null;
+
+    const totalWeight = ENEMY_DROP_TABLE.reduce((sum, entry) => sum + entry.weight, 0);
+    let roll = Math.random() * totalWeight;
+    for (const entry of ENEMY_DROP_TABLE) {
+      roll -= entry.weight;
+      if (roll <= 0) return entry.itemId;
+    }
+    return ENEMY_DROP_TABLE[0].itemId;
   }
 
   // Check if battle is over
