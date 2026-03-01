@@ -1,16 +1,14 @@
 import { useTheme } from '@/contexts/ThemeContext';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
-import Constants from 'expo-constants';
-import * as MediaLibrary from 'expo-media-library';
 import React, { useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -37,7 +35,6 @@ export const BugCamera: React.FC<BugCameraProps> = ({
   const facing: CameraType = 'back';
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
-  const isExpoGo = Constants.appOwnership === 'expo';
 
   // Live scan state — simple: idle → classifying → result
   const [liveScanState, setLiveScanState] = useState<'idle' | 'classifying' | 'result'>('idle');
@@ -83,13 +80,6 @@ export const BugCamera: React.FC<BugCameraProps> = ({
       });
 
       if (photo?.uri) {
-        if (!isExpoGo) {
-          try {
-            await MediaLibrary.saveToLibraryAsync(photo.uri);
-          } catch (error) {
-            console.warn('Could not save to media library:', error);
-          }
-        }
         onCapture(photo.uri);
       }
     } catch (error) {
@@ -121,7 +111,15 @@ export const BugCamera: React.FC<BugCameraProps> = ({
       // Run ML classification
       const result = await onClassifyPhoto(photo.uri);
 
-      if (result && result.confidence >= 0.45) {
+      if (result === null) {
+        // null means the ML model is not loaded yet (not just low confidence)
+        setLiveScanState('idle');
+        Alert.alert(
+          'ML Model Not Ready',
+          'The on-device model is still loading. Try again in a moment, or switch to Photo mode.',
+          [{ text: 'OK' }]
+        );
+      } else if (result.confidence >= 0.8) {
         setScanLabel(result.label);
         setScanConfidence(result.confidence);
         setLiveScanState('result');
@@ -129,10 +127,10 @@ export const BugCamera: React.FC<BugCameraProps> = ({
         setLiveScanState('idle');
         Alert.alert(
           'No Bug Detected',
-          result && result.confidence > 0
-            ? `Low confidence (${Math.round(result.confidence * 100)}%). Try getting closer or adjusting the angle.`
+          result.confidence > 0
+            ? `Low confidence (${Math.round(result.confidence * 100)}%). The model needs at least 80% confidence. Try getting closer, improving lighting, or adjusting the angle.`
             : 'Could not identify a bug in this photo. Try getting closer or adjusting the angle.',
-          [{ text: 'OK' }]
+          [{ text: 'Try Again' }]
         );
       }
     } catch (error) {

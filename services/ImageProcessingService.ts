@@ -273,30 +273,6 @@ class ImageProcessingService {
   }
 
   /**
-   * Preprocess image for object detection model
-   * @param photoUri - Original photo URI
-   * @param inputSize - Target input size for detection model
-   * @returns URI of preprocessed image
-   */
-  private async preprocessForDetection(photoUri: string, inputSize: number): Promise<string> {
-    console.log(`🔧 Preprocessing for detection (${inputSize}x${inputSize})`);
-    
-    const preprocessed = await ImageManipulator.manipulateAsync(
-      photoUri,
-      [
-        { resize: { width: inputSize, height: inputSize } }
-      ],
-      { 
-        format: ImageManipulator.SaveFormat.JPEG, 
-        compress: 0.9 
-      }
-    );
-    
-    console.log(`✅ Preprocessed for detection: ${inputSize}x${inputSize}`);
-    return preprocessed.uri;
-  }
-
-  /**
    * Simple insect detection using image analysis heuristics
    */
   private async simpleInsectDetection(photoUri: string): Promise<{ x: number; y: number; width: number; height: number } | null> {

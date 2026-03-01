@@ -12,6 +12,11 @@ import { ThemeProvider } from '@/contexts/ThemeContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { walkModeService } from '@/services/WalkModeService';
 
+// Import BackgroundStepTracking so that TaskManager.defineTask() runs at
+// module load time — required for the background fetch task to be registered
+// with the OS even when the app is cold-started by the background scheduler.
+import '@/services/BackgroundStepTracking';
+
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const [loaded] = useFonts({

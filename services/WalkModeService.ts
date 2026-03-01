@@ -17,9 +17,11 @@ import { BUG_TRAP, FULL_REVIVE, POTION, REVIVE_SEED, SUPER_POTION } from '@/cons
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Pedometer } from 'expo-sensors';
 import { AppState, AppStateStatus, Platform } from 'react-native';
-
-// Background task name
-const BACKGROUND_STEP_TASK = 'background-step-tracking';
+import {
+    consumeBackgroundSteps,
+    registerBackgroundStepTracking,
+    unregisterBackgroundStepTracking,
+} from './BackgroundStepTracking';
 
 // Mock Pedometer for web/simulator
 class MockPedometer {
@@ -84,11 +86,11 @@ export interface WalkHistoryEntry {
 // Walk Mode Configuration
 export const WALK_MODE_CONFIG = {
   // XP Conversion
-  STEPS_PER_XP_GAIN: 1312,       // Every 1312 steps (1 km) = XP gain
+  STEPS_PER_XP_GAIN: 20,        // TESTING: 20 steps per milestone (normally 1312)
   XP_PER_MILESTONE: 5,           // 5 XP per milestone reached
   
   // Item Drop System  
-  ITEM_DROP_CHANCE: 0.15,        // 15% chance per XP milestone to drop item
+  ITEM_DROP_CHANCE: 1.0,         // TESTING: 100% drop chance (normally 0.15)
   
   // Item Drop Weights (higher = more common)
   ITEM_DROP_WEIGHTS: {
@@ -277,6 +279,9 @@ class WalkModeService {
         }
       });
 
+      // Register background fetch task so steps are tracked even when app is killed
+      await registerBackgroundStepTracking();
+
       await this.saveState();
       this.log('✅ Walk Mode tracking started');
       
@@ -315,6 +320,9 @@ class WalkModeService {
         this._appStateSubscription.remove();
         this._appStateSubscription = null;
       }
+
+      // Unregister background step tracking
+      await unregisterBackgroundStepTracking();
 
       this.state.isActive = false;
       this.state.activeBugId = null;
@@ -400,24 +408,39 @@ class WalkModeService {
       const now = new Date();
       const elapsed = now.getTime() - lastUpdate.getTime();
 
-      // Only attempt recovery if the gap is > 5 seconds and < 7 days
-      if (elapsed < 5000 || elapsed > 7 * 24 * 60 * 60 * 1000) {
-        this.log('⏭️ Skipping step recovery (gap too short or too long):', Math.round(elapsed / 1000), 's');
-        // Still update timestamp so we don't keep retrying the same stale range
-        this.state.lastUpdateTimestamp = now.getTime();
-        await this.saveState();
-        return;
+      let recoveredSteps = 0;
+
+      // ── 1. Consume steps accumulated by the background fetch task ──
+      //    These were tracked while the app was fully killed.
+      try {
+        const bgSteps = await consumeBackgroundSteps();
+        if (bgSteps > 0) {
+          recoveredSteps += bgSteps;
+          this.log(`🔄 Consumed ${bgSteps} steps from background tracking`);
+        }
+      } catch (error_) {
+        this.log('⚠️ Failed to consume background steps:', error_);
       }
 
-      let recoveredSteps = 0;
-      try {
-        const result = await PedometerAPI.getStepCountAsync(lastUpdate, now);
-        if (result && result.steps > 0) {
-          recoveredSteps = result.steps;
+      // ── 2. Also query Pedometer.getStepCountAsync as a fallback ──
+      //    Only attempt if the gap is > 5 seconds and < 7 days.
+      if (elapsed >= 5000 && elapsed <= 7 * 24 * 60 * 60 * 1000) {
+        try {
+          const result = await PedometerAPI.getStepCountAsync(lastUpdate, now);
+          if (result && result.steps > 0) {
+            // Use the larger of background-accumulated or pedometer-reported steps
+            // to avoid double-counting while still getting the best coverage.
+            if (result.steps > recoveredSteps) {
+              this.log(`🔄 Pedometer reported ${result.steps} steps (more than bg: ${recoveredSteps}), using pedometer value`);
+              recoveredSteps = result.steps;
+            }
+          }
+        } catch (pedometerError) {
+          // getStepCountAsync can fail on Android without Health Connect / Google Fit
+          this.log('⚠️ Pedometer.getStepCountAsync failed (platform limitation):', pedometerError);
         }
-      } catch (pedometerError) {
-        // getStepCountAsync can fail on Android without Health Connect / Google Fit
-        this.log('⚠️ Pedometer.getStepCountAsync failed (platform limitation):', pedometerError);
+      } else if (recoveredSteps === 0) {
+        this.log('⏭️ Skipping pedometer recovery (gap too short or too long):', Math.round(elapsed / 1000), 's');
       }
 
       // Always advance the timestamp so the next recovery attempt
@@ -425,7 +448,7 @@ class WalkModeService {
       this.state.lastUpdateTimestamp = now.getTime();
 
       if (recoveredSteps > 0) {
-        this.log(`🔄 Recovered ${recoveredSteps} steps taken while app was closed`);
+        this.log(`🔄 Recovered ${recoveredSteps} total steps taken while app was closed`);
         this.state.sessionSteps += recoveredSteps;
         this.state.totalSteps += recoveredSteps;
 
@@ -438,7 +461,7 @@ class WalkModeService {
           await this.saveState();
         }
       } else {
-        this.log('🔄 No missed steps to recover (pedometer returned 0)');
+        this.log('🔄 No missed steps to recover');
         await this.saveState();
       }
     } catch (error) {

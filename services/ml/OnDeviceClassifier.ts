@@ -476,14 +476,22 @@ class OnDeviceClassifier {
     // Enhanced mock predictions using your trained 15-species model data
     console.log('🎭 Generating realistic mock predictions from trained model species');
     
-    // Weighted probabilities based on common insect sightings (matches trained model classes)
+    // Weighted probabilities based on common insect sightings (matches ALL trained model classes).
+    // Every class the model can output must appear here so stubs never skew toward a subset.
     const speciesWeights: { [key: string]: number } = {
-      'ant': 0.25,        // Very common
-      'Bees': 0.20,       // Common
-      'Butterfly': 0.18,  // Common
-      'Ladybug': 0.15,    // Moderately common
-      'wasp': 0.12,       // Less common
-      'dragonfly': 0.10,  // Less common
+      'ant':        0.18,
+      'Bees':       0.18,
+      'bee':        0.18, // alternate casing used by some label files
+      'Butterfly':  0.15,
+      'Ladybug':    0.12,
+      'wasp':       0.12,
+      'dragonfly':  0.10,
+      'scorpion':   0.08, // less common but must be represented
+      'Scorpion':   0.08,
+      'beetle':     0.06,
+      'Beetle':     0.06,
+      'grasshopper':0.04,
+      'moth':       0.03,
     };
 
     // Select species based on weights (simulating YOLOv8 confidence scores)

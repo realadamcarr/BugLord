@@ -48,7 +48,10 @@ service cloud.firestore {
     // ── Friend Requests ─────────────────────────────────────────────
 
     match /friend_requests/{requestId} {
-      // Both sender and recipient can read
+      // Both sender and recipient can read (get and list).
+      // All queries MUST include a where clause on fromUid or toUid that
+      // matches the authenticated user, so Firestore can verify every
+      // returned document satisfies this rule.
       allow read: if isSignedIn()
         && (request.auth.uid == resource.data.fromUid
             || request.auth.uid == resource.data.toUid);

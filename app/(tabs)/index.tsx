@@ -355,45 +355,48 @@ export default function CaptureScreen() {
         }
 
         // VALIDATION: Check if insect is detected with minimum confidence
-        const MIN_CONFIDENCE = 0.30; // 30% — allows reasonable ML detections through
+        const MIN_CONFIDENCE = 0.8; // 80% — only accept confident ML detections
         const hasValidDetection = mlCandidates.length > 0 && mlCandidates[0].confidence >= MIN_CONFIDENCE;
 
         if (!hasValidDetection) {
-          // ML didn't detect anything confidently — fall through to fallback identification
-          // instead of hard-rejecting (the API/local fallback may still identify something)
-          console.log('⚠️ ML confidence too low, falling through to fallback identification...');
-          mlCandidates = []; // Clear so the fallback path runs below
+          // ML didn't detect anything confidently — reject the scan
+          const topConf = mlCandidates.length > 0 ? mlCandidates[0].confidence : 0;
+          console.log(`⚠️ ML confidence too low (${(topConf * 100).toFixed(1)}%), rejecting scan`);
+          setIsIdentifying(false);
+          setShowBugIdentification(false);
+          Alert.alert(
+            'Could Not Identify Bug',
+            topConf > 0
+              ? `Best match was only ${Math.round(topConf * 100)}% confident (need 80%). Try getting closer, improving lighting, or adjusting the angle.`
+              : 'No insect detected in this photo. Make sure the bug is clearly visible and well-lit.',
+            [{ text: 'Try Again' }]
+          );
+          return;
         }
       }
 
-      // USE REAL TENSORFLOW LITE PREDICTIONS WHEN AVAILABLE!
-      let result;
-      if (mlCandidates.length > 0) {
-        console.log('✅ Using real TensorFlow Lite predictions:', mlCandidates);
-        
-        // Convert TensorFlow Lite predictions to BugIdentificationResult format
-        let candidates: IdentificationCandidate[] = mlCandidates.map(candidate => ({
-          label: candidate.label,
-          species: candidate.label, // Use label as species for now
-          confidence: candidate.confidence,
-          source: 'TensorFlow Lite ML Model'
-        }));
+      // USE REAL TENSORFLOW LITE PREDICTIONS
+      console.log('✅ Using real TensorFlow Lite predictions:', mlCandidates);
+      
+      // Convert TensorFlow Lite predictions to BugIdentificationResult format
+      let candidates: IdentificationCandidate[] = mlCandidates.map(candidate => ({
+        label: candidate.label,
+        species: candidate.label, // Use label as species for now
+        confidence: candidate.confidence,
+        source: 'TensorFlow Lite ML Model'
+      }));
 
-        // Refine ant predictions using color analysis (red vs black vs carpenter)
-        if (candidates[0]?.label?.toLowerCase() === 'ant') {
-          console.log('🐜 Top prediction is ant — running sub-classification...');
-          candidates = await bugIdentificationService.refineAntPrediction(candidates, originalPhoto);
-        }
-
-        result = {
-          candidates,
-          provider: 'TensorFlow Lite',
-          isFromAPI: false
-        };
-      } else {
-        console.log('⚠️  No ML predictions available, using fallback identification.');
-        result = await bugIdentificationService.identify(processedImage.croppedImage);
+      // Refine ant predictions using color analysis (red vs black vs carpenter)
+      if (candidates[0]?.label?.toLowerCase() === 'ant') {
+        console.log('🐜 Top prediction is ant — running sub-classification...');
+        candidates = await bugIdentificationService.refineAntPrediction(candidates, originalPhoto);
       }
+
+      const result = {
+        candidates,
+        provider: 'TensorFlow Lite',
+        isFromAPI: false
+      };
 
       setIdentificationResult(result);
 
@@ -531,8 +534,12 @@ export default function CaptureScreen() {
   };
 
   // ─── Live Scan Callbacks ──────────────────────────────────────
-  /** Classify a single photo using the on-device ML model */
+  /** Classify a single photo using the on-device ML model.
+   *  Returns null ONLY when the model is not loaded yet (BugCamera shows "not ready" alert).
+   *  Returns { label, confidence } always when the model IS loaded — even for low-confidence
+   *  results so BugCamera can show the "low confidence" message instead of "not ready". */
   const handleClassifyPhoto = useCallback(async (photoUri: string): Promise<{ label: string; confidence: number } | null> => {
+    // Return null = model not loaded, so BugCamera can show a specific message
     if (!mlReady || !onDeviceClassifier.isReady()) return null;
     try {
       const mlInput = await mlPreprocessingService.preprocessForInference(photoUri, {
@@ -540,11 +547,15 @@ export default function CaptureScreen() {
         quality: 0.7,
       });
       const candidates = await onDeviceClassifier.classifyImage(mlInput, 3);
-      if (candidates.length === 0 || candidates[0].confidence < 0.45) return null;
+      if (candidates.length === 0) {
+        // Model ran but produced no output — return zero-confidence so BugCamera
+        // shows "could not identify" rather than "model not ready"
+        return { label: '', confidence: 0 };
+      }
       return { label: candidates[0].label, confidence: candidates[0].confidence };
     } catch (err) {
       console.warn('Photo classification error:', err);
-      return null;
+      return { label: '', confidence: 0 };
     }
   }, [mlReady]);
 

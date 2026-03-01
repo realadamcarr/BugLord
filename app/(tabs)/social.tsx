@@ -11,6 +11,7 @@ import {
     sendFriendRequest,
     subscribeFriends,
     subscribeIncomingFriendRequests,
+    subscribeOutgoingFriendRequests,
 } from '@/src/services/friendsService';
 import { ensureUserProfile, getUserProfile, logout, UserProfile } from '@/src/services/socialAuth';
 import { subscribeIncomingTrades } from '@/src/services/tradeService';
@@ -43,6 +44,7 @@ export default function SocialScreen() {
 
   // ── Friends & requests ───────────────────────────────────────────
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
+  const [sentRequests, setSentRequests] = useState<FriendRequest[]>([]);
   const [friendUids, setFriendUids] = useState<string[]>([]);
   const [friendProfiles, setFriendProfiles] = useState<UserProfile[]>([]);
   const [processingRequest, setProcessingRequest] = useState<string | null>(null);
@@ -69,6 +71,13 @@ export default function SocialScreen() {
   useEffect(() => {
     if (!user) return;
     const unsub = subscribeIncomingFriendRequests(user.uid, setFriendRequests);
+    return unsub;
+  }, [user]);
+
+  // Subscribe to outgoing sent requests
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeOutgoingFriendRequests(user.uid, setSentRequests);
     return unsub;
   }, [user]);
 
@@ -301,6 +310,22 @@ export default function SocialScreen() {
           </View>
         )}
 
+        {/* ── Sent (Outgoing) Friend Requests ─────────────────────── */}
+        {sentRequests.length > 0 && (
+          <View style={[styles.card, { backgroundColor: theme.colors.card }]}>
+            <ThemedText style={styles.cardTitle}>
+              Sent Requests ({sentRequests.length})
+            </ThemedText>
+            {sentRequests.map((req) => (
+              <SentRequestRow
+                key={req.id}
+                request={req}
+                theme={theme}
+              />
+            ))}
+          </View>
+        )}
+
         {/* ── Friends List ────────────────────────────────────────── */}
         <View style={[styles.card, { backgroundColor: theme.colors.card }]}>
           <ThemedText style={styles.cardTitle}>
@@ -434,6 +459,35 @@ const rowStyles = StyleSheet.create({
   declineBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6 },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
 });
+
+// ── Sent Request Row ────────────────────────────────────────────────
+
+function SentRequestRow({
+  request,
+  theme,
+}: Readonly<{
+  request: FriendRequest;
+  theme: any;
+}>) {
+  const [recipientProfile, setRecipientProfile] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    getUserProfile(request.toUid).then(setRecipientProfile);
+  }, [request.toUid]);
+
+  return (
+    <View style={rowStyles.container}>
+      <View style={rowStyles.info}>
+        <ThemedText style={rowStyles.name}>
+          {recipientProfile?.displayName ?? request.toUid.slice(0, 8)}
+        </ThemedText>
+      </View>
+      <ThemedText style={{ fontSize: 13, fontStyle: 'italic', color: theme.colors.textMuted }}>
+        Pending…
+      </ThemedText>
+    </View>
+  );
+}
 
 // ── Styles ───────────────────────────────────────────────────────────
 

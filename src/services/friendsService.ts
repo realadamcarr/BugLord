@@ -1,18 +1,19 @@
 import { db } from '@/src/lib/firebase';
 import { FriendRequest, FriendRequestStatus } from '@/src/models/friends';
 import {
-  addDoc,
-  collection,
-  doc,
-  getDocs,
-  onSnapshot,
-  orderBy,
-  query,
-  runTransaction,
-  serverTimestamp,
-  setDoc,
-  Unsubscribe,
-  where
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    onSnapshot,
+    orderBy,
+    query,
+    runTransaction,
+    serverTimestamp,
+    setDoc,
+    Unsubscribe,
+    where
 } from 'firebase/firestore';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -111,31 +112,35 @@ export async function sendFriendRequest(
   }
 
   try {
-    // Check for existing pending request in either direction
-    const q = query(
-      collection(db, 'friend_requests'),
-      where('status', '==', 'pending' satisfies FriendRequestStatus),
-    );
-    const snap = await getDocs(q);
-    const duplicate = snap.docs.some((d) => {
-      const data = d.data();
-      return (
-        (data.fromUid === fromUid && data.toUid === toUid) ||
-        (data.fromUid === toUid && data.toUid === fromUid)
-      );
-    });
-
-    if (duplicate) {
-      return { success: false, error: 'A pending friend request already exists' };
-    }
-
     // Check if already friends
     const friendshipId = buildFriendshipId(fromUid, toUid);
-    const friendshipSnap = await getDocs(
-      query(collection(db, 'friendships'), where('__name__', '==', friendshipId)),
-    );
-    if (!friendshipSnap.empty) {
+    const friendshipDoc = await getDoc(doc(db, 'friendships', friendshipId));
+    if (friendshipDoc.exists()) {
       return { success: false, error: 'You are already friends' };
+    }
+
+    // Check for existing pending request: from me → them
+    const outgoingQ = query(
+      collection(db, 'friend_requests'),
+      where('fromUid', '==', fromUid),
+      where('toUid', '==', toUid),
+      where('status', '==', 'pending' satisfies FriendRequestStatus),
+    );
+    const outgoingSnap = await getDocs(outgoingQ);
+    if (!outgoingSnap.empty) {
+      return { success: false, error: 'You already sent a request to this player' };
+    }
+
+    // Check for existing pending request: them → me
+    const incomingQ = query(
+      collection(db, 'friend_requests'),
+      where('fromUid', '==', toUid),
+      where('toUid', '==', fromUid),
+      where('status', '==', 'pending' satisfies FriendRequestStatus),
+    );
+    const incomingSnap = await getDocs(incomingQ);
+    if (!incomingSnap.empty) {
+      return { success: false, error: 'This player already sent you a request — check your pending requests!' };
     }
 
     await addDoc(collection(db, 'friend_requests'), {
@@ -148,6 +153,7 @@ export async function sendFriendRequest(
 
     return { success: true };
   } catch (err: unknown) {
+    console.error('[friendsService] sendFriendRequest error:', err);
     const message = err instanceof Error ? err.message : 'Failed to send friend request';
     return { success: false, error: message };
   }
@@ -205,6 +211,9 @@ export async function lookupByFriendCode(
 
 /**
  * Subscribe to incoming pending friend requests for a user.
+ * NOTE: This query requires a Firestore composite index on friend_requests:
+ *   (toUid ASC, status ASC, createdAt DESC)
+ * See firestore.indexes.json or create it manually in the Firebase Console.
  */
 export function subscribeIncomingFriendRequests(
   uid: string,
@@ -227,7 +236,43 @@ export function subscribeIncomingFriendRequests(
       })) as FriendRequest[];
       onData(requests);
     },
-    onError,
+    (error) => {
+      console.error('[friendsService] subscribeIncomingFriendRequests error:', error);
+      onError?.(error);
+    },
+  );
+}
+
+/**
+ * Subscribe to outgoing pending friend requests for a user (requests the user sent).
+ * NOTE: This query requires a Firestore composite index on friend_requests:
+ *   (fromUid ASC, status ASC, createdAt DESC)
+ */
+export function subscribeOutgoingFriendRequests(
+  uid: string,
+  onData: (requests: FriendRequest[]) => void,
+  onError?: (error: Error) => void,
+): Unsubscribe {
+  const q = query(
+    collection(db, 'friend_requests'),
+    where('fromUid', '==', uid),
+    where('status', '==', 'pending' satisfies FriendRequestStatus),
+    orderBy('createdAt', 'desc'),
+  );
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      const requests: FriendRequest[] = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      })) as FriendRequest[];
+      onData(requests);
+    },
+    (error) => {
+      console.error('[friendsService] subscribeOutgoingFriendRequests error:', error);
+      onError?.(error);
+    },
   );
 }
 

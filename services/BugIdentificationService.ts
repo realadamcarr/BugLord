@@ -10,9 +10,12 @@ export interface APIError {
 // Configuration for different identification services
 const API_CONFIG = {
   // iNaturalist is free and great for species identification
+  // NOTE: iNaturalist's API does not accept raw image uploads for identification.
+  // Keeping ENABLED: false prevents the fake GET /observations path from running,
+  // which was silently producing random SAMPLE_BUG results on every scan.
   INATURALIST: {
     BASE_URL: 'https://api.inaturalist.org/v1',
-    ENABLED: true,
+    ENABLED: false,
   },
   // Google Vision API (requires API key)
   GOOGLE_VISION: {
@@ -152,33 +155,50 @@ class BugIdentificationService {
   }
 
   /**
-   * Local analysis - Uses image analysis patterns and heuristics
+   * Stable hash of a string → unsigned 32-bit integer.
+   * Used so the same photo URI always maps to the same fallback bug.
+   */
+  private simpleHash(str: string): number {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash |= 0; // convert to 32-bit integer
+    }
+    return Math.abs(hash);
+  }
+
+  /**
+   * Local analysis - Uses a deterministic hash of the image URI so the
+   * same photo always produces the same fallback result.
    */
   private async identifyWithLocalAnalysis(photoUri: string): Promise<BugIdentificationResult> {
     // Simulate some basic analysis time
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Use weighted random selection based on common bugs
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Use a stable hash so the same URI → same bug every time
+    const hash = this.simpleHash(photoUri);
+
     const weights = [0.4, 0.3, 0.2, 0.08, 0.02]; // Common to Legendary
     const rarities: BugRarity[] = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
-    
-    let random = Math.random();
+
+    // Deterministically pick rarity from hash
+    const rarityRoll = (hash % 100) / 100;
+    let cumulative = 0;
     let selectedRarity: BugRarity = 'common';
-    
     for (let i = 0; i < weights.length; i++) {
-      random -= weights[i];
-      if (random <= 0) {
+      cumulative += weights[i];
+      if (rarityRoll < cumulative) {
         selectedRarity = rarities[i];
         break;
       }
     }
-    
-    // Filter sample bugs by selected rarity or pick random
+
+    // Deterministically pick bug from filtered list
     const suitableBugs = SAMPLE_BUGS.filter(bug => bug.rarity === selectedRarity);
-    const selectedBug = suitableBugs.length > 0 
-      ? suitableBugs[Math.floor(Math.random() * suitableBugs.length)]
-      : SAMPLE_BUGS[Math.floor(Math.random() * SAMPLE_BUGS.length)];
-    
+    const pool = suitableBugs.length > 0 ? suitableBugs : SAMPLE_BUGS;
+    const selectedBug = pool[(hash >> 3) % pool.length];
+
     const candidates: IdentificationCandidate[] = this.pickCandidates(selectedBug);
 
     return {
@@ -305,10 +325,14 @@ class BugIdentificationService {
   }
 
   /**
-   * Fallback identification when all APIs fail
+   * Fallback identification when all APIs fail.
+   * Uses a time-bucket so results are stable within a 10-second window
+   * (prevents the same photo showing a different bug on every retry).
    */
   private getFallbackIdentification(): BugIdentificationResult {
-    const fallbackBug = SAMPLE_BUGS[Math.floor(Math.random() * SAMPLE_BUGS.length)];
+    const bucket = Math.floor(Date.now() / 10000); // changes every 10 s
+    const idx = bucket % SAMPLE_BUGS.length;
+    const fallbackBug = SAMPLE_BUGS[idx];
     const candidates = this.pickCandidates({ name: fallbackBug.name, species: fallbackBug.species });
     return {
       candidates,
