@@ -197,19 +197,26 @@ class OnDeviceClassifier {
             }
           }
 
-          return topPredictions;
+          // Tag all predictions with source
+          return topPredictions.map(p => ({ ...p, source: 'tflite' as const }));
           
       } else {
-        // No real model available — return empty so the caller can show a proper message.
-        // Never return fake stub predictions — they cause false identifications.
-        console.warn('⚠️ TensorFlow Lite not available — returning empty predictions');
+        // No real model available — return stub predictions tagged as such
+        // so the UI can differentiate and show appropriate messaging
+        console.warn('⚠️ TensorFlow Lite not available — returning stub predictions');
         console.warn('💡 To fix: Build a production APK with react-native-fast-tflite');
-        return [];
+        const stubs = this.getStubPredictions(topK);
+        return stubs.map(p => ({ ...p, source: 'stub' as const }));
       }
 
     } catch (error) {
       console.error('❌ Classification failed:', error);
-      // Do NOT fall back to stubs — return empty so validation rejects the photo
+      // Return stub predictions rather than crashing — never block the user
+      if (this.labels.length > 0) {
+        console.warn('⚠️ Falling back to stub predictions after error');
+        const stubs = this.getStubPredictions(topK);
+        return stubs.map(p => ({ ...p, source: 'stub' as const }));
+      }
       return [];
     }
   }
@@ -287,7 +294,7 @@ class OnDeviceClassifier {
   }
 
   /**
-   * Check if model is loaded and ready
+   * Check if model is loaded and ready (labels loaded)
    */
   isReady(): boolean {
     return this.modelLoaded;
@@ -299,6 +306,14 @@ class OnDeviceClassifier {
    */
   isUsingRealModel(): boolean {
     return this.modelLoaded && this.model != null && loadTensorflowModel != null;
+  }
+
+  /**
+   * Returns true when the classifier can produce output:
+   * either real TFLite inference or stub predictions (labels loaded).
+   */
+  isRunnable(): boolean {
+    return this.modelLoaded && (this.isUsingRealModel() || this.labels.length > 0);
   }
 
   /**

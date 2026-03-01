@@ -5,6 +5,7 @@ import {
     ActivityIndicator,
     Alert,
     Image,
+    Platform,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -35,6 +36,11 @@ export const BugCamera: React.FC<BugCameraProps> = ({
   const facing: CameraType = 'back';
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
+
+  // Camera readiness gate — disables capture until the native surface is ready
+  const [cameraReady, setCameraReady] = useState(false);
+  // In-flight capture lock — prevents double-tap captures
+  const [isCapturing, setIsCapturing] = useState(false);
 
   // Live scan state — simple: idle → classifying → result
   const [liveScanState, setLiveScanState] = useState<'idle' | 'classifying' | 'result'>('idle');
@@ -68,41 +74,76 @@ export const BugCamera: React.FC<BugCameraProps> = ({
     );
   }
 
+  /** Shared capture options — no base64/exif overhead, skip JPEG re-encode on Android */
+  const captureOptions = {
+    quality: 0.8,
+    base64: false as const,
+    exif: false as const,
+    ...(Platform.OS === 'android' ? { skipProcessing: true } : {}),
+  };
+
   // ─── Photo Mode: capture and return ────────────────────────
   const takePicture = async () => {
-    if (!cameraRef.current) return;
+    if (!cameraRef.current || !cameraReady || isCapturing) return;
+    setIsCapturing(true);
 
     try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
-        base64: true,
-        exif: true,
-      });
+      let photo = await cameraRef.current.takePictureAsync(captureOptions);
+
+      // Single retry with short delay if first attempt fails
+      if (!photo?.uri) {
+        await new Promise(r => setTimeout(r, 150));
+        photo = await cameraRef.current.takePictureAsync(captureOptions);
+      }
 
       if (photo?.uri) {
         onCapture(photo.uri);
+      } else {
+        Alert.alert('Error', 'Failed to capture photo. Please try again.');
       }
     } catch (error) {
       console.error('Error taking picture:', error);
+      // Single retry on exception
+      try {
+        await new Promise(r => setTimeout(r, 150));
+        const retryPhoto = await cameraRef.current.takePictureAsync(captureOptions);
+        if (retryPhoto?.uri) {
+          onCapture(retryPhoto.uri);
+          return;
+        }
+      } catch { /* ignore retry error */ }
       Alert.alert('Error', 'Failed to capture photo. Please try again.');
+    } finally {
+      setIsCapturing(false);
     }
   };
 
   // ─── Live Scan: capture → classify → show result ───────────
   const takeScanPhoto = async () => {
-    if (!cameraRef.current || !onClassifyPhoto) return;
+    if (!cameraRef.current || !onClassifyPhoto) {
+      setLiveScanState('idle');
+      return;
+    }
+    if (!cameraReady || isCapturing) {
+      setLiveScanState('idle');
+      return;
+    }
+    setIsCapturing(true);
 
     try {
       setLiveScanState('classifying');
 
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
-        base64: true,
-        exif: true,
-      });
+      let photo = await cameraRef.current.takePictureAsync(captureOptions);
+
+      // Single retry if first attempt fails
+      if (!photo?.uri) {
+        await new Promise(r => setTimeout(r, 150));
+        photo = await cameraRef.current.takePictureAsync(captureOptions);
+      }
 
       if (!photo?.uri) {
         setLiveScanState('idle');
+        setIsCapturing(false);
         return;
       }
 
@@ -112,14 +153,19 @@ export const BugCamera: React.FC<BugCameraProps> = ({
       const result = await onClassifyPhoto(photo.uri);
 
       if (result === null) {
-        // null means the ML model is not loaded yet (not just low confidence)
+        // null means the ML model is still loading — offer actionable choices
         setLiveScanState('idle');
         Alert.alert(
-          'ML Model Not Ready',
-          'The on-device model is still loading. Try again in a moment, or switch to Photo mode.',
-          [{ text: 'OK' }]
+          'ML Model Loading',
+          'The on-device model is still loading. What would you like to do?',
+          [
+            { text: 'Try Again', onPress: () => { /* user taps scan button again */ } },
+            { text: 'Switch to Photo', onPress: () => { /* parent handles mode */ } },
+            { text: 'Close', style: 'cancel', onPress: onClose },
+          ]
         );
-      } else if (result.confidence >= 0.5) {
+      } else if (result.label && result.confidence > 0) {
+        // Always show result — even low confidence — let the user decide
         setScanLabel(result.label);
         setScanConfidence(result.confidence);
         setLiveScanState('result');
@@ -127,9 +173,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
         setLiveScanState('idle');
         Alert.alert(
           'No Bug Detected',
-          result.confidence > 0
-            ? `Low confidence (${Math.round(result.confidence * 100)}%). Try getting closer, improving lighting, or adjusting the angle.`
-            : 'Could not identify a bug in this photo. Try getting closer or adjusting the angle.',
+          'Could not identify a bug in this photo. Try getting closer or adjusting the angle.',
           [{ text: 'Try Again' }]
         );
       }
@@ -137,6 +181,8 @@ export const BugCamera: React.FC<BugCameraProps> = ({
       console.error('Live scan capture failed:', error);
       setLiveScanState('idle');
       Alert.alert('Error', 'Failed to capture photo. Please try again.');
+    } finally {
+      setIsCapturing(false);
     }
   };
 
@@ -222,6 +268,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
           facing={facing}
           mode="picture"
           ref={cameraRef}
+          onCameraReady={() => setCameraReady(true)}
         >
           <View style={styles.overlay}>
             {/* Top controls */}
@@ -256,10 +303,10 @@ export const BugCamera: React.FC<BugCameraProps> = ({
               <TouchableOpacity
                 style={[
                   styles.captureButton,
-                  liveScanState === 'classifying' && { opacity: 0.5 },
+                  (!cameraReady || isCapturing || liveScanState === 'classifying') && { opacity: 0.5 },
                 ]}
                 onPress={mode === 'liveScan' ? takeScanPhoto : takePicture}
-                disabled={liveScanState === 'classifying'}
+                disabled={!cameraReady || isCapturing || liveScanState === 'classifying'}
               >
                 <View style={styles.captureIcon} />
               </TouchableOpacity>

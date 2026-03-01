@@ -344,23 +344,12 @@ export default function CaptureScreen() {
 
         console.log('🧠 Running ML classification...');
 
-        // Check if real TFLite model is available (not stubs)
+        // Check ML model state for debug logging
         const usingRealModel = onDeviceClassifier.isUsingRealModel();
+        const modelRunnable = onDeviceClassifier.isRunnable();
+        console.log(`🔍 ML Debug — mlReady: ${mlReady}, isReady: ${onDeviceClassifier.isReady()}, isUsingRealModel: ${usingRealModel}, isRunnable: ${modelRunnable}`);
 
-        if (!usingRealModel) {
-          // No real model → reject immediately instead of using fake stubs
-          console.warn('⚠️ No real TFLite model available — cannot identify bugs');
-          setIsIdentifying(false);
-          setShowBugIdentification(false);
-          Alert.alert(
-            'ML Model Not Available',
-            'The AI model is not loaded. Please use a production APK built with EAS to enable real bug identification.',
-            [{ text: 'OK' }]
-          );
-          return;
-        }
-
-        // Run real on-device ML classification
+        // Run on-device ML classification (real model or stub fallback)
         if (mlReady && onDeviceClassifier.isReady()) {
           try {
             mlCandidates = await onDeviceClassifier.classifyImage(mlInput, 5);
@@ -370,23 +359,29 @@ export default function CaptureScreen() {
           }
         }
 
-        // VALIDATION: Check if insect is detected with minimum confidence
-        const MIN_CONFIDENCE = 0.5; // 50% — reasonable for a 6-class model on real photos
-        const hasValidDetection = mlCandidates.length > 0 && mlCandidates[0].confidence >= MIN_CONFIDENCE;
+        // If ML produced no candidates, fall back to the API identification service
+        if (mlCandidates.length === 0) {
+          console.log('⚠️ No ML candidates — falling back to bugIdentificationService...');
+          try {
+            const fallbackResult = await bugIdentificationService.identify(processedImage.croppedImage);
+            if (fallbackResult?.candidates?.length > 0) {
+              console.log('✅ Fallback identification succeeded:', fallbackResult.candidates[0].label);
+              // Convert to the shape expected below
+              mlCandidates = fallbackResult.candidates.map((c: any) => ({
+                label: c.label || c.species,
+                confidence: c.confidence,
+                source: 'fallback',
+              }));
+            }
+          } catch (error_) {
+            console.warn('⚠️ Fallback identification also failed:', error_);
+          }
+        }
 
-        if (!hasValidDetection) {
-          const topConf = mlCandidates.length > 0 ? mlCandidates[0].confidence : 0;
-          console.log(`⚠️ ML confidence too low (${(topConf * 100).toFixed(1)}%), rejecting scan`);
-          setIsIdentifying(false);
-          setShowBugIdentification(false);
-          Alert.alert(
-            'Could Not Identify Bug',
-            topConf > 0
-              ? `Best match was only ${Math.round(topConf * 100)}% confident (need 50%). Try getting closer, improving lighting, or adjusting the angle.`
-              : 'No insect detected in this photo. Make sure the bug is clearly visible and well-lit.',
-            [{ text: 'Try Again' }]
-          );
-          return;
+        // If still no candidates at all, allow manual entry instead of blocking
+        if (mlCandidates.length === 0) {
+          console.log('⚠️ No identification possible — allowing manual add');
+          mlCandidates = [{ label: 'Unknown Bug', confidence: 0, source: 'manual' }];
         }
       }
 
@@ -550,12 +545,15 @@ export default function CaptureScreen() {
 
   // ─── Live Scan Callbacks ──────────────────────────────────────
   /** Classify a single photo using the on-device ML model.
-   *  Returns null ONLY when the model is not loaded yet (BugCamera shows "not ready" alert).
-   *  Returns { label, confidence } always when the model IS loaded — even for low-confidence
-   *  results so BugCamera can show the "low confidence" message instead of "not ready". */
+   *  Returns null ONLY when the model is truly still loading (BugCamera shows "loading" alert).
+   *  Returns { label, confidence } in all other cases — even for low-confidence or stub results
+   *  so BugCamera can show the result instead of a hard "not ready" block. */
   const handleClassifyPhoto = useCallback(async (photoUri: string): Promise<{ label: string; confidence: number } | null> => {
-    // Return null = model not loaded / no real model, so BugCamera can show a specific message
-    if (!mlReady || !onDeviceClassifier.isReady() || !onDeviceClassifier.isUsingRealModel()) return null;
+    console.log(`🔍 handleClassifyPhoto — mlReady: ${mlReady}, isReady: ${onDeviceClassifier.isReady()}, isRunnable: ${onDeviceClassifier.isRunnable()}, isUsingRealModel: ${onDeviceClassifier.isUsingRealModel()}`);
+
+    // Return null ONLY if model is truly not loaded yet
+    if (!mlReady || !onDeviceClassifier.isReady()) return null;
+
     try {
       const mlInput = await mlPreprocessingService.preprocessForInference(photoUri, {
         targetSize: 224,

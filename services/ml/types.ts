@@ -2,6 +2,8 @@
 export interface MLCandidate {
   label: string;
   confidence: number;
+  /** Where this prediction came from: real TFLite inference or a stub fallback */
+  source?: 'tflite' | 'stub';
 }
 
 export interface MLModelInfo {
@@ -34,7 +36,8 @@ export interface BoundingBox {
 
 export interface DetectionResult {
   boxes: BoundingBox[];
-  inferenceTime: number;
+  inferenceTime?: number;
+  confidenceThreshold?: number;
 }
 
 export interface DetectionModelConfig {
@@ -73,25 +76,4 @@ export interface UploadQueueItem extends LabeledSample {
   status: 'pending' | 'uploading' | 'failed' | 'success';
 }
 
-// Object Detection Types
-export interface BoundingBox {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  confidence?: number;
-  class?: string;
-}
-
-export interface DetectionResult {
-  boxes: BoundingBox[];
-  inferenceTime: number;
-}
-
-export interface DetectionModelConfig {
-  modelPath: string;
-  labelsPath?: string;
-  inputSize: number; // e.g., 300 or 320 for SSD
-  confidenceThreshold: number;
-  maxDetections: number;
-}
+// (duplicate detection types removed — see definitions above)
