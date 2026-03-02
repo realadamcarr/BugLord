@@ -70,7 +70,13 @@
         }
       ],
       "expo-notifications",
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow BugLord to access your photos to scan existing bug images"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

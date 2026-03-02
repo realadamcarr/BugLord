@@ -16,6 +16,7 @@ import { modelUpdateService } from '@/services/ml/ModelUpdateService';
 import { onDeviceClassifier } from '@/services/ml/OnDeviceClassifier';
 import { Bug, BugIdentificationResult, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
 import { labelToCategory } from '@/utils/bugCategory';
+import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -308,6 +309,39 @@ export default function CaptureScreen() {
     
     // Automatically process the captured photo
     await processAndClassify(photoUri, photoUri);
+  };
+
+  // ─── Gallery Scan ─────────────────────────────────────────
+  const pickFromGalleryAndScan = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'BugLord needs access to your photo library to scan existing bug photos.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+        exif: true,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+
+      const photoUri = result.assets[0].uri;
+      setCapturedPhoto(photoUri);
+
+      // Reuse the exact same detection pipeline as camera capture
+      await processAndClassify(photoUri, photoUri);
+    } catch (error) {
+      console.error('Gallery scan failed:', error);
+      Alert.alert('Error', 'Failed to scan the selected photo. Please try again.');
+    }
   };
 
   const handleRecentBugTap = (bug: Bug) => {
@@ -703,6 +737,18 @@ export default function CaptureScreen() {
             </ThemedText>
           </TouchableOpacity>
 
+          {/* Gallery Scan Button */}
+          <TouchableOpacity
+            style={styles.galleryButton}
+            onPress={pickFromGalleryAndScan}
+          >
+            <Text style={styles.galleryIcon}>🖼️</Text>
+            <View style={styles.galleryButtonContent}>
+              <ThemedText style={styles.galleryButtonText}>Scan from Gallery</ThemedText>
+              <ThemedText style={styles.galleryButtonSubtext}>Identify a bug from an existing photo</ThemedText>
+            </View>
+          </TouchableOpacity>
+
           {/* Quick Stats */}
           <View style={styles.quickStats}>
             <View style={styles.statCard}>
@@ -1093,6 +1139,36 @@ const createStyles = (theme: any) => StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255,255,255,0.85)',
     fontWeight: '600',
+  },
+  galleryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.card,
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    marginBottom: 14,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+  },
+  galleryIcon: {
+    fontSize: 28,
+    marginRight: 14,
+  },
+  galleryButtonContent: {
+    flex: 1,
+  },
+  galleryButtonText: {
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  galleryButtonSubtext: {
+    fontSize: 11,
+    color: theme.colors.textMuted,
+    fontWeight: '600',
+    marginTop: 2,
   },
   quickStats: {
     flexDirection: 'row',
