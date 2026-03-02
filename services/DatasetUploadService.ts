@@ -10,7 +10,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { LabeledSample, UploadQueueItem } from './ml/types';
 
 const UPLOAD_QUEUE_KEY = 'UPLOAD_QUEUE';

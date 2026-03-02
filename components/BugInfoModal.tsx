@@ -1,4 +1,5 @@
 import { ThemedText } from '@/components/ThemedText';
+import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Bug, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
@@ -208,7 +209,9 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
 
           {/* Bug Image */}
           <View style={styles.imageContainer}>
-            {bug.photo ? (
+            {bug.category && BUG_SPRITE[bug.category] ? (
+              <Image source={BUG_SPRITE[bug.category]} style={styles.bugPhoto} />
+            ) : bug.photo ? (
               <Image source={{ uri: bug.photo }} style={styles.bugPhoto} />
             ) : bug.pixelArt ? (
               <Image source={{ uri: bug.pixelArt }} style={styles.bugIcon} />
@@ -331,6 +334,68 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
             </View>
           </View>
 
+          {/* Battle Stats */}
+          <View style={styles.section}>
+            <ThemedText style={styles.sectionTitle}>⚔️ Battle Stats</ThemedText>
+
+            {/* Attack */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>Attack</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View
+                    style={[
+                      styles.statBarFill,
+                      {
+                        width: `${Math.min(100, ((bug.attack || 0) / 40) * 100)}%`,
+                        backgroundColor: '#E74C3C',
+                      },
+                    ]}
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.attack || 0}</ThemedText>
+              </View>
+            </View>
+
+            {/* Defense */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>Defense</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View
+                    style={[
+                      styles.statBarFill,
+                      {
+                        width: `${Math.min(100, ((bug.defense || 0) / 35) * 100)}%`,
+                        backgroundColor: '#3498DB',
+                      },
+                    ]}
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.defense || 0}</ThemedText>
+              </View>
+            </View>
+
+            {/* Speed */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>Speed</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View
+                    style={[
+                      styles.statBarFill,
+                      {
+                        width: `${Math.min(100, ((bug.speed || 0) / 35) * 100)}%`,
+                        backgroundColor: '#2ECC71',
+                      },
+                    ]}
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.speed || 0}</ThemedText>
+              </View>
+            </View>
+          </View>
+
           {/* Candidates Selection */}
           {isNewCatch && candidates.length > 0 && !showPartySwap && (
             <View style={styles.section}>
@@ -429,7 +494,9 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
                     ]}
                     onPress={() => setSelectedSwapBug(partyBug.id)}
                   >
-                    {partyBug.photo ? (
+                    {partyBug.category && BUG_SPRITE[partyBug.category] ? (
+                      <Image source={BUG_SPRITE[partyBug.category]} style={styles.partyBugIcon} />
+                    ) : partyBug.photo ? (
                       <Image source={{ uri: partyBug.photo }} style={styles.partyBugIcon} />
                     ) : partyBug.pixelArt ? (
                       <Image source={{ uri: partyBug.pixelArt }} style={styles.partyBugIcon} />

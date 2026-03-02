@@ -45,7 +45,7 @@ class OnDeviceClassifier {
   private async ensureMlDirExists(): Promise<void> {
     const mlDir = `${FileSystem.documentDirectory!}ml/`;
     try {
-      const dirInfo = await FileSystem.getInfoAsync(mlDir, { size: false });
+      const dirInfo = await FileSystem.getInfoAsync(mlDir);
       if (!dirInfo.exists) {
         await FileSystem.makeDirectoryAsync(mlDir, { intermediates: true }).catch(() => {
           console.warn('Could not create ML directory, may already exist:', mlDir);
@@ -607,7 +607,7 @@ class OnDeviceClassifier {
     
     // Check if already copied
     try {
-      const fileInfo = await FileSystem.getInfoAsync(targetPath, { size: false });
+      const fileInfo = await FileSystem.getInfoAsync(targetPath);
       if (fileInfo.exists) {
         console.log('  ✅ Model already exists at:', targetPath);
         return targetPath;
@@ -643,7 +643,7 @@ class OnDeviceClassifier {
     
     // Check if already copied
     try {
-      const fileInfo = await FileSystem.getInfoAsync(targetPath, { size: false });
+      const fileInfo = await FileSystem.getInfoAsync(targetPath);
       if (fileInfo.exists) {
         console.log('✅ Labels already in FileSystem:', targetPath);
         return targetPath;

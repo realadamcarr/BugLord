@@ -1,6 +1,7 @@
 import { BugInfoModal } from '@/components/BugInfoModal';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Bug } from '@/types/Bug';
@@ -64,7 +65,9 @@ export const CollectionScreen: React.FC<CollectionScreenProps> = ({ onClose }) =
       onPress={() => handleBugPress(bug)}
     >
       <View style={[styles.bugImageContainer, isFainted && { opacity: 0.4 }]}>
-        {bug.photo ? (
+        {bug.category && BUG_SPRITE[bug.category] ? (
+          <Image source={BUG_SPRITE[bug.category]} style={styles.bugIcon} />
+        ) : bug.photo ? (
           <Image source={{ uri: bug.photo }} style={styles.bugIcon} />
         ) : bug.pixelArt ? (
           <Image source={{ uri: bug.pixelArt }} style={styles.bugIcon} />

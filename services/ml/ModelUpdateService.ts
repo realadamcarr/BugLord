@@ -11,7 +11,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { MLModelInfo } from './types';
 
 const MODEL_VERSION_KEY = 'MODEL_VERSION';
@@ -46,7 +46,7 @@ class ModelUpdateService {
 
     // Ensure ml directory exists
     try {
-      const dirInfo = await FileSystem.getInfoAsync(this.modelDir, { size: false });
+      const dirInfo = await FileSystem.getInfoAsync(this.modelDir);
       if (!dirInfo.exists) {
         try {
           await FileSystem.makeDirectoryAsync(this.modelDir, { intermediates: true });
@@ -231,8 +231,8 @@ class ModelUpdateService {
     const { modelPath, labelsPath } = this.getCurrentModelPaths();
     
     try {
-      const modelInfo = await FileSystem.getInfoAsync(modelPath, { size: false });
-      const labelsInfo = await FileSystem.getInfoAsync(labelsPath, { size: false });
+      const modelInfo = await FileSystem.getInfoAsync(modelPath);
+      const labelsInfo = await FileSystem.getInfoAsync(labelsPath);
       
       return modelInfo.exists && labelsInfo.exists;
     } catch {

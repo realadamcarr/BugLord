@@ -1,4 +1,5 @@
 // Bug Collector - Core Types and Interfaces
+import { BugCategory } from '../constants/bugSprites';
 
 export type BugRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
 
@@ -16,6 +17,7 @@ export interface Bug {
   // Visual
   photo?: string; // Base64 or file path (original image uri)
   pixelArt?: string; // Pixelized version for collection view
+  category?: BugCategory; // Sprite category (bee/butterfly/beetle/fly/spider/ant)
   
   // Stats and traits
   xpValue: number;
@@ -46,6 +48,9 @@ export interface Bug {
   // Battle stats
   currentHp?: number; // Current HP (defaults to maxHp if not set)
   maxHp?: number; // Maximum HP (calculated from level/stats)
+  attack?: number; // Attack power
+  defense?: number; // Defense rating
+  speed?: number; // Speed rating
 }
 
 export interface BugCollection {
@@ -111,14 +116,32 @@ export const BIOME_CONFIG = {
   meadow: { emoji: '🌾', color: '#9ACD32' },
 };
 
+// Base battle-stat ranges per rarity (min, max). Higher rarity → stronger.
+const BATTLE_STAT_RANGES: Record<BugRarity, { attack: [number, number]; defense: [number, number]; speed: [number, number] }> = {
+  common:    { attack: [5, 10],  defense: [4, 9],   speed: [4, 9]  },
+  uncommon:  { attack: [8, 14],  defense: [7, 13],  speed: [7, 13] },
+  rare:      { attack: [12, 20], defense: [10, 18], speed: [10, 18] },
+  epic:      { attack: [18, 28], defense: [15, 25], speed: [15, 25] },
+  legendary: { attack: [25, 40], defense: [22, 35], speed: [22, 35] },
+};
+
+const randBetween = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+
 // Helper function to generate random bug stats
-export const generateBugStats = (rarity: BugRarity): { xp: number; maxXp: number; level: number } => {
+export const generateBugStats = (rarity: BugRarity): {
+  xp: number; maxXp: number; level: number;
+  attack: number; defense: number; speed: number;
+} => {
   const config = RARITY_CONFIG[rarity];
   const baseXp = Math.floor(Math.random() * (config.xpRange[1] - config.xpRange[0]) + config.xpRange[0]);
+  const bs = BATTLE_STAT_RANGES[rarity];
   return {
     xp: 0,
     maxXp: baseXp,
     level: 1,
+    attack: randBetween(bs.attack[0], bs.attack[1]),
+    defense: randBetween(bs.defense[0], bs.defense[1]),
+    speed: randBetween(bs.speed[0], bs.speed[1]),
   };
 };
 

@@ -1,6 +1,28 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { BugCategory } from '../constants/bugSprites';
 import { Bug, BugCollection, generateBugStats, RARITY_CONFIG } from '../types/Bug';
+import { labelToCategory } from '../utils/bugCategory';
+
+/**
+ * Derive a BugCategory from any available text field on the bug.
+ * Tries: confirmedLabel → userConfirmedLabel → top predicted candidate → name → species.
+ */
+function deriveBugCategory(bug: any): BugCategory | undefined {
+  const fields: string[] = [
+    bug.confirmedLabel,
+    bug.userConfirmedLabel,
+    bug.predictedCandidates?.[0]?.label,
+    bug.name,
+    bug.species,
+  ].filter(Boolean);
+
+  for (const text of fields) {
+    const cat = labelToCategory(text);
+    if (cat) return cat;
+  }
+  return undefined;
+}
 
 interface BugCollectionContextType {
   collection: BugCollection;
@@ -75,6 +97,29 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
         if (!parsed.party || parsed.party.length !== 6) {
           parsed.party = Array(6).fill(null);
         }
+
+        // --- Migration: back-fill category + battle stats for bugs that don't have them ---
+        const migrateBug = (bug: any) => {
+          let changed = false;
+          const updates: any = {};
+          if (!bug.category) {
+            const cat = deriveBugCategory(bug);
+            if (cat) { updates.category = cat; changed = true; }
+          }
+          if (bug.attack == null || bug.defense == null || bug.speed == null) {
+            const stats = generateBugStats(bug.rarity || 'common');
+            if (bug.attack == null) { updates.attack = stats.attack; changed = true; }
+            if (bug.defense == null) { updates.defense = stats.defense; changed = true; }
+            if (bug.speed == null) { updates.speed = stats.speed; changed = true; }
+          }
+          return changed ? { ...bug, ...updates } : bug;
+        };
+        if (parsed.bugs) {
+          parsed.bugs = parsed.bugs.map(migrateBug);
+        }
+        if (parsed.party) {
+          parsed.party = parsed.party.map((bug: any) => bug ? migrateBug(bug) : bug);
+        }
         
         setCollection({ ...DEFAULT_COLLECTION, ...parsed });
       }
@@ -113,6 +158,9 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
       maxXp: stats.maxXp,
       maxHp: stats.maxXp, // Initialize maxHp
       currentHp: stats.maxXp, // Start with full HP
+      attack: stats.attack,
+      defense: stats.defense,
+      speed: stats.speed,
     };
 
     setCollection(prev => ({

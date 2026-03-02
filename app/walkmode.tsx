@@ -12,6 +12,7 @@
 
 import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
+import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useWalkMode } from '@/services/useWalkMode';
@@ -258,7 +259,9 @@ export default function WalkModeScreen() {
               style={styles.bugListItem}
               onPress={() => handleBugSelection(bug)}
             >
-              {bug.photo ? (
+              {bug.category && BUG_SPRITE[bug.category] ? (
+                <Image source={BUG_SPRITE[bug.category]} style={styles.bugListPhoto} />
+              ) : bug.photo ? (
                 <Image source={{ uri: bug.photo }} style={styles.bugListPhoto} />
               ) : bug.pixelArt ? (
                 <Image source={{ uri: bug.pixelArt }} style={styles.bugListPhoto} />
@@ -374,7 +377,9 @@ export default function WalkModeScreen() {
           <View style={styles.progressInner}>
             {selectedBug ? (
               <>
-                {selectedBug.photo ? (
+                {selectedBug.category && BUG_SPRITE[selectedBug.category] ? (
+                  <Image source={BUG_SPRITE[selectedBug.category]} style={styles.selectedBugPhoto} />
+                ) : selectedBug.photo ? (
                   <Image source={{ uri: selectedBug.photo }} style={styles.selectedBugPhoto} />
                 ) : selectedBug.pixelArt ? (
                   <Image source={{ uri: selectedBug.pixelArt }} style={styles.selectedBugPhoto} />
@@ -478,7 +483,9 @@ export default function WalkModeScreen() {
           >
             {selectedBug ? (
               <View style={styles.selectedBugContainer}>
-                {selectedBug.photo ? (
+                {selectedBug.category && BUG_SPRITE[selectedBug.category] ? (
+                  <Image source={BUG_SPRITE[selectedBug.category]} style={styles.bugSelectorPhoto} />
+                ) : selectedBug.photo ? (
                   <Image source={{ uri: selectedBug.photo }} style={styles.bugSelectorPhoto} />
                 ) : selectedBug.pixelArt ? (
                   <Image source={{ uri: selectedBug.pixelArt }} style={styles.bugSelectorPhoto} />

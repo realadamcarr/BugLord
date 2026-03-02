@@ -276,27 +276,32 @@ class ImageProcessingService {
    * Simple insect detection using image analysis heuristics
    */
   private async simpleInsectDetection(photoUri: string): Promise<{ x: number; y: number; width: number; height: number } | null> {
-    // This would analyze the image for:
-    // - High contrast areas (insects vs background)
-    // - Typical insect shapes and patterns
-    // - Movement or focus areas
-    
-    // For now, return a reasonable center crop area
-    // In a real app, this would use actual image analysis
-    const imageWidth = 1080; // Assume typical camera resolution
-    const imageHeight = 1920;
-    
-    // Create a crop area that's likely to contain the insect
-    const cropSize = Math.min(imageWidth, imageHeight) * 0.6;
-    const x = (imageWidth - cropSize) / 2;
-    const y = (imageHeight - cropSize) / 2;
-    
-    return {
-      x: Math.round(x),
-      y: Math.round(y),
-      width: Math.round(cropSize),
-      height: Math.round(cropSize)
-    };
+    try {
+      // Get actual image dimensions instead of assuming a fixed resolution
+      const imageInfo = await ImageManipulator.manipulateAsync(
+        photoUri,
+        [],
+        { base64: false, format: ImageManipulator.SaveFormat.JPEG }
+      );
+
+      const imageWidth = imageInfo.width;
+      const imageHeight = imageInfo.height;
+
+      // Create a crop area that's likely to contain the insect (center 60%)
+      const cropSize = Math.min(imageWidth, imageHeight) * 0.6;
+      const x = (imageWidth - cropSize) / 2;
+      const y = (imageHeight - cropSize) / 2;
+
+      return {
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.round(cropSize),
+        height: Math.round(cropSize)
+      };
+    } catch (error) {
+      console.warn('simpleInsectDetection failed to get image dims:', error);
+      return null;
+    }
   }
   
   /**
@@ -449,13 +454,28 @@ class ImageProcessingService {
    * Fallback processing when main detection fails
    */
   private async processWithFallback(photoUri: string, options: ProcessingOptions): Promise<CropResult> {
-    const boundingBox = this.getCenterCropBoundingBox();
-    
-    return {
-      croppedImage: photoUri, // Use original as fallback
-      pixelatedIcon: photoUri, // Use original as fallback for now
-      boundingBox
-    };
+    try {
+      // Get actual image dimensions for a proper center crop
+      const imageInfo = await ImageManipulator.manipulateAsync(
+        photoUri,
+        [],
+        { base64: false, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      const boundingBox = this.getCenterCropBoundingBox(imageInfo.width, imageInfo.height);
+
+      return {
+        croppedImage: photoUri,
+        pixelatedIcon: photoUri,
+        boundingBox
+      };
+    } catch {
+      // Ultimate fallback — return original photo with a default bounding box
+      return {
+        croppedImage: photoUri,
+        pixelatedIcon: photoUri,
+        boundingBox: { x: 0, y: 0, width: 100, height: 100 }
+      };
+    }
   }
   
   /**

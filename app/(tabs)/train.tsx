@@ -2,6 +2,7 @@ import { BugInfoModal } from '@/components/BugInfoModal';
 import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
 import { WalkHistoryModal } from '@/components/WalkHistoryModal';
+import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useInventory } from '@/contexts/InventoryContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -70,7 +71,9 @@ export default function TrainScreen() {
     >
       {bug ? (
         <View style={[styles.bugInSlot, isFainted && { opacity: 0.5 }]}>
-          {bug.photo ? (
+          {bug.category && BUG_SPRITE[bug.category] ? (
+            <Image source={BUG_SPRITE[bug.category]} style={styles.bugPhoto} />
+          ) : bug.photo ? (
             <Image source={{ uri: bug.photo }} style={styles.bugPhoto} />
           ) : bug.pixelArt ? (
             <Image source={{ uri: bug.pixelArt }} style={styles.bugPhoto} />

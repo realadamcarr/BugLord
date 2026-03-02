@@ -9,6 +9,7 @@
  */
 
 import { ThemedText } from '@/components/ThemedText';
+import { BUG_SPRITE } from '@/constants/bugSprites';
 import { getItemDefinition } from '@/constants/Items';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useInventory } from '@/contexts/InventoryContext';
@@ -163,7 +164,9 @@ export default function InventoryScreen() {
                   style={[styles.bugPickerItem, { backgroundColor: theme.colors.surface || theme.colors.card }]}
                   onPress={() => handleUseItem(bug)}
                 >
-                  {bug.photo ? (
+                  {bug.category && BUG_SPRITE[bug.category] ? (
+                    <Image source={BUG_SPRITE[bug.category]} style={[styles.bugPickerPhoto, isFainted && styles.faintedPhoto]} />
+                  ) : bug.photo ? (
                     <Image source={{ uri: bug.photo }} style={[styles.bugPickerPhoto, isFainted && styles.faintedPhoto]} />
                   ) : bug.pixelArt ? (
                     <Image source={{ uri: bug.pixelArt }} style={[styles.bugPickerPhoto, isFainted && styles.faintedPhoto]} />

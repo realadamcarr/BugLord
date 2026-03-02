@@ -14,6 +14,7 @@ import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { getItemDefinition } from '@/constants/Items';
+import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useInventory } from '@/contexts/InventoryContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -45,8 +46,9 @@ const getBugHp = (bug: Bug): { currentHp: number; maxHp: number } => {
   return { currentHp, maxHp };
 };
 
-/** Helper: render a bug sprite (photo / pixelArt / fallback) */
+/** Helper: render a bug sprite (category sprite / photo / pixelArt / fallback) */
 const BugSpriteImage = ({ bug, style, fallbackSize, theme }: { bug: Bug; style: any; fallbackSize: number; theme: any }) => {
+  if (bug.category && BUG_SPRITE[bug.category]) return <Image source={BUG_SPRITE[bug.category]} style={style} />;
   if (bug.photo) return <Image source={{ uri: bug.photo }} style={style} />;
   if (bug.pixelArt) return <Image source={{ uri: bug.pixelArt }} style={style} />;
   return (

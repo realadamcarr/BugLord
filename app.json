@@ -69,7 +69,8 @@
           "motionPermission": "Allow BugLord to track your steps for Walk Mode"
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true

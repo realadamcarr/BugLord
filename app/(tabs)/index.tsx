@@ -5,6 +5,7 @@ import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
+import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { bugIdentificationService } from '@/services/BugIdentificationService';
@@ -14,6 +15,7 @@ import { mlPreprocessingService } from '@/services/ml/MLPreprocessingService';
 import { modelUpdateService } from '@/services/ml/ModelUpdateService';
 import { onDeviceClassifier } from '@/services/ml/OnDeviceClassifier';
 import { Bug, BugIdentificationResult, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
+import { labelToCategory } from '@/utils/bugCategory';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -234,8 +236,17 @@ export default function CaptureScreen() {
                   }
                   
                   if (!copied) {
-                    // If bundle copy fails, create a placeholder for now
-                    console.warn('⚠️ Could not copy from any source, using labels-only mode');
+                    // Model file unavailable — load labels into the classifier so it
+                    // can still run in stub/fallback mode (isReady() will be true).
+                    console.warn('⚠️ Could not copy model from any source, using labels-only mode');
+                    try {
+                      // Labels were already written above; load them into the classifier
+                      // with an empty model path — loadModel will set modelLoaded=true
+                      // (model itself will be null → stubs), but isReady() returns true.
+                      await onDeviceClassifier.loadModel(modelPath, labelsPath);
+                    } catch {
+                      console.warn('⚠️ Could not load labels into classifier');
+                    }
                     setMlReady(true);
                     setModelVersion('labels-only');
                     console.log('✅ ML ready in labels-only mode');
@@ -243,6 +254,12 @@ export default function CaptureScreen() {
                   }
                 } catch (bundleError) {
                   console.error('❌ Bundle copy failed:', bundleError);
+                  // Try to at least load labels so stubs work
+                  try {
+                    await onDeviceClassifier.loadModel(modelPath, labelsPath);
+                  } catch {
+                    console.warn('⚠️ Could not load labels into classifier');
+                  }
                   setMlReady(true);
                   setModelVersion('labels-only');
                   console.log('✅ ML ready in labels-only mode (fallback)');
@@ -253,11 +270,18 @@ export default function CaptureScreen() {
               console.error('❌ Failed to copy from assets:', copyError);
               console.warn('⚠️  Model files not found in document directory.');
               console.warn('📋 Please ensure model files are in:', modelDir);
-              console.warn('   Expected files:');
-              console.warn('   - model.tflite (2.8 MB)');
-              console.warn('   - labels.json');
               
-              setMlReady(false);
+              // Still try to make the classifier usable with inline labels
+              try {
+                const fallbackLabels = ["Bees", "Butterfly", "Ladybug", "ant", "dragonfly", "wasp"];
+                const fallbackLabelsPath = `${modelDir}labels.json`;
+                await FileSystem.writeAsStringAsync(fallbackLabelsPath, JSON.stringify(fallbackLabels));
+                await onDeviceClassifier.loadModel(`${modelDir}model.tflite`, fallbackLabelsPath);
+              } catch {
+                console.warn('⚠️ Could not bootstrap labels into classifier');
+              }
+              setMlReady(true);
+              setModelVersion('labels-only');
               return;
             }
           }
@@ -420,6 +444,7 @@ export default function CaptureScreen() {
         biome: 'garden',
         photo: originalPhoto,
         pixelArt: processedImage.pixelatedIcon,
+        category: top?.label ? labelToCategory(top.label) : undefined,
         traits: top ? ['AI Identified'] : ['Unknown'],
         size: 'medium',
         xpValue: RARITY_CONFIG['common'].xpRange[0],
@@ -573,13 +598,13 @@ export default function CaptureScreen() {
   }, [mlReady]);
 
   /** Called when user taps "Capture!" after live scan lock */
-  const handleLiveScanConfirm = useCallback(async (photoUri: string, label: string, confidence: number) => {
+  const handleLiveScanConfirm = async (photoUri: string, label: string, confidence: number) => {
     setShowCamera(false);
     setCapturedPhoto(photoUri);
 
     // Pass the already-confirmed ML result to skip redundant re-classification
     await processAndClassify(photoUri, photoUri, { label, confidence });
-  }, []);
+  };
 
   const renderPartySlot = (bug: Bug | null, index: number) => (
     <TouchableOpacity
@@ -593,7 +618,9 @@ export default function CaptureScreen() {
     >
       {bug ? (
         <View style={styles.bugInSlot}>
-          {bug.photo ? (
+          {bug.category && BUG_SPRITE[bug.category] ? (
+            <Image source={BUG_SPRITE[bug.category]} style={styles.bugPhoto} />
+          ) : bug.photo ? (
             <Image source={{ uri: bug.photo }} style={styles.bugPhoto} />
           ) : (
             <PixelatedEmoji type="bug" size={32} color={theme.colors.text} />
@@ -733,7 +760,9 @@ export default function CaptureScreen() {
                   onPress={() => handleRecentBugTap(bug)}
                   activeOpacity={0.7}
                 >
-                  {bug.photo ? (
+                  {bug.category && BUG_SPRITE[bug.category] ? (
+                    <Image source={BUG_SPRITE[bug.category]} style={styles.recentBugPhoto} />
+                  ) : bug.photo ? (
                     <Image source={{ uri: bug.photo }} style={styles.recentBugPhoto} />
                   ) : bug.pixelArt ? (
                     <Image source={{ uri: bug.pixelArt }} style={styles.recentBugPhoto} />
@@ -856,7 +885,9 @@ export default function CaptureScreen() {
                   >
                     {bug ? (
                       <>
-                        {bug.photo ? (
+                        {bug.category && BUG_SPRITE[bug.category] ? (
+                          <Image source={BUG_SPRITE[bug.category]} style={styles.partyManagementBugPhoto} />
+                        ) : bug.photo ? (
                           <Image source={{ uri: bug.photo }} style={styles.partyManagementBugPhoto} />
                         ) : bug.pixelArt ? (
                           <Image source={{ uri: bug.pixelArt }} style={styles.partyManagementBugPhoto} />
@@ -907,7 +938,9 @@ export default function CaptureScreen() {
                         }
                       }}
                     >
-                      {bug.photo ? (
+                      {bug.category && BUG_SPRITE[bug.category] ? (
+                        <Image source={BUG_SPRITE[bug.category]} style={styles.partyManagementBugPhoto} />
+                      ) : bug.photo ? (
                         <Image source={{ uri: bug.photo }} style={styles.partyManagementBugPhoto} />
                       ) : bug.pixelArt ? (
                         <Image source={{ uri: bug.pixelArt }} style={styles.partyManagementBugPhoto} />
