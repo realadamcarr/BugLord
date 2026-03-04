@@ -454,9 +454,17 @@ export default function CaptureScreen() {
       console.log('🐛 Bug identified:', result);
     } catch (error) {
       console.error('Bug identification failed:', error);
+      // Don't leave the modal in a broken state — close it and let user retry
+      setShowBugIdentification(false);
+      setIdentifiedBug(null);
+      setIdentificationResult(null);
       Alert.alert(
         'Processing Error', 
-        'Could not process the image automatically. You can still add the bug manually!'
+        'Could not process the image. Please try again.',
+        [
+          { text: 'Retry', onPress: () => capturedPhoto && processAndClassify(capturedPhoto, capturedPhoto) },
+          { text: 'Cancel', style: 'cancel' },
+        ]
       );
     } finally {
       setIsIdentifying(false);
@@ -559,88 +567,24 @@ export default function CaptureScreen() {
   const handleRescan = async () => {
     if (!capturedPhoto) return;
 
-    const candidates = identificationResult?.candidates ?? [];
-    const nextIndex = rescanCount + 1;
-
-    // Cycle to the next candidate without re-calling the API
-    if (nextIndex < candidates.length) {
-      const rotated = [
-        candidates[nextIndex],
-        ...candidates.slice(0, nextIndex),
-        ...candidates.slice(nextIndex + 1),
-      ];
-      const newTop = rotated[0];
-      const { SAMPLE_BUGS: sampleBugs } = await import('@/types/Bug');
-      const matchedSample = sampleBugs.find(b => b.name === newTop?.label);
-
-      setIdentificationResult(prev => prev ? { ...prev, candidates: rotated } : prev);
-      setIdentifiedBug(prev => prev ? {
-        ...prev,
-        name: newTop?.label || prev.name,
-        species: newTop?.species || matchedSample?.species || prev.species,
-        description: matchedSample?.description || prev.description,
-        rarity: matchedSample?.rarity || prev.rarity,
-        biome: matchedSample?.biome || prev.biome,
-        category: newTop?.label ? labelToCategory(newTop.label) : prev.category,
-        traits: matchedSample?.traits || prev.traits,
-        size: matchedSample?.size || prev.size,
-        xpValue: RARITY_CONFIG[matchedSample?.rarity || prev.rarity || 'common'].xpRange[0],
-      } : prev);
-      setRescanCount(nextIndex);
-      console.log(`🔄 Rescan #${nextIndex}: showing "${newTop?.label}" (was "${candidates[0]?.label}")`);
-    } else {
-      // All candidates exhausted — run local-only analysis for an independent fresh result
-      // (avoids repeating the same iNaturalist response)
-      setRescanCount(0);
-      setIdentifiedBug(null);
-      setIdentificationResult(null);
-      setIsIdentifying(true);
-      try {
-        const freshResult = await bugIdentificationService.identifyLocalOnly(capturedPhoto);
-        if (freshResult && freshResult.candidates.length > 0) {
-          const { SAMPLE_BUGS: sampleBugs } = await import('@/types/Bug');
-          const top = freshResult.candidates[0];
-          const matchedSample = sampleBugs.find(b => b.name === top?.label);
-          setIdentificationResult(freshResult);
-          setIdentifiedBug({
-            name: top?.label || 'Unknown bug',
-            species: top?.species || matchedSample?.species || 'Unknown',
-            description: matchedSample?.description || `Identified via local analysis`,
-            rarity: matchedSample?.rarity || 'common',
-            biome: matchedSample?.biome || 'garden',
-            photo: capturedPhoto,
-            category: top?.label ? labelToCategory(top.label) : undefined,
-            traits: matchedSample?.traits || ['AI Identified'],
-            size: matchedSample?.size || 'medium',
-            xpValue: RARITY_CONFIG[matchedSample?.rarity || 'common'].xpRange[0],
-            level: 1, xp: 0, maxXp: 100,
-            caughtAt: new Date(),
-            predictedCandidates: freshResult.candidates,
-            provider: freshResult.provider,
-            imageUri: capturedPhoto,
-            capturedAt: new Date().toISOString(),
-          } as any);
-          console.log(`🔄 Rescan exhausted — fresh local result: "${top?.label}"`);
-        } else {
-          processAndClassify(capturedPhoto, capturedPhoto);
-        }
-      } catch {
-        processAndClassify(capturedPhoto, capturedPhoto);
-      } finally {
-        setIsIdentifying(false);
-      }
-    }
+    // Always re-run the FULL identification pipeline (TFLite + iNaturalist).
+    // This gives the user a fresh analysis every time instead of cycling
+    // through stale/stub candidates.
+    console.log('🔄 Rescan: re-running full identification pipeline...');
+    setRescanCount(prev => prev + 1);
+    setIdentifiedBug(null);
+    setIdentificationResult(null);
+    await processAndClassify(capturedPhoto, capturedPhoto);
   };
 
   // ─── Live Scan Callbacks ──────────────────────────────────────
-  /** Classify a single photo using the on-device ML model.
-   *  Returns null ONLY when the model is truly still loading (BugCamera shows "loading" alert).
-   *  Returns { label, confidence } in all other cases — even for low-confidence or stub results
-   *  so BugCamera can show the result instead of a hard "not ready" block. */
+  /** Classify a single photo for live scan.
+   *  Priority: TFLite (fast) → iNaturalist API (accurate) → local color analysis (fallback).
+   *  Returns null ONLY when nothing at all is ready yet. */
   const handleClassifyPhoto = useCallback(async (photoUri: string): Promise<{ label: string; confidence: number } | null> => {
     console.log(`🔍 handleClassifyPhoto — mlReady: ${mlReady}, isReady: ${onDeviceClassifier.isReady()}, isRunnable: ${onDeviceClassifier.isRunnable()}, isUsingRealModel: ${onDeviceClassifier.isUsingRealModel()}`);
 
-    // If we have a real (non-stub) TFLite model, use it
+    // 1. TFLite — fastest path
     if (mlReady && onDeviceClassifier.isReady() && onDeviceClassifier.isUsingRealModel()) {
       try {
         const mlInput = await mlPreprocessingService.preprocessForInference(photoUri, {
@@ -648,25 +592,40 @@ export default function CaptureScreen() {
           quality: 0.7,
         });
         const candidates = await onDeviceClassifier.classifyImage(mlInput, 3);
-        if (candidates.length === 0) {
-          return { label: '', confidence: 0 };
+        const real = candidates.filter((c: any) => c.source !== 'stub');
+        if (real.length > 0 && real[0].label) {
+          return { label: real[0].label, confidence: real[0].confidence };
         }
-        return { label: candidates[0].label, confidence: candidates[0].confidence };
+        console.warn('⚠️ TFLite returned no real candidates for live scan');
       } catch (err) {
-        console.warn('Photo classification error:', err);
+        console.warn('TFLite live scan error:', err);
       }
     }
 
-    // No real TFLite model — use image-based color analysis instead of random stubs
-    console.log('🎨 Using image-based analysis for live scan (no TFLite model)');
+    // 2. iNaturalist API — slower but accurate, runs the full identify() chain
+    console.log('🌿 Live scan: trying iNaturalist + image analysis...');
     try {
-      const result = await bugIdentificationService.classifyForLiveScan(photoUri);
-      if (result) return result;
+      const result = await bugIdentificationService.identify(photoUri);
+      if (result?.candidates?.length > 0 && result.candidates[0].label) {
+        return {
+          label: result.candidates[0].label,
+          confidence: result.candidates[0].confidence ?? 0.6,
+        };
+      }
     } catch (err) {
-      console.warn('Image-based live scan failed:', err);
+      console.warn('iNaturalist live scan failed:', err);
     }
 
-    return { label: 'Unknown Bug', confidence: 0.1 };
+    // 3. Local color analysis — instant fallback
+    console.log('🎨 Live scan: falling back to local color analysis');
+    try {
+      const result = await bugIdentificationService.classifyForLiveScan(photoUri);
+      if (result && result.label && result.label !== 'Unknown Bug') return result;
+    } catch (err) {
+      console.warn('Color analysis live scan failed:', err);
+    }
+
+    return { label: 'Unknown Bug', confidence: 0.15 };
   }, [mlReady]);
 
   /** Called when user taps "Capture!" after live scan lock */
