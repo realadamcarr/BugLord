@@ -97,8 +97,11 @@ class OnDeviceClassifier {
       .slice(0, k);
   }
 
+  /** Tracks why real model isn't available — exposed for UI diagnostics */
+  modelLoadError: string | null = null;
+
   /**
-   * Load model and labels from specified paths
+   * Load model and labels from specified paths (file:// URI approach).
    * @param modelPath - Path to .tflite model file
    * @param labelsPath - Path to labels JSON file
    */
@@ -116,14 +119,17 @@ class OnDeviceClassifier {
       if (loadTensorflowModel) {
         try {
           this.model = await loadTensorflowModel({url: `file://${modelPath}`});
+          this.modelLoadError = null;
           console.log('✅ TFLite classification model loaded with react-native-fast-tflite');
           console.log(`   Input shapes: ${JSON.stringify(this.model?.inputs)}`);
           console.log(`   Output shapes: ${JSON.stringify(this.model?.outputs)}`);
-        } catch (modelError) {
-          console.warn('⚠️  TFLite loading failed, using fallback:', modelError);
+        } catch (modelError: any) {
+          console.warn('⚠️  TFLite file-path loading failed:', modelError);
+          this.modelLoadError = `TFLite load failed: ${modelError?.message ?? modelError}`;
           this.model = null;
         }
       } else {
+        this.modelLoadError = 'react-native-fast-tflite not available (Expo Go?)';
         console.warn('⚠️  react-native-fast-tflite not available, using stub mode');
         console.log('   Build with: npx expo prebuild && eas build');
         this.model = null;
@@ -141,6 +147,60 @@ class OnDeviceClassifier {
     } catch (error) {
       console.error('❌ Failed to load model:', error);
       throw new Error(`Model loading failed: ${error}`);
+    }
+  }
+
+  /**
+   * Load model directly from a bundled asset module (most robust for production).
+   * Uses react-native-fast-tflite's native asset resolution which avoids the
+   * copy-to-document-directory dance entirely.
+   *
+   * @param assetModule - The return value of require('path/to/model.tflite')
+   * @param labels - Either a labels file path (string) or pre-parsed labels array
+   */
+  async loadModelFromAsset(assetModule: number, labels: string | string[]): Promise<void> {
+    console.log('🧠 Loading ML model from bundled asset...');
+
+    try {
+      // Load labels
+      if (typeof labels === 'string') {
+        this.labels = await this.readLabelsFile(labels);
+      } else {
+        this.labels = labels;
+      }
+      console.log(`✅ Loaded ${this.labels.length} class labels`);
+
+      // Load TFLite model directly from asset module (number from require())
+      if (loadTensorflowModel) {
+        try {
+          console.log('🔧 Calling loadTensorflowModel with asset module (require)...');
+          this.model = await loadTensorflowModel(assetModule);
+          this.modelLoadError = null;
+          console.log('✅ TFLite model loaded from bundled asset!');
+          console.log(`   Input shapes: ${JSON.stringify(this.model?.inputs)}`);
+          console.log(`   Output shapes: ${JSON.stringify(this.model?.outputs)}`);
+        } catch (modelError: any) {
+          console.error('❌ TFLite asset loading failed:', modelError);
+          this.modelLoadError = `TFLite asset load failed: ${modelError?.message ?? modelError}`;
+          this.model = null;
+        }
+      } else {
+        this.modelLoadError = 'react-native-fast-tflite not available (Expo Go?)';
+        console.warn('⚠️  react-native-fast-tflite not available, using stub mode');
+        this.model = null;
+      }
+
+      this.modelLoaded = true;
+      this.config = {
+        modelPath: '<bundled-asset>',
+        labelsPath: typeof labels === 'string' ? labels : '<inline>',
+        inputSize: 224,
+        topK: 5,
+        confidenceThreshold: 0.1,
+      };
+    } catch (error) {
+      console.error('❌ Failed to load model from asset:', error);
+      throw new Error(`Model asset loading failed: ${error}`);
     }
   }
 

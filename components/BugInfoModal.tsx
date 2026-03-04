@@ -401,6 +401,23 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
           {/* Candidates Selection */}
           {isNewCatch && candidates.length > 0 && !showPartySwap && (
             <View style={styles.section}>
+              {/* Identification engine badge */}
+              {(() => {
+                const sources = candidates.map(c => c.source).filter(Boolean);
+                const hasTflite = sources.some(s => /tflite/i.test(s ?? ''));
+                const hasINat = sources.some(s => /inat/i.test(s ?? ''));
+                const hasImageAnalysis = sources.some(s => /image|color|local/i.test(s ?? ''));
+                const engine = hasTflite && hasINat ? '🧠 TFLite + 🌿 iNaturalist'
+                  : hasTflite ? '🧠 On-Device TFLite Model'
+                  : hasINat ? '🌿 iNaturalist API'
+                  : hasImageAnalysis ? '🎨 Local Color Analysis'
+                  : '🤖 AI';
+                return (
+                  <View style={{ backgroundColor: hasTflite ? '#1B5E20' : hasINat ? '#0D47A1' : '#4A148C', borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10, marginBottom: 8, alignSelf: 'flex-start' }}>
+                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Identified by: {engine}</Text>
+                  </View>
+                );
+              })()}
               <ThemedText style={styles.sectionTitle}>🤖 AI Suggestions</ThemedText>
               {candidates.map((c) => (
                 <TouchableOpacity

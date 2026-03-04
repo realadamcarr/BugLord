@@ -89,218 +89,106 @@ export default function CaptureScreen() {
   };
 
   const loadMLModel = async () => {
+    const MODEL_LABELS = ["Bees", "Butterfly", "Ladybug", "ant", "dragonfly", "wasp"];
+
     try {
+      // 1. If a server-pushed model exists on disk, prefer that
       const hasLocal = await modelUpdateService.hasLocalModel();
-      
       if (hasLocal) {
         const paths = modelUpdateService.getCurrentModelPaths();
         await onDeviceClassifier.loadModel(paths.modelPath, paths.labelsPath);
         const version = await modelUpdateService.getCurrentVersion();
         setModelVersion(version);
         setMlReady(true);
-        console.log('✅ ML model loaded:', version || 'bundled');
-      } else {
-        // Load bundled model from assets
-        console.log('⚠️  No local model, loading bundled assets...');
-        try {
-          // Use legacy FileSystem API for consistent behavior
-          const FileSystem = require('expo-file-system/legacy');
-          const Asset = require('expo-asset').Asset;
-          
-          // Bundled assets are in the app bundle, we need to copy them to accessible location
-          const modelDir = `${FileSystem.documentDirectory}ml/`;
-          const modelPath = `${modelDir}model.tflite`;
-          const labelsPath = `${modelDir}labels.json`;
-          
-          console.log('📁 Checking for model files in:', modelDir);
-          
-          // Check if files exist using legacy API (simpler for file checks)
-          const modelInfo = await FileSystem.getInfoAsync(modelPath);
-          const labelsInfo = await FileSystem.getInfoAsync(labelsPath);
-          
-          // Check if model exists but is wrong size (corrupted)
-          const expectedModelSize = 2800000; // ~2.8MB
-          const isCorrupted = modelInfo.exists && modelInfo.size && modelInfo.size < expectedModelSize;
-          
-          if (!modelInfo.exists || !labelsInfo.exists || isCorrupted) {
-            if (isCorrupted) {
-              console.log(`🗑️  Deleting corrupted model file (${Math.round(modelInfo.size! / 1024)}KB instead of ~12MB)`);
-              await FileSystem.deleteAsync(modelPath);
-            }
-            
-            console.log('📦 Copying bundled assets to document directory...');
-            
-            // Ensure directory exists
-            await FileSystem.makeDirectoryAsync(modelDir, { intermediates: true }).catch(() => {});
-            
-            try {
-              // Try to copy files from app bundle automatically
-              console.log('📁 Attempting to copy from app bundle...');
-              
-              // Create labels.json directly (flat array matching model output classes)
-              const labelsContent = [
-                "Bees", "Butterfly", "Ladybug", "ant", "dragonfly", "wasp"
-              ];
-              
-              if (!labelsInfo.exists) {
-                await FileSystem.writeAsStringAsync(labelsPath, JSON.stringify(labelsContent, null, 2));
-                console.log('✅ Created labels.json with 6 species');
-              }
-              
-              // Try to copy model from app bundle
-              if (!modelInfo.exists || isCorrupted) {
-                try {
-                  // Attempt multiple bundle paths
-                  const possiblePaths = [
-                    `${FileSystem.bundleDirectory}assets/ml/model.tflite`,
-                    `${FileSystem.bundleDirectory}assets/assets/ml/model.tflite`,
-                    `${FileSystem.bundleDirectory}bundled/assets/ml/model.tflite`
-                  ];
-                  
-                  let copied = false;
-                  for (const sourcePath of possiblePaths) {
-                    try {
-                      console.log('🔍 Trying bundle path:', sourcePath);
-                      const sourceInfo = await FileSystem.getInfoAsync(sourcePath);
-                      if (sourceInfo.exists) {
-                        await FileSystem.copyAsync({
-                          from: sourcePath,
-                          to: modelPath
-                        });
-                        console.log('✅ Copied model from bundle:', sourcePath);
-                        copied = true;
-                        break;
-                      }
-                    } catch (pathError) {
-                      console.log('❌ Path failed:', sourcePath);
-                    }
-                  }
-                  
-                  // If bundle copy fails, try expo-asset approach with error handling
-                  if (!copied) {
-                    console.log('📦 Trying expo-asset approach...');
-                    try {
-                      console.log('🔍 Asset module path: @/assets/ml/model.tflite');
-                      // Import the model asset 
-                      const modelAsset = Asset.fromModule(require('../../assets/ml/model.tflite'));
-                      console.log('📋 Asset info:', {
-                        name: modelAsset.name,
-                        type: modelAsset.type,
-                        hash: modelAsset.hash,
-                        uri: modelAsset.uri,
-                        downloaded: modelAsset.downloaded
-                      });
-                      
-                      await modelAsset.downloadAsync();
-                      console.log('📋 After download:', {
-                        localUri: modelAsset.localUri,
-                        downloaded: modelAsset.downloaded
-                      });
-                      
-                      if (modelAsset.localUri) {
-                        // Check source size before copying
-                        const sourceInfo = await FileSystem.getInfoAsync(modelAsset.localUri);
-                        console.log('📊 Source file info:', sourceInfo);
-                        
-                        await FileSystem.copyAsync({
-                          from: modelAsset.localUri,
-                          to: modelPath
-                        });
-                        
-                        // Verify copy
-                        const destInfo = await FileSystem.getInfoAsync(modelPath);
-                        console.log('📊 Copied file info:', destInfo);
-                        console.log('✅ Copied model using expo-asset');
-                        copied = true;
-                      }
-                    } catch (assetError) {
-                      console.log('❌ Expo-asset failed:', assetError);
-                    }
-                  }
-                  
-                  // Final fallback: Check downloads folder for manually copied model
-                  if (!copied) {
-                    console.log('📲 Trying downloads folder...');
-                    try {
-                      const downloadPath = '/storage/emulated/0/Download/model.tflite';
-                      const downloadInfo = await FileSystem.getInfoAsync(`file://${downloadPath}`);
-                      
-                      if (downloadInfo.exists) {
-                        await FileSystem.copyAsync({
-                          from: `file://${downloadPath}`,
-                          to: modelPath
-                        });
-                        console.log('✅ Copied model from downloads folder');
-                        copied = true;
-                      }
-                    } catch (downloadError) {
-                      console.log('❌ Downloads copy failed:', downloadError);
-                    }
-                  }
-                  
-                  if (!copied) {
-                    // Model file unavailable — load labels into the classifier so it
-                    // can still run in stub/fallback mode (isReady() will be true).
-                    console.warn('⚠️ Could not copy model from any source, using labels-only mode');
-                    try {
-                      // Labels were already written above; load them into the classifier
-                      // with an empty model path — loadModel will set modelLoaded=true
-                      // (model itself will be null → stubs), but isReady() returns true.
-                      await onDeviceClassifier.loadModel(modelPath, labelsPath);
-                    } catch {
-                      console.warn('⚠️ Could not load labels into classifier');
-                    }
-                    setMlReady(true);
-                    setModelVersion('labels-only');
-                    console.log('✅ ML ready in labels-only mode');
-                    return;
-                  }
-                } catch (bundleError) {
-                  console.error('❌ Bundle copy failed:', bundleError);
-                  // Try to at least load labels so stubs work
-                  try {
-                    await onDeviceClassifier.loadModel(modelPath, labelsPath);
-                  } catch {
-                    console.warn('⚠️ Could not load labels into classifier');
-                  }
-                  setMlReady(true);
-                  setModelVersion('labels-only');
-                  console.log('✅ ML ready in labels-only mode (fallback)');
-                  return;
-                }
-              }
-            } catch (copyError) {
-              console.error('❌ Failed to copy from assets:', copyError);
-              console.warn('⚠️  Model files not found in document directory.');
-              console.warn('📋 Please ensure model files are in:', modelDir);
-              
-              // Still try to make the classifier usable with inline labels
-              try {
-                const fallbackLabels = ["Bees", "Butterfly", "Ladybug", "ant", "dragonfly", "wasp"];
-                const fallbackLabelsPath = `${modelDir}labels.json`;
-                await FileSystem.writeAsStringAsync(fallbackLabelsPath, JSON.stringify(fallbackLabels));
-                await onDeviceClassifier.loadModel(`${modelDir}model.tflite`, fallbackLabelsPath);
-              } catch {
-                console.warn('⚠️ Could not bootstrap labels into classifier');
-              }
-              setMlReady(true);
-              setModelVersion('labels-only');
-              return;
-            }
-          }
-          
-          console.log('📦 Loading model from:', modelPath);
-          await onDeviceClassifier.loadModel(modelPath, labelsPath);
-          setModelVersion('bundled');
+        console.log('✅ ML model loaded from server update:', version || 'bundled');
+        return;
+      }
+
+      // 2. PRIMARY: Load directly from bundled asset via require()
+      //    react-native-fast-tflite resolves the Metro asset ID natively,
+      //    avoiding the entire copy-to-document-directory dance.
+      console.log('🧠 Loading TFLite model from bundled asset...');
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const modelAssetModule = require('../../assets/ml/model.tflite');
+        await onDeviceClassifier.loadModelFromAsset(modelAssetModule, MODEL_LABELS);
+
+        if (onDeviceClassifier.isUsingRealModel()) {
+          setModelVersion('bundled-tflite');
           setMlReady(true);
-          console.log('✅ Bundled ML model loaded successfully');
-        } catch (bundleError) {
-          console.error('❌ Failed to load bundled model:', bundleError);
-          setMlReady(false);
+          console.log('✅ TFLite model loaded from bundled asset — REAL inference active');
+          return;
+        }
+        // loadModelFromAsset sets modelLoaded=true even if the native module
+        // isn't available (Expo Go) — check isUsingRealModel() above.
+        console.warn('⚠️ TFLite native module unavailable — loaded labels only from asset approach');
+        console.warn('   Reason:', onDeviceClassifier.modelLoadError ?? 'unknown');
+      } catch (assetErr) {
+        console.warn('⚠️ Bundled asset model load failed:', assetErr);
+      }
+
+      // 3. FALLBACK: Try file-path approach (copy asset to documentDirectory)
+      //    This handles edge cases where direct asset loading doesn't work.
+      console.log('📦 Trying file-path fallback...');
+      try {
+        const FileSystem = require('expo-file-system/legacy');
+        const Asset = require('expo-asset').Asset;
+        const modelDir = `${FileSystem.documentDirectory}ml/`;
+        const modelPath = `${modelDir}model.tflite`;
+        const labelsPath = `${modelDir}labels.json`;
+
+        await FileSystem.makeDirectoryAsync(modelDir, { intermediates: true }).catch(() => {});
+
+        // Write labels
+        await FileSystem.writeAsStringAsync(labelsPath, JSON.stringify(MODEL_LABELS, null, 2));
+
+        // Copy model via expo-asset
+        const modelInfo = await FileSystem.getInfoAsync(modelPath);
+        if (!modelInfo.exists || (modelInfo.size && modelInfo.size < 100000)) {
+          const modelAsset = Asset.fromModule(require('../../assets/ml/model.tflite'));
+          await modelAsset.downloadAsync();
+          if (modelAsset.localUri) {
+            await FileSystem.copyAsync({ from: modelAsset.localUri, to: modelPath });
+            console.log('✅ Copied model to documentDirectory via expo-asset');
+          }
+        }
+
+        // Try loading from file path
+        const fileInfo = await FileSystem.getInfoAsync(modelPath);
+        if (fileInfo.exists && fileInfo.size > 100000) {
+          await onDeviceClassifier.loadModel(modelPath, labelsPath);
+          if (onDeviceClassifier.isUsingRealModel()) {
+            setModelVersion('bundled-file');
+            setMlReady(true);
+            console.log('✅ TFLite model loaded from file path — REAL inference active');
+            return;
+          }
+        }
+      } catch (fileErr) {
+        console.warn('⚠️ File-path model loading failed:', fileErr);
+      }
+
+      // 4. LABELS-ONLY: Classifier can produce stubs but not real inference.
+      //    iNaturalist + color analysis will handle identification.
+      console.warn('⚠️ No real TFLite model available — using labels-only mode');
+      console.warn('   Model load error:', onDeviceClassifier.modelLoadError ?? 'none');
+      if (!onDeviceClassifier.isReady()) {
+        // Ensure at least labels are loaded
+        try {
+          await onDeviceClassifier.loadModelFromAsset(
+            require('../../assets/ml/model.tflite'),
+            MODEL_LABELS
+          );
+        } catch {
+          // Last resort — just make it not crash
         }
       }
+      setModelVersion('labels-only');
+      setMlReady(true);
+      console.log('✅ ML ready in labels-only mode (iNaturalist + color analysis will run)');
+
     } catch (error) {
-      console.error('❌ Model loading failed:', error);
+      console.error('❌ Model loading failed completely:', error);
       setMlReady(false);
     }
   };
@@ -926,6 +814,35 @@ export default function CaptureScreen() {
               {scanMode === 'gallery' ? 'Identify a bug from an existing photo' : scanMode === 'liveScan' ? 'Real-time AI detection' : 'Discover new species'}
             </ThemedText>
           </TouchableOpacity>
+
+          {/* ML Engine Status Badge */}
+          <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 8, marginBottom: 4, gap: 6 }}>
+            <View style={{
+              backgroundColor: onDeviceClassifier.isUsingRealModel() ? '#1B5E20' : '#B71C1C',
+              paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, flexDirection: 'row', alignItems: 'center',
+            }}>
+              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+                {onDeviceClassifier.isUsingRealModel() ? '🧠 TFLite: ACTIVE' : '⚠️ TFLite: OFF'}
+              </Text>
+            </View>
+            <View style={{
+              backgroundColor: '#0D47A1',
+              paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+            }}>
+              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>🌿 iNaturalist: ON</Text>
+            </View>
+            {modelVersion && (
+              <View style={{
+                backgroundColor: theme.colors.cardBackground,
+                paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1,
+                borderColor: theme.colors.border,
+              }}>
+                <Text style={{ color: theme.colors.textMuted, fontSize: 10, fontWeight: '600' }}>
+                  v: {modelVersion}
+                </Text>
+              </View>
+            )}
+          </View>
 
           {/* Quick Stats */}
           <View style={styles.quickStats}>
