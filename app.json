@@ -58,6 +58,7 @@
     },
     "plugins": [
       "expo-router",
+      "react-native-fast-tflite",
       [
         "expo-camera",
         {

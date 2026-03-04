@@ -49,6 +49,10 @@ datasets/**/*.webp
 *.pkl
 *.joblib
 
+# But allow the bundled app model & labels used at runtime
+!assets/ml/model.tflite
+!assets/ml/labels.json
+
 # Training outputs
 runs/
 logs/

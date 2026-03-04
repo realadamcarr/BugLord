@@ -400,55 +400,74 @@ export default function CaptureScreen() {
         console.log('✅ Using pre-confirmed live scan result:', preConfirmedResult);
         mlCandidates = [{ label: preConfirmedResult.label, confidence: preConfirmedResult.confidence }];
       } else {
-        // NEW: ML preprocessing for fixed input size
-        const mlInput = await mlPreprocessingService.preprocessForInference(analysisPhoto, {
-          targetSize: 224,
-          quality: 0.9,
-        });
-
-        console.log('🧠 Running ML classification...');
+        // ── Happy path: run TFLite + iNaturalist in parallel, merge results ──
+        // This ensures we get both on-device ML and cloud-based identification
+        // instead of falling through to local color analysis stubs.
 
         // Check ML model state for debug logging
         const usingRealModel = onDeviceClassifier.isUsingRealModel();
         const modelRunnable = onDeviceClassifier.isRunnable();
         console.log(`🔍 ML Debug — mlReady: ${mlReady}, isReady: ${onDeviceClassifier.isReady()}, isUsingRealModel: ${usingRealModel}, isRunnable: ${modelRunnable}`);
 
-        // Run on-device ML classification (real model or stub fallback)
-        if (mlReady && onDeviceClassifier.isReady()) {
+        // Launch TFLite and iNaturalist concurrently
+        const tflitePromise = (async (): Promise<any[]> => {
+          if (!(mlReady && onDeviceClassifier.isReady())) return [];
           try {
-            mlCandidates = await onDeviceClassifier.classifyImage(mlInput, 5);
-            console.log('✅ ML classification complete:', mlCandidates);
-
-            // If all candidates are stubs (no real TFLite model), discard them
-            // and fall through to the deterministic fallback below so the same
-            // image always produces the same result instead of random predictions.
-            const allStubs = mlCandidates.length > 0 && mlCandidates.every((c: any) => c.source === 'stub');
+            const mlInput = await mlPreprocessingService.preprocessForInference(analysisPhoto, {
+              targetSize: 224,
+              quality: 0.9,
+            });
+            console.log('🧠 Running on-device TFLite classification...');
+            const candidates = await onDeviceClassifier.classifyImage(mlInput, 5);
+            // Discard stubs so they never pollute results
+            const allStubs = candidates.length > 0 && candidates.every((c: any) => c.source === 'stub');
             if (allStubs) {
-              console.warn('⚠️ All ML candidates are stubs (dev mode) — discarding for deterministic fallback');
-              mlCandidates = [];
+              console.warn('⚠️ TFLite returned stubs (no real model) — discarding');
+              return [];
             }
-          } catch (error) {
-            console.warn('⚠️  ML classification failed:', error);
+            console.log('✅ TFLite classification complete:', candidates.map((c: any) => `${c.label} ${(c.confidence * 100).toFixed(1)}%`).join(', '));
+            return candidates;
+          } catch (err) {
+            console.warn('⚠️ TFLite classification failed:', err);
+            return [];
           }
-        }
+        })();
 
-        // If ML produced no candidates, fall back to image-based identification
-        if (mlCandidates.length === 0) {
-          console.log('🎨 No ML candidates — using image-based identification...');
+        const iNatPromise = (async (): Promise<any[]> => {
           try {
-            // Prefer the detected crop for color analysis to reduce background skew.
-            const fallbackResult = await bugIdentificationService.identify(analysisPhoto);
-            if (fallbackResult?.candidates?.length > 0) {
-              console.log('✅ Image-based identification succeeded:', fallbackResult.candidates[0].label);
-              mlCandidates = fallbackResult.candidates.map((c: any) => ({
+            console.log('🌿 Running iNaturalist identification...');
+            const iNatResult = await bugIdentificationService.identify(analysisPhoto);
+            if (iNatResult?.candidates?.length > 0) {
+              console.log(`✅ iNaturalist/image analysis returned: ${iNatResult.candidates[0].label} (source: ${iNatResult.provider})`);
+              return iNatResult.candidates.map((c: any) => ({
                 label: c.label || c.species,
                 confidence: c.confidence,
-                source: 'ImageAnalysis',
+                source: c.source || iNatResult.provider || 'iNaturalist',
               }));
             }
-          } catch (error_) {
-            console.warn('⚠️ Image-based identification failed:', error_);
+            return [];
+          } catch (err) {
+            console.warn('⚠️ iNaturalist/image analysis failed:', err);
+            return [];
           }
+        })();
+
+        // Wait for both to finish
+        const [tfliteCandidates, iNatCandidates] = await Promise.all([tflitePromise, iNatPromise]);
+
+        // Merge results: TFLite leads when available, iNaturalist fills gaps
+        if (tfliteCandidates.length > 0 && iNatCandidates.length > 0) {
+          // Both sources returned results — merge with TFLite leading
+          console.log('🔀 Merging TFLite + iNaturalist results');
+          const seenLabels = new Set(tfliteCandidates.map((c: any) => c.label));
+          const extra = iNatCandidates.filter((c: any) => !seenLabels.has(c.label));
+          mlCandidates = [...tfliteCandidates, ...extra].slice(0, 10);
+        } else if (tfliteCandidates.length > 0) {
+          console.log('🧠 Using TFLite results (iNaturalist unavailable)');
+          mlCandidates = tfliteCandidates;
+        } else if (iNatCandidates.length > 0) {
+          console.log('🌿 Using iNaturalist/image analysis results (TFLite unavailable)');
+          mlCandidates = iNatCandidates;
         }
 
         // If still no candidates at all, allow manual entry instead of blocking
