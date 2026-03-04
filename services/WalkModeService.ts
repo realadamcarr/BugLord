@@ -18,15 +18,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Pedometer } from 'expo-sensors';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import {
-    consumeBackgroundSteps,
-    registerBackgroundStepTracking,
-    unregisterBackgroundStepTracking,
+  consumeBackgroundSteps,
+  registerBackgroundStepTracking,
+  unregisterBackgroundStepTracking,
 } from './BackgroundStepTracking';
 import {
-    dismissWalkModeNotification,
-    requestNotificationPermission,
-    showWalkModeNotification,
-    updateWalkModeNotification,
+  dismissWalkModeNotification,
+  requestNotificationPermission,
+  showWalkModeNotification,
+  updateWalkModeNotification,
 } from './WalkModeNotification';
 
 // Mock Pedometer for web/simulator
@@ -184,15 +184,22 @@ class WalkModeService {
       await this.loadState();
       
       // Check if pedometer is available
-      const isAvailable = await PedometerAPI.isAvailableAsync();
-      if (!isAvailable) {
-        this.log('⚠️ Pedometer not available on this device');
-        throw new Error('Pedometer not available on this device');
+      let pedometerAvailable = false;
+      try {
+        pedometerAvailable = await PedometerAPI.isAvailableAsync();
+      } catch {
+        this.log('⚠️ Pedometer availability check failed');
+      }
+
+      if (!pedometerAvailable) {
+        this.log('⚠️ Pedometer not available — step counting will not work until permissions are granted');
+        // Don't throw — still mark as initialized so resume/recovery can work
+        // when the user grants permission later
       }
 
       // If walk mode was active before app closed, resume tracking
-      if (this.state.isActive && this.state.activeBugId) {
-        this.log('🔄 Resuming Walk Mode tracking for bug:', this.state.activeBugName);
+      if (this.state.isActive) {
+        this.log('🔄 Resuming Walk Mode tracking for bug:', this.state.activeBugName || '(none)');
         
         // Recover steps taken while the app was closed
         await this.recoverMissedSteps();
@@ -218,6 +225,10 @@ class WalkModeService {
           }
         });
 
+        // Re-register background fetch task in case OS unregistered it
+        // (Android may drop tasks after app update or prolonged inactivity)
+        await registerBackgroundStepTracking();
+
         // Re-show the persistent notification and start periodic updates
         this.startNotification();
         
@@ -225,15 +236,17 @@ class WalkModeService {
       }
 
       // Listen for app state changes — save on background, recover steps on foreground
-      this._appStateSubscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
-        if (nextState === 'background' || nextState === 'inactive') {
-          this.log('📱 App going to background — force-saving walk state');
-          this.forceSave();
-        } else if (nextState === 'active' && this.state.isActive) {
-          this.log('📱 App returned to foreground — recovering missed steps');
-          this.recoverMissedSteps();
-        }
-      });
+      if (!this._appStateSubscription) {
+        this._appStateSubscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+          if ((nextState === 'background' || nextState === 'inactive') && this.state.isActive) {
+            this.log('📱 App going to background — force-saving walk state');
+            this.forceSave();
+          } else if (nextState === 'active' && this.state.isActive) {
+            this.log('📱 App returned to foreground — recovering missed steps');
+            this.recoverMissedSteps();
+          }
+        });
+      }
 
       this.log('✅ Walk Mode service initialized');
       this.isInitialized = true;
@@ -326,12 +339,6 @@ class WalkModeService {
       if (this.pedometerSubscription) {
         this.pedometerSubscription.remove();
         this.pedometerSubscription = null;
-      }
-
-      // Clean up AppState listener
-      if (this._appStateSubscription) {
-        this._appStateSubscription.remove();
-        this._appStateSubscription = null;
       }
 
       // Unregister background step tracking

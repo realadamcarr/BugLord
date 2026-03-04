@@ -1,4 +1,5 @@
 import * as ImageManipulator from 'expo-image-manipulator';
+import pako from 'pako';
 import { Dimensions } from 'react-native';
 import { onDeviceClassifier } from './ml/OnDeviceClassifier';
 
@@ -287,8 +288,30 @@ class ImageProcessingService {
       const imageWidth = imageInfo.width;
       const imageHeight = imageInfo.height;
 
+      // Heuristic fallback: detect the darkest, most contrasty local region.
+      // This improves tiny dark-subject captures (e.g. ants) when ML detection isn't available.
+      const thumbSize = 80;
+      const thumb = await ImageManipulator.manipulateAsync(
+        photoUri,
+        [{ resize: { width: thumbSize, height: thumbSize } }],
+        {
+          base64: true,
+          compress: 1,
+          format: ImageManipulator.SaveFormat.PNG,
+        }
+      );
+
+      const heuristicBox = thumb.base64
+        ? this.findDarkSubjectBoundingBoxFromPng(thumb.base64, thumbSize, imageWidth, imageHeight)
+        : null;
+
+      if (heuristicBox) {
+        console.log('🎯 Heuristic fallback detection found subject region:', heuristicBox);
+        return heuristicBox;
+      }
+
       // Create a crop area that's likely to contain the insect (center 60%)
-      const cropSize = Math.min(imageWidth, imageHeight) * 0.6;
+      const cropSize = Math.min(imageWidth, imageHeight) * 0.45;
       const x = (imageWidth - cropSize) / 2;
       const y = (imageHeight - cropSize) / 2;
 
@@ -302,6 +325,277 @@ class ImageProcessingService {
       console.warn('simpleInsectDetection failed to get image dims:', error);
       return null;
     }
+  }
+
+  private findDarkSubjectBoundingBoxFromPng(
+    pngBase64: string,
+    thumbSize: number,
+    imageWidth: number,
+    imageHeight: number
+  ): { x: number; y: number; width: number; height: number } | null {
+    try {
+      const bytes = this.base64ToBytes(pngBase64);
+
+      const pixels = this.decodePngPixels(bytes, thumbSize, thumbSize);
+      if (pixels.length !== thumbSize * thumbSize) return null;
+
+      const luma = pixels.map(([r, g, b]) => (0.299 * r + 0.587 * g + 0.114 * b) / 255);
+      const globalMean = luma.reduce((sum, v) => sum + v, 0) / Math.max(luma.length, 1);
+
+      const window = Math.max(10, Math.floor(thumbSize * 0.18)); // ~14 on 80px thumb
+      const step = 2;
+      const best = this.findBestDarkWindow(luma, thumbSize, window, step, globalMean);
+
+      if (!best || best.score < 0.22) return null;
+
+      // Expand around candidate region so full body fits.
+      const centerX = best.x + window / 2;
+      const centerY = best.y + window / 2;
+      const expanded = Math.floor(window * 2.4);
+
+      const minThumbCrop = Math.floor(thumbSize * 0.22);
+      const maxThumbCrop = Math.floor(thumbSize * 0.58);
+      const cropThumbSize = Math.max(minThumbCrop, Math.min(maxThumbCrop, expanded));
+
+      const originX = Math.max(0, Math.min(thumbSize - cropThumbSize, Math.round(centerX - cropThumbSize / 2)));
+      const originY = Math.max(0, Math.min(thumbSize - cropThumbSize, Math.round(centerY - cropThumbSize / 2)));
+
+      const scaleX = imageWidth / thumbSize;
+      const scaleY = imageHeight / thumbSize;
+
+      return {
+        x: Math.round(originX * scaleX),
+        y: Math.round(originY * scaleY),
+        width: Math.round(cropThumbSize * scaleX),
+        height: Math.round(cropThumbSize * scaleY),
+      };
+    } catch (error) {
+      console.warn('⚠️ Heuristic fallback detection failed:', error);
+      return null;
+    }
+  }
+
+  private base64ToBytes(base64: string): Uint8Array {
+    const raw = atob(base64);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) {
+      bytes[i] = raw.codePointAt(i) ?? 0;
+    }
+    return bytes;
+  }
+
+  private findBestDarkWindow(
+    luma: number[],
+    thumbSize: number,
+    window: number,
+    step: number,
+    globalMean: number
+  ): { x: number; y: number; score: number } | null {
+    let best: { x: number; y: number; score: number } | null = null;
+
+    for (let y = 0; y <= thumbSize - window; y += step) {
+      for (let x = 0; x <= thumbSize - window; x += step) {
+        const score = this.scoreDarkWindow(luma, thumbSize, x, y, window, globalMean);
+        if (!best || score > best.score) {
+          best = { x, y, score };
+        }
+      }
+    }
+
+    return best;
+  }
+
+  private scoreDarkWindow(
+    luma: number[],
+    thumbSize: number,
+    startX: number,
+    startY: number,
+    window: number,
+    globalMean: number
+  ): number {
+    let sum = 0;
+    let sumSq = 0;
+    let darkCount = 0;
+
+    for (let wy = 0; wy < window; wy++) {
+      for (let wx = 0; wx < window; wx++) {
+        const value = luma[(startY + wy) * thumbSize + (startX + wx)];
+        sum += value;
+        sumSq += value * value;
+        if (value < 0.28) darkCount++;
+      }
+    }
+
+    const n = window * window;
+    const mean = sum / n;
+    const variance = Math.max(0, sumSq / n - mean * mean);
+    const contrast = Math.sqrt(variance);
+    const darkRatio = darkCount / n;
+
+    const centerX = startX + window / 2;
+    const centerY = startY + window / 2;
+    const dx = (centerX - thumbSize / 2) / (thumbSize / 2);
+    const dy = (centerY - thumbSize / 2) / (thumbSize / 2);
+    const centerBias = 1 - Math.min(1, Math.hypot(dx, dy));
+
+    return (
+      (globalMean - mean) * 2.0 +
+      contrast * 1.2 +
+      darkRatio * 1.5 +
+      centerBias * 0.35
+    );
+  }
+
+  private decodePngPixels(
+    pngBytes: Uint8Array,
+    expectedWidth: number,
+    expectedHeight: number
+  ): Array<[number, number, number]> {
+    try {
+      const parsed = this.parsePngStructure(pngBytes);
+      if (!parsed) return [];
+      if (parsed.width !== expectedWidth || parsed.height !== expectedHeight) return [];
+
+      const bytesPerPixel = this.getPngBytesPerPixel(parsed.colorType);
+      if (!bytesPerPixel) return [];
+
+      const inflated = pako.inflate(parsed.compressed);
+      const decoded = this.unfilterPngScanlines(inflated, parsed.width, parsed.height, bytesPerPixel);
+      return this.rgbPixelsFromDecoded(decoded, parsed.width, parsed.height, parsed.colorType, bytesPerPixel);
+    } catch {
+      return [];
+    }
+  }
+
+  private parsePngStructure(
+    pngBytes: Uint8Array
+  ): { width: number; height: number; colorType: number; compressed: Uint8Array } | null {
+    let offset = 8;
+    let width = 0;
+    let height = 0;
+    let colorType = 0;
+    const idatChunks: Uint8Array[] = [];
+
+    while (offset < pngBytes.length - 8) {
+      const len =
+        (pngBytes[offset] << 24) |
+        (pngBytes[offset + 1] << 16) |
+        (pngBytes[offset + 2] << 8) |
+        pngBytes[offset + 3];
+      const type = String.fromCodePoint(
+        pngBytes[offset + 4],
+        pngBytes[offset + 5],
+        pngBytes[offset + 6],
+        pngBytes[offset + 7]
+      );
+
+      if (type === 'IHDR') {
+        width =
+          (pngBytes[offset + 8] << 24) |
+          (pngBytes[offset + 9] << 16) |
+          (pngBytes[offset + 10] << 8) |
+          pngBytes[offset + 11];
+        height =
+          (pngBytes[offset + 12] << 24) |
+          (pngBytes[offset + 13] << 16) |
+          (pngBytes[offset + 14] << 8) |
+          pngBytes[offset + 15];
+        colorType = pngBytes[offset + 17];
+      } else if (type === 'IDAT') {
+        idatChunks.push(pngBytes.slice(offset + 8, offset + 8 + len));
+      } else if (type === 'IEND') {
+        break;
+      }
+
+      offset += 12 + len;
+    }
+
+    if (!idatChunks.length || !width || !height) {
+      return null;
+    }
+
+    const compressed = new Uint8Array(idatChunks.reduce((sum, chunk) => sum + chunk.length, 0));
+    let writeOffset = 0;
+    for (const chunk of idatChunks) {
+      compressed.set(chunk, writeOffset);
+      writeOffset += chunk.length;
+    }
+
+    return { width, height, colorType, compressed };
+  }
+
+  private getPngBytesPerPixel(colorType: number): number {
+    if (colorType === 2) return 3;
+    if (colorType === 6) return 4;
+    if (colorType === 0) return 1;
+    return 0;
+  }
+
+  private unfilterPngScanlines(
+    inflated: Uint8Array,
+    width: number,
+    height: number,
+    bytesPerPixel: number
+  ): Uint8Array {
+    const scanlineLen = 1 + width * bytesPerPixel;
+    const decoded = new Uint8Array(width * height * bytesPerPixel);
+
+    for (let y = 0; y < height; y++) {
+      const filterType = inflated[y * scanlineLen];
+      const rowStart = y * scanlineLen + 1;
+      const decodedRowStart = y * width * bytesPerPixel;
+
+      for (let x = 0; x < width * bytesPerPixel; x++) {
+        const raw = inflated[rowStart + x];
+        const a = x >= bytesPerPixel ? decoded[decodedRowStart + x - bytesPerPixel] : 0;
+        const b = y > 0 ? decoded[(y - 1) * width * bytesPerPixel + x] : 0;
+        const c = x >= bytesPerPixel && y > 0
+          ? decoded[(y - 1) * width * bytesPerPixel + x - bytesPerPixel]
+          : 0;
+
+        decoded[decodedRowStart + x] = this.applyPngFilter(filterType, raw, a, b, c);
+      }
+    }
+
+    return decoded;
+  }
+
+  private applyPngFilter(filterType: number, raw: number, a: number, b: number, c: number): number {
+    if (filterType === 1) return (raw + a) & 0xff;
+    if (filterType === 2) return (raw + b) & 0xff;
+    if (filterType === 3) return (raw + Math.floor((a + b) / 2)) & 0xff;
+    if (filterType === 4) return (raw + this.paethPredictor(a, b, c)) & 0xff;
+    return raw;
+  }
+
+  private rgbPixelsFromDecoded(
+    decoded: Uint8Array,
+    width: number,
+    height: number,
+    colorType: number,
+    bytesPerPixel: number
+  ): Array<[number, number, number]> {
+    const pixels: Array<[number, number, number]> = [];
+    for (let i = 0; i < width * height; i++) {
+      const idx = i * bytesPerPixel;
+      if (colorType === 0) {
+        const gray = decoded[idx];
+        pixels.push([gray, gray, gray]);
+      } else {
+        pixels.push([decoded[idx], decoded[idx + 1], decoded[idx + 2]]);
+      }
+    }
+    return pixels;
+  }
+
+  private paethPredictor(a: number, b: number, c: number): number {
+    const p = a + b - c;
+    const pa = Math.abs(p - a);
+    const pb = Math.abs(p - b);
+    const pc = Math.abs(p - c);
+    if (pa <= pb && pa <= pc) return a;
+    if (pb <= pc) return b;
+    return c;
   }
   
   /**

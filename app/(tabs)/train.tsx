@@ -196,7 +196,7 @@ export default function TrainScreen() {
               onPress={() => setShowWalkHistory(true)}
             >
               <Text style={styles.quickActionIcon}>📊</Text>
-              <ThemedText style={styles.quickActionTitle}>History</ThemedText>
+              <ThemedText style={styles.quickActionTitle}>Walk History</ThemedText>
               <ThemedText style={styles.quickActionValue}>View</ThemedText>
             </TouchableOpacity>
           </View>

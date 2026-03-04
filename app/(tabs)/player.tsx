@@ -5,7 +5,7 @@ import { XPProgressBar } from '@/components/XPProgressBar';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { clearScanLogs, getScanLogs, ScanLogEntry } from '@/services/ScanLogService';
-import { BIOME_CONFIG, RARITY_CONFIG } from '@/types/Bug';
+import { BIOME_CONFIG, BugRarity, RARITY_CONFIG } from '@/types/Bug';
 import React, { useEffect, useState } from 'react';
 import { Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +16,7 @@ export default function PlayerScreen() {
   const { theme } = useTheme();
   const { collection } = useBugCollection();
   const [showCollection, setShowCollection] = useState(false);
+  const [collectionInitialRarity, setCollectionInitialRarity] = useState<BugRarity | 'all'>('all');
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<ScanLogEntry[]>([]);
 
@@ -63,6 +64,11 @@ export default function PlayerScreen() {
       {completed && <Text style={styles.checkmark}>✓</Text>}
     </View>
   );
+
+  const openCollection = (rarity: BugRarity | 'all' = 'all') => {
+    setCollectionInitialRarity(rarity);
+    setShowCollection(true);
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
@@ -126,7 +132,7 @@ export default function PlayerScreen() {
         <View style={styles.collectionButtonContainer}>
           <TouchableOpacity 
             style={styles.collectionButton}
-            onPress={() => setShowCollection(true)}
+            onPress={() => openCollection('all')}
           >
             <View style={styles.collectionButtonIcon}>
               <PixelatedEmoji type="dex" size={28} color={theme.colors.text} />
@@ -163,7 +169,12 @@ export default function PlayerScreen() {
           </View>
           
           {Object.entries(RARITY_CONFIG).map(([rarity, config]) => (
-            <View key={rarity} style={styles.rarityRow}>
+            <TouchableOpacity
+              key={rarity}
+              style={styles.rarityRow}
+              activeOpacity={0.8}
+              onPress={() => openCollection(rarity as BugRarity)}
+            >
               <View 
                 style={[styles.rarityBadge, { backgroundColor: config.color }]}
               />
@@ -173,7 +184,7 @@ export default function PlayerScreen() {
               <ThemedText style={styles.rarityCount}>
                 {rarityStats[rarity] || 0}
               </ThemedText>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -266,7 +277,10 @@ export default function PlayerScreen() {
               <Text style={styles.modalCloseText}>✕</Text>
             </TouchableOpacity>
           </View>
-          <CollectionScreen />
+          <CollectionScreen
+            onClose={() => setShowCollection(false)}
+            initialRarityFilter={collectionInitialRarity}
+          />
         </View>
       </Modal>
 
@@ -285,8 +299,9 @@ export default function PlayerScreen() {
             >
               <Text style={styles.modalCloseText}>✕</Text>
             </TouchableOpacity>
+            <ThemedText style={{ fontSize: 18, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1 }}>Scan Logs</ThemedText>
             <TouchableOpacity
-              style={[styles.modalCloseButton, { position: 'absolute', right: 12 }]}
+              style={styles.modalCloseButton}
               onPress={async () => { await clearScanLogs(); setLogs([]); }}
             >
               <Text style={styles.modalCloseText}>Clear</Text>
@@ -576,7 +591,7 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   modalHeader: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     alignItems: 'center',
     padding: 14,
     paddingTop: 18,

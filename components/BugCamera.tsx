@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-export type ScanMode = 'photo' | 'liveScan';
+export type ScanMode = 'photo' | 'liveScan' | 'gallery';
 
 interface BugCameraProps {
   onCapture: (photoUri: string) => void;

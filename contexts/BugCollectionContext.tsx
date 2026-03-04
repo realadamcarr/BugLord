@@ -26,10 +26,11 @@ function deriveBugCategory(bug: any): BugCategory | undefined {
 
 interface BugCollectionContextType {
   collection: BugCollection;
-  addBugToCollection: (bug: Omit<Bug, 'id' | 'caughtAt' | 'level' | 'xp' | 'maxXp'>) => Promise<Bug>;
+  addBugToCollection: (bug: Omit<Bug, 'id' | 'caughtAt'> & Partial<Pick<Bug, 'level' | 'xp' | 'maxXp'>>) => Promise<Bug>;
   addBugToParty: (bug: Bug, slot?: number) => boolean;
   removeBugFromParty: (slot: number) => void;
   swapPartySlots: (from: number, to: number) => void;
+  switchParty: (index: number) => void;
   updateBugNickname: (bugId: string, nickname: string) => void;
   addXpToBug: (bugId: string, xpAmount: number) => Promise<boolean>;
   updateBugHp: (bugId: string, currentHp: number) => Promise<boolean>;
@@ -43,9 +44,17 @@ const BugCollectionContext = createContext<BugCollectionContextType | undefined>
 const STORAGE_KEY = 'bug_collection_data';
 const COLLECTION_VERSION = '1.0';
 
+const EMPTY_PARTY: (Bug | null)[] = [null, null, null, null, null, null];
+
 const DEFAULT_COLLECTION: BugCollection = {
   bugs: [],
-  party: [null, null, null, null, null, null], // 6 empty party slots
+  party: [null, null, null, null, null, null],
+  parties: [
+    [null, null, null, null, null, null],
+    [null, null, null, null, null, null],
+    [null, null, null, null, null, null],
+  ],
+  activePartyIndex: 0,
   totalXp: 0,
   level: 1,
   xp: 0,
@@ -93,10 +102,33 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
           }));
         }
         
-        // Ensure party array has 6 slots
-        if (!parsed.party || parsed.party.length !== 6) {
-          parsed.party = Array(6).fill(null);
+        // --- Migration: single party → multi-party ---
+        const ensureSixSlots = (p: any): (Bug | null)[] => {
+          if (!p || !Array.isArray(p)) return [...EMPTY_PARTY];
+          while (p.length < 6) p.push(null);
+          return p.slice(0, 6);
+        };
+
+        if (!parsed.parties || !Array.isArray(parsed.parties)) {
+          // Old format: migrate existing party to parties[0]
+          const oldParty = ensureSixSlots(parsed.party);
+          parsed.parties = [
+            oldParty,
+            [...EMPTY_PARTY],
+            [...EMPTY_PARTY],
+          ];
+          parsed.activePartyIndex = 0;
+        } else {
+          // Ensure we have exactly 3 parties with 6 slots each
+          while (parsed.parties.length < 3) parsed.parties.push([...EMPTY_PARTY]);
+          parsed.parties = parsed.parties.slice(0, 3).map(ensureSixSlots);
+          if (parsed.activePartyIndex == null || parsed.activePartyIndex < 0 || parsed.activePartyIndex > 2) {
+            parsed.activePartyIndex = 0;
+          }
         }
+
+        // Keep party in sync with active party
+        parsed.party = parsed.parties[parsed.activePartyIndex];
 
         // --- Migration: back-fill category + battle stats for bugs that don't have them ---
         const migrateBug = (bug: any) => {
@@ -117,9 +149,12 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
         if (parsed.bugs) {
           parsed.bugs = parsed.bugs.map(migrateBug);
         }
-        if (parsed.party) {
-          parsed.party = parsed.party.map((bug: any) => bug ? migrateBug(bug) : bug);
-        }
+        // Migrate bugs in all parties
+        parsed.parties = parsed.parties.map((p: any[]) =>
+          p.map((bug: any) => bug ? migrateBug(bug) : bug)
+        );
+        // Keep party in sync after migration
+        parsed.party = parsed.parties[parsed.activePartyIndex];
         
         setCollection({ ...DEFAULT_COLLECTION, ...parsed });
       }
@@ -146,21 +181,25 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
   };
 
   const addBugToCollection = async (
-    bugData: Omit<Bug, 'id' | 'caughtAt' | 'level' | 'xp' | 'maxXp'>
+    bugData: Omit<Bug, 'id' | 'caughtAt'> & Partial<Pick<Bug, 'level' | 'xp' | 'maxXp'>>
   ): Promise<Bug> => {
     const stats = generateBugStats(bugData.rarity);
+    const level = bugData.level ?? 1;
+    const xp = bugData.xp ?? 0;
+    const maxXp = bugData.maxXp ?? stats.maxXp;
+    const hpForLevel = Math.floor(stats.maxXp * (1 + (level - 1) * 0.2));
     const newBug: Bug = {
       ...bugData,
       id: generateBugId(),
       caughtAt: new Date(),
-      level: 1,
-      xp: 0,
-      maxXp: stats.maxXp,
-      maxHp: stats.maxXp, // Initialize maxHp
-      currentHp: stats.maxXp, // Start with full HP
-      attack: stats.attack,
-      defense: stats.defense,
-      speed: stats.speed,
+      level,
+      xp,
+      maxXp,
+      maxHp: bugData.maxHp ?? hpForLevel,
+      currentHp: bugData.currentHp ?? hpForLevel,
+      attack: bugData.attack ?? stats.attack,
+      defense: bugData.defense ?? stats.defense,
+      speed: bugData.speed ?? stats.speed,
     };
 
     setCollection(prev => ({
@@ -177,13 +216,16 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
 
   const addBugToParty = (bug: Bug, slot?: number): boolean => {
     setCollection(prev => {
-      const newParty = [...prev.party];
+      const idx = prev.activePartyIndex;
+      const newParty = [...prev.parties[idx]];
       
       // If slot is specified, use it (if empty)
       if (slot !== undefined && slot >= 0 && slot < 6) {
         if (newParty[slot] === null) {
           newParty[slot] = bug;
-          return { ...prev, party: newParty };
+          const newParties = [...prev.parties];
+          newParties[idx] = newParty;
+          return { ...prev, parties: newParties, party: newParty };
         }
         return prev; // Slot occupied
       }
@@ -192,7 +234,9 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
       const emptySlot = newParty.findIndex(slot => slot === null);
       if (emptySlot !== -1) {
         newParty[emptySlot] = bug;
-        return { ...prev, party: newParty };
+        const newParties = [...prev.parties];
+        newParties[idx] = newParty;
+        return { ...prev, parties: newParties, party: newParty };
       }
       
       return prev; // Party full
@@ -205,9 +249,12 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     if (slot < 0 || slot >= 6) return;
     
     setCollection(prev => {
-      const newParty = [...prev.party];
+      const idx = prev.activePartyIndex;
+      const newParty = [...prev.parties[idx]];
       newParty[slot] = null;
-      return { ...prev, party: newParty };
+      const newParties = [...prev.parties];
+      newParties[idx] = newParty;
+      return { ...prev, parties: newParties, party: newParty };
     });
   };
 
@@ -215,89 +262,78 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     if (from < 0 || from >= 6 || to < 0 || to >= 6) return;
     
     setCollection(prev => {
-      const newParty = [...prev.party];
+      const idx = prev.activePartyIndex;
+      const newParty = [...prev.parties[idx]];
       const temp = newParty[from];
       newParty[from] = newParty[to];
       newParty[to] = temp;
-      return { ...prev, party: newParty };
+      const newParties = [...prev.parties];
+      newParties[idx] = newParty;
+      return { ...prev, parties: newParties, party: newParty };
     });
   };
 
-  const updateBugNickname = (bugId: string, nickname: string) => {
+  const switchParty = (index: number) => {
+    if (index < 0 || index > 2) return;
     setCollection(prev => ({
       ...prev,
-      bugs: prev.bugs.map(bug => 
-        bug.id === bugId ? { ...bug, nickname } : bug
-      ),
-      party: prev.party.map(bug => 
-        bug && bug.id === bugId ? { ...bug, nickname } : bug
-      ),
+      activePartyIndex: index,
+      party: prev.parties[index],
     }));
+  };
+
+  const updateBugNickname = (bugId: string, nickname: string) => {
+    setCollection(prev => {
+      const newParties = prev.parties.map(p =>
+        p.map(bug => bug && bug.id === bugId ? { ...bug, nickname } : bug)
+      );
+      return {
+        ...prev,
+        bugs: prev.bugs.map(bug => 
+          bug.id === bugId ? { ...bug, nickname } : bug
+        ),
+        parties: newParties,
+        party: newParties[prev.activePartyIndex],
+      };
+    });
   };
 
   const addXpToBug = async (bugId: string, xpAmount: number): Promise<boolean> => {
     return new Promise((resolve) => {
       setCollection(prev => {
-        // Find the bug in either bugs array or party
         let bugFound = false;
-        
+
+        const levelUpBug = (bug: Bug): Bug => {
+          bugFound = true;
+          let newXp = bug.xp + xpAmount;
+          let newLevel = bug.level;
+          let currentBug = { ...bug };
+          while (newXp >= currentBug.maxXp) {
+            newXp -= currentBug.maxXp;
+            newLevel += 1;
+            const newMaxXp = Math.floor(currentBug.maxXp * 1.2);
+            currentBug = { ...currentBug, maxXp: newMaxXp };
+          }
+          return { ...currentBug, xp: newXp, level: newLevel };
+        };
+
         // Update bug in bugs array
-        const newBugs = prev.bugs.map(bug => {
-          if (bug.id === bugId) {
-            bugFound = true;
-            let newXp = bug.xp + xpAmount;
-            let newLevel = bug.level;
-            
-            // Level up logic for individual bugs
-            while (newXp >= bug.maxXp) {
-              newXp -= bug.maxXp;
-              newLevel += 1;
-              // Increase max XP for next level (simple progression)
-              const newMaxXp = Math.floor(bug.maxXp * 1.2);
-              bug = { ...bug, maxXp: newMaxXp };
-            }
-            
-            return {
-              ...bug,
-              xp: newXp,
-              level: newLevel,
-            };
-          }
-          return bug;
-        });
+        const newBugs = prev.bugs.map(bug =>
+          bug.id === bugId ? levelUpBug(bug) : bug
+        );
         
-        // Update bug in party array if found
-        const newParty = prev.party.map(bug => {
-          if (bug && bug.id === bugId) {
-            bugFound = true;
-            let newXp = bug.xp + xpAmount;
-            let newLevel = bug.level;
-            
-            // Level up logic for individual bugs
-            while (newXp >= bug.maxXp) {
-              newXp -= bug.maxXp;
-              newLevel += 1;
-              // Increase max XP for next level (simple progression)
-              const newMaxXp = Math.floor(bug.maxXp * 1.2);
-              bug = { ...bug, maxXp: newMaxXp };
-            }
-            
-            return {
-              ...bug,
-              xp: newXp,
-              level: newLevel,
-            };
-          }
-          return bug;
-        });
+        // Update bug in all parties
+        const newParties = prev.parties.map(p =>
+          p.map(bug => bug && bug.id === bugId ? levelUpBug(bug) : bug)
+        );
         
-        // Resolve the promise with success status
         setTimeout(() => resolve(bugFound), 0);
         
         return {
           ...prev,
           bugs: newBugs,
-          party: newParty,
+          parties: newParties,
+          party: newParties[prev.activePartyIndex],
         };
       });
     });
@@ -328,43 +364,32 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     return new Promise((resolve) => {
       setCollection(prev => {
         let bugFound = false;
+
+        const updateHp = (bug: Bug): Bug => {
+          bugFound = true;
+          const maxHp = bug.maxHp || bug.maxXp;
+          return {
+            ...bug,
+            currentHp: Math.max(0, Math.min(currentHp, maxHp)),
+            maxHp,
+          };
+        };
         
-        // Update bug in bugs array
-        const newBugs = prev.bugs.map(bug => {
-          if (bug.id === bugId) {
-            bugFound = true;
-            // Initialize maxHp if not set (based on maxXp as proxy)
-            const maxHp = bug.maxHp || bug.maxXp;
-            return {
-              ...bug,
-              currentHp: Math.max(0, Math.min(currentHp, maxHp)),
-              maxHp,
-            };
-          }
-          return bug;
-        });
+        const newBugs = prev.bugs.map(bug =>
+          bug.id === bugId ? updateHp(bug) : bug
+        );
         
-        // Update bug in party array if found
-        const newParty = prev.party.map(bug => {
-          if (bug && bug.id === bugId) {
-            bugFound = true;
-            const maxHp = bug.maxHp || bug.maxXp;
-            return {
-              ...bug,
-              currentHp: Math.max(0, Math.min(currentHp, maxHp)),
-              maxHp,
-            };
-          }
-          return bug;
-        });
+        const newParties = prev.parties.map(p =>
+          p.map(bug => bug && bug.id === bugId ? updateHp(bug) : bug)
+        );
         
-        // Resolve the promise with success status
         setTimeout(() => resolve(bugFound), 0);
         
         return {
           ...prev,
           bugs: newBugs,
-          party: newParty,
+          parties: newParties,
+          party: newParties[prev.activePartyIndex],
         };
       });
     });
@@ -372,18 +397,18 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
 
   const releaseBug = (bugId: string) => {
     setCollection(prev => {
-      // Remove from bugs array
       const newBugs = prev.bugs.filter(bug => bug.id !== bugId);
       
-      // Remove from party if present
-      const newParty = prev.party.map(bug => 
-        bug && bug.id === bugId ? null : bug
+      // Remove from all parties
+      const newParties = prev.parties.map(p =>
+        p.map(bug => bug && bug.id === bugId ? null : bug)
       );
       
       return {
         ...prev,
         bugs: newBugs,
-        party: newParty,
+        parties: newParties,
+        party: newParties[prev.activePartyIndex],
       };
     });
   };
@@ -394,6 +419,7 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     addBugToParty,
     removeBugFromParty,
     swapPartySlots,
+    switchParty,
     updateBugNickname,
     addXpToBug,
     updateBugHp,

@@ -24,6 +24,7 @@ interface BugInfoModalProps {
   bug: Bug | null;
   onClose: () => void;
   onConfirm: (options: { nickname?: string; addToParty?: boolean; replaceBugId?: string; confirmedLabel?: string; confirmationMethod?: ConfirmationMethod; }) => void;
+  onRescan?: () => void;
   isNewCatch?: boolean;
   candidates?: IdentificationCandidate[];
 }
@@ -33,6 +34,7 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   bug,
   onClose,
   onConfirm,
+  onRescan,
   isNewCatch = false,
   candidates = []
 }) => {
@@ -540,6 +542,14 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
               </>
             ) : (
               <>
+                {onRescan && (
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.rescanButton]}
+                    onPress={onRescan}
+                  >
+                    <ThemedText style={styles.rescanButtonText}>🔄 Rescan Bug</ThemedText>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   style={[styles.actionButton, styles.secondaryButton]}
                   onPress={handleAddToCollection}
@@ -787,6 +797,7 @@ const createStyles = (theme: any) => StyleSheet.create({
     left: 0,
     right: 0,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     padding: 16,
     backgroundColor: theme.colors.background,
     borderTopWidth: 3,
@@ -794,7 +805,8 @@ const createStyles = (theme: any) => StyleSheet.create({
     gap: 10,
   },
   actionButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '45%',
     paddingVertical: 14,
     borderRadius: 8,
     alignItems: 'center',
@@ -820,6 +832,18 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   secondaryButtonText: {
     color: theme.colors.text,
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  rescanButton: {
+    backgroundColor: theme.colors.surface,
+    borderColor: theme.colors.warning,
+    flexBasis: '100%',
+  },
+  rescanButtonText: {
+    color: theme.colors.warning,
     fontSize: 13,
     fontWeight: '900',
     textTransform: 'uppercase',

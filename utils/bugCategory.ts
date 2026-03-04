@@ -19,7 +19,7 @@ const KEYWORD_MAP: [RegExp, BugCategory][] = [
   [/\b(fly|flies|mosquito|gnat|midge|crane\s*fly|dragonfly|damselfly|hover\s*fly)\b/i, 'fly'],
 
   // Spiders / ticks / scorpions → spider sprite
-  [/\b(spider|tarantula|tick|scorpion|harvestman|daddy\s*long\s*legs|arachnid)\b/i, 'spider'],
+  [/\b(spider|tarantula|tick|scorpion|harvestman|daddy\s*long\s*legs|arachnid|widow|orb[- ]?weaver|jumping\s*spider|wolf\s*spider)\b/i, 'spider'],
 
   // Ants / termites → ant sprite
   [/\b(ant|ants|fire\s*ant|carpenter\s*ant|termite|formicidae)\b/i, 'ant'],

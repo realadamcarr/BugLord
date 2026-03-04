@@ -68,9 +68,9 @@ export async function clearBgStepData(): Promise<void> {
 }
 
 // ─── Define the background task (top level!) ────────────────────────────────
-
-TaskManager.defineTask(BACKGROUND_STEP_TASK_NAME, async () => {
-  try {
+if (!TaskManager.isTaskDefined(BACKGROUND_STEP_TASK_NAME)) {
+  TaskManager.defineTask(BACKGROUND_STEP_TASK_NAME, async () => {
+    try {
     // 1. Check if walk mode is active; if not, no work to do.
     const walkRaw = await AsyncStorage.getItem(WALK_MODE_STORAGE_KEY);
     if (!walkRaw) {
@@ -132,11 +132,12 @@ TaskManager.defineTask(BACKGROUND_STEP_TASK_NAME, async () => {
 
     console.log(`[BgStep] Accumulated ${steps} steps (total bg: ${prevAccumulated + steps})`);
     return BackgroundFetch.BackgroundFetchResult.NewData;
-  } catch (e) {
-    console.warn('[BgStep] Background task error:', e);
-    return BackgroundFetch.BackgroundFetchResult.Failed;
-  }
-});
+    } catch (e) {
+      console.warn('[BgStep] Background task error:', e);
+      return BackgroundFetch.BackgroundFetchResult.Failed;
+    }
+  });
+}
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
@@ -148,6 +149,15 @@ export async function registerBackgroundStepTracking(): Promise<void> {
   if (Platform.OS === 'web') return;
 
   try {
+    const status = await BackgroundFetch.getStatusAsync();
+    if (
+      status === BackgroundFetch.BackgroundFetchStatus.Denied ||
+      status === BackgroundFetch.BackgroundFetchStatus.Restricted
+    ) {
+      console.warn('[BgStep] Background fetch unavailable on this device:', status);
+      return;
+    }
+
     // Check if already registered
     const isRegistered = await TaskManager.isTaskRegisteredAsync(BACKGROUND_STEP_TASK_NAME);
     if (isRegistered) {
@@ -217,5 +227,25 @@ export async function consumeBackgroundSteps(): Promise<number> {
     return steps;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Restore background step tracking after app startup if walk mode is active.
+ * Safe to call repeatedly.
+ */
+export async function restoreBackgroundStepTrackingIfNeeded(): Promise<void> {
+  if (Platform.OS === 'web') return;
+
+  try {
+    const walkRaw = await AsyncStorage.getItem(WALK_MODE_STORAGE_KEY);
+    if (!walkRaw) return;
+
+    const walkState = JSON.parse(walkRaw);
+    if (walkState?.isActive) {
+      await registerBackgroundStepTracking();
+    }
+  } catch (e) {
+    console.warn('[BgStep] Failed to restore background step tracking:', e);
   }
 }

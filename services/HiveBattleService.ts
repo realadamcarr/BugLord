@@ -139,6 +139,11 @@ export class HiveBattleService {
     else if (enemyBug.level >= 10) rarity = 'rare';
     else if (enemyBug.level >= 6) rarity = 'uncommon';
 
+    // Scale stats with level so caught bugs feel appropriately strong
+    const baseAttack = Math.floor(5 + enemyBug.level * 1.5 + Math.random() * 3);
+    const baseDefense = Math.floor(3 + enemyBug.level * 1.2 + Math.random() * 3);
+    const baseSpeed = Math.floor(4 + enemyBug.level * 1 + Math.random() * 3);
+
     return {
       id: `caught-${enemyBug.id}`,
       name: enemyBug.name.replace('Wild ', '').replace('Boss ', ''),
@@ -149,6 +154,11 @@ export class HiveBattleService {
       level: enemyBug.level,
       xp: 0,
       maxXp: enemyBug.maxHp,
+      maxHp: enemyBug.maxHp,
+      currentHp: enemyBug.maxHp, // Caught bugs start at full HP
+      attack: baseAttack,
+      defense: baseDefense,
+      speed: baseSpeed,
       xpValue: enemyBug.level * 10,
       traits: [`Caught at Level ${enemyBug.level}`],
       size: 'medium' as const,

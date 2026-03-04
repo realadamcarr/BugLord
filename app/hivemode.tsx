@@ -67,9 +67,23 @@ const hpColor = (percent: number) => {
 
 /** Helper: render a battle bug sprite (string URI or emoji) */
 const BattleSpriteImage = ({ sprite, imageStyle, emojiStyle }: { sprite?: string; imageStyle: any; emojiStyle: any }) => {
+  if (typeof sprite === 'string' && sprite.startsWith('category:')) {
+    const category = sprite.replace('category:', '') as keyof typeof BUG_SPRITE;
+    if (BUG_SPRITE[category]) {
+      return <Image source={BUG_SPRITE[category]} style={imageStyle} />;
+    }
+  }
+
   if (
     typeof sprite === 'string' &&
-    (sprite.startsWith('data:') || sprite.startsWith('file:') || sprite.startsWith('http'))
+    (
+      sprite.startsWith('data:') ||
+      sprite.startsWith('file:') ||
+      sprite.startsWith('http') ||
+      sprite.startsWith('blob:') ||
+      sprite.startsWith('content:') ||
+      sprite.startsWith('asset:')
+    )
   ) {
     return <Image source={{ uri: sprite }} style={imageStyle} />;
   }
@@ -84,6 +98,7 @@ export default function HiveModeScreen() {
     addBugToParty,
     removeBugFromParty,
     updateBugNickname,
+    addXpToBug,
     gainXP,
     updateBugHp,
   } = useBugCollection();
@@ -158,7 +173,10 @@ export default function HiveModeScreen() {
       maxHp,
       currentHp, // Use actual HP — no full heal
       attack: Math.floor(10 + selectedBug.level * 2),
-      sprite: selectedBug.pixelArt || selectedBug.photo,
+      sprite:
+        (selectedBug.category ? `category:${selectedBug.category}` : undefined) ||
+        selectedBug.pixelArt ||
+        selectedBug.photo,
       isEnemy: false,
     };
 
@@ -306,6 +324,13 @@ export default function HiveModeScreen() {
     const xpGained = Math.floor(defeatedEnemy.level * 10);
     gainXP(xpGained);
 
+    // Grant XP to the active fighting bug so it can level up
+    if (hiveState.playerBug) {
+      addXpToBug(hiveState.playerBug.id, xpGained);
+      // Persist current HP after the round
+      updateBugHp(hiveState.playerBug.id, hiveState.playerBug.currentHp);
+    }
+
     // Roll for item drop
     const droppedItemId = HiveBattleService.rollItemDrop();
     let dropMsg = '';
@@ -429,9 +454,8 @@ export default function HiveModeScreen() {
         setForcedSwitch(true);
         setShowSwitchSelector(true);
       } else {
-        Alert.alert('All Bugs Fainted!', 'All your party bugs have been defeated.', [
-          { text: 'End Run', onPress: () => handleRunCompletion(false) },
-        ]);
+        setBattleMessage('All your party bugs have fainted...');
+        handleRunCompletion(false);
       }
     }, 1200);
   };
@@ -467,7 +491,10 @@ export default function HiveModeScreen() {
       maxHp,
       currentHp,
       attack: Math.floor(10 + newBug.level * 2),
-      sprite: newBug.pixelArt || newBug.photo,
+      sprite:
+        (newBug.category ? `category:${newBug.category}` : undefined) ||
+        newBug.pixelArt ||
+        newBug.photo,
       isEnemy: false,
     };
 
@@ -605,9 +632,17 @@ export default function HiveModeScreen() {
   const handleRunCompletion = (won: boolean) => {
     console.log('[Hive] Run completed. Won:', won);
 
+    // Persist HP for the active bug
     if (hiveState.playerBug) {
       updateBugHp(hiveState.playerBug.id, hiveState.playerBug.currentHp);
     }
+
+    // Persist HP for all party bugs tracked during the run
+    Object.entries(partyBugHp).forEach(([bugId, hp]) => {
+      if (bugId !== hiveState.playerBug?.id) {
+        updateBugHp(bugId, hp.current);
+      }
+    });
 
     const totalXp = hiveState.roundsWon * 50;
     if (won) gainXP(totalXp);

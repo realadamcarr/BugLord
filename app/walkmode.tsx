@@ -209,9 +209,16 @@ export default function WalkModeScreen() {
       if (Platform.OS === 'android') {
         Alert.alert(
           'Walk Mode Started!',
-          `${selectedBug.name} is now training!\n\n• Walk 1 kilometer to gain XP\n• You may find items while walking\n\n⚡ TIP: For reliable background tracking, disable battery optimization for BugLord in your device Settings → Battery → App restrictions.`,
+          `${selectedBug.name} is now training!\n\n• Walk 1 kilometer to gain XP\n• You may find items while walking\n\n⚡ IMPORTANT: To track steps when the app is closed, disable battery optimization for BugLord.\n\nGo to Settings → Apps → BugLord → Battery → Unrestricted`,
           [
-            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+            {
+              text: 'Open Battery Settings',
+              onPress: () => {
+                // Try Android-specific battery optimization intent first
+                Linking.openURL('android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS')
+                  .catch(() => Linking.openSettings().catch(() => {}));
+              },
+            },
             { text: 'Got it', style: 'cancel' },
           ],
         );

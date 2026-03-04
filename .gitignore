@@ -91,3 +91,8 @@ google-services.json
 GoogleService-Info.plist
 **/service-account*.json
 functions/node_modules/
+
+# --------------------
+# Test images
+# --------------------
+phone test images/
