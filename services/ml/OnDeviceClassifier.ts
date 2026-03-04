@@ -97,6 +97,105 @@ class OnDeviceClassifier {
       .slice(0, k);
   }
 
+  // ─── YOLOv5 output parsing ────────────────────────────────────
+
+  /**
+   * Auto-detect whether output tensor is YOLOv5 detection format or plain
+   * classification softmax. YOLOv5 outputs [N, 5+C] where C = num classes;
+   * a classification model outputs [C] or [1, C].
+   */
+  private isYoloOutput(tensor: number[], numClasses: number): boolean {
+    // Classification: tensor.length === numClasses
+    if (tensor.length === numClasses) return false;
+    // YOLOv5: total length divisible by stride (5 + numClasses)
+    const stride = 5 + numClasses;
+    return tensor.length > numClasses && tensor.length % stride === 0;
+  }
+
+  /**
+   * Parse YOLOv5 TFLite output tensor.
+   * Each detection row: [cx, cy, w, h, obj_conf, cls0, cls1, ..., clsN]
+   */
+  private parseYoloOutput(
+    outputData: number[],
+    numClasses: number,
+    confidenceThreshold: number = 0.25
+  ): MLCandidate[] {
+    const results: MLCandidate[] = [];
+    const stride = 5 + numClasses;
+    const numDetections = Math.floor(outputData.length / stride);
+
+    for (let i = 0; i < numDetections; i++) {
+      const offset = i * stride;
+      const objConf = outputData[offset + 4];
+      if (objConf < confidenceThreshold) continue;
+
+      let bestClassIdx = 0;
+      let bestClassScore = 0;
+      for (let c = 0; c < numClasses; c++) {
+        const score = outputData[offset + 5 + c];
+        if (score > bestClassScore) {
+          bestClassScore = score;
+          bestClassIdx = c;
+        }
+      }
+
+      const finalConfidence = objConf * bestClassScore;
+      if (finalConfidence < confidenceThreshold) continue;
+
+      results.push({
+        label: this.labels[bestClassIdx] ?? `class_${bestClassIdx}`,
+        confidence: finalConfidence,
+        bbox: {
+          x: outputData[offset],
+          y: outputData[offset + 1],
+          w: outputData[offset + 2],
+          h: outputData[offset + 3],
+        },
+      });
+    }
+
+    results.sort((a, b) => b.confidence - a.confidence);
+    return this.nonMaxSuppression(results, 0.45);
+  }
+
+  /**
+   * Simple Non-Max Suppression to remove overlapping detections.
+   */
+  private nonMaxSuppression(detections: MLCandidate[], iouThreshold: number): MLCandidate[] {
+    const kept: MLCandidate[] = [];
+    for (const det of detections) {
+      let dominated = false;
+      for (const k of kept) {
+        if (det.bbox && k.bbox && this.computeIoU(det.bbox, k.bbox) > iouThreshold) {
+          dominated = true;
+          break;
+        }
+      }
+      if (!dominated) kept.push(det);
+    }
+    return kept;
+  }
+
+  /**
+   * Compute Intersection-over-Union for two center-format bounding boxes.
+   */
+  private computeIoU(
+    a: { x: number; y: number; w: number; h: number },
+    b: { x: number; y: number; w: number; h: number }
+  ): number {
+    const ax1 = a.x - a.w / 2, ay1 = a.y - a.h / 2;
+    const ax2 = a.x + a.w / 2, ay2 = a.y + a.h / 2;
+    const bx1 = b.x - b.w / 2, by1 = b.y - b.h / 2;
+    const bx2 = b.x + b.w / 2, by2 = b.y + b.h / 2;
+
+    const ix1 = Math.max(ax1, bx1), iy1 = Math.max(ay1, by1);
+    const ix2 = Math.min(ax2, bx2), iy2 = Math.min(ay2, by2);
+    const inter = Math.max(0, ix2 - ix1) * Math.max(0, iy2 - iy1);
+    const union = a.w * a.h + b.w * b.h - inter;
+    return union > 0 ? inter / union : 0;
+  }
+
   /** Tracks why real model isn't available — exposed for UI diagnostics */
   modelLoadError: string | null = null;
 
@@ -257,8 +356,10 @@ class OnDeviceClassifier {
             }
           }
 
-          // Tag all predictions with source
-          return topPredictions.map(p => ({ ...p, source: 'tflite' as const }));
+          // Tag all predictions with source — detect YOLOv5 vs classification
+          const yoloDetected = topPredictions.some(p => p.bbox != null);
+          const src = yoloDetected ? 'tflite-yolov5' as const : 'tflite' as const;
+          return topPredictions.map(p => ({ ...p, source: src }));
           
       } else {
         // No real model available — return stub predictions tagged as such
@@ -283,7 +384,8 @@ class OnDeviceClassifier {
 
   /**
    * Run a single inference pass on a preprocessed image URI.
-   * Returns raw predictions (unsorted) for all labels.
+   * Auto-detects whether the model outputs YOLOv5 detection format
+   * (N × [5 + numClasses]) or plain classification softmax ([numClasses]).
    */
   private async runInference(imageUri: string): Promise<MLCandidate[]> {
     // Run inference directly — input should already be preprocessed to 224x224
@@ -305,45 +407,53 @@ class OnDeviceClassifier {
     }
     
     if (!Array.isArray(outputTensor)) {
-      throw new Error(`Expected array tensor output, got: ${typeof outputTensor}`);
+      throw new TypeError(`Expected array tensor output, got: ${typeof outputTensor}`);
     }
 
-    // Apply softmax normalization to convert logits → proper probabilities
+    const numClasses = this.labels.length;
+
+    // ── Auto-detect YOLOv5 detection output vs classification output ──
+    if (this.isYoloOutput(outputTensor, numClasses)) {
+      console.log('🎯 Detected YOLOv5 output format — parsing detections');
+      const detections = this.parseYoloOutput(outputTensor, numClasses, 0.25);
+      console.log(`✅ YOLOv5: ${detections.length} detection(s) above threshold`);
+      return detections;
+    }
+
+    // ── Standard classification output — apply softmax ──
+    console.log('📊 Standard classification output — applying softmax');
+
     const maxVal = Math.max(...outputTensor);
-    const exps = outputTensor.map((v: number) => Math.exp(v - maxVal)); // subtract max for numerical stability
+    const exps = outputTensor.map((v: number) => Math.exp(v - maxVal));
     const sumExps = exps.reduce((a: number, b: number) => a + b, 0);
     const softmaxValues = exps.map((e: number) => e / sumExps);
 
     // Compute entropy to measure prediction uncertainty
-    // High entropy = spread across classes (likely not a real bug)
-    // Low entropy = confident single-class prediction
     let entropy = 0;
     for (const p of softmaxValues) {
       if (p > 1e-10) {
         entropy -= p * Math.log2(p);
       }
     }
-    const maxEntropy = Math.log2(this.labels.length); // uniform distribution
-    const normalizedEntropy = entropy / maxEntropy; // 0 = certain, 1 = uniform/random
+    const maxEntropy = Math.log2(numClasses);
+    const normalizedEntropy = entropy / maxEntropy;
     console.log(`📊 Prediction entropy: ${entropy.toFixed(3)} / ${maxEntropy.toFixed(3)} (normalized: ${(normalizedEntropy * 100).toFixed(1)}%)`);
 
-    // If entropy is very high (>0.85), the model is uncertain — likely not a real bug photo
+    // If entropy is very high (>0.85), the model is uncertain
     if (normalizedEntropy > 0.85) {
       console.log('⚠️ High entropy detected — model is very uncertain, likely not a bug photo');
-      // Return predictions with dampened confidence to trigger rejection
       const predictions: MLCandidate[] = [];
-      for (let i = 0; i < this.labels.length && i < softmaxValues.length; i++) {
+      for (let i = 0; i < numClasses && i < softmaxValues.length; i++) {
         predictions.push({
           label: this.labels[i],
-          confidence: softmaxValues[i] * 0.3, // dampen so it fails threshold
+          confidence: softmaxValues[i] * 0.3,
         });
       }
       return predictions;
     }
     
-    // Map softmax values to labels
     const predictions: MLCandidate[] = [];
-    for (let i = 0; i < this.labels.length && i < softmaxValues.length; i++) {
+    for (let i = 0; i < numClasses && i < softmaxValues.length; i++) {
       predictions.push({
         label: this.labels[i],
         confidence: softmaxValues[i],

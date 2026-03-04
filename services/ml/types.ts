@@ -3,7 +3,9 @@ export interface MLCandidate {
   label: string;
   confidence: number;
   /** Where this prediction came from: real TFLite inference or a stub fallback */
-  source?: 'tflite' | 'stub';
+  source?: 'tflite' | 'tflite-yolov5' | 'stub';
+  /** Optional bounding box from YOLOv5 detection output */
+  bbox?: { x: number; y: number; w: number; h: number };
 }
 
 export interface MLModelInfo {

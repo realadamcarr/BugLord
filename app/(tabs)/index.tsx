@@ -24,6 +24,22 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
+// Map raw YOLO / classification labels → BugLord SAMPLE_BUGS species names.
+const YOLO_SPECIES_MAP: Record<string, string> = {
+  'Butterfly':   'Monarch Butterfly',
+  'Dragonfly':   'Blue Dasher Dragonfly',
+  'Grasshopper': 'Grasshopper',
+  'Ladybug':     'Ladybug',
+  'Mosquito':    'Mosquito',
+  'Moth':        'Luna Moth',
+  'Bees':        'Honey Bee',
+  'ant':         'Black Garden Ant',
+  'beetle':      'Stag Beetle',
+  'caterpillar': 'Caterpillar',
+  'earthworms':  'Earthworm',
+  'wasp':        'Paper Wasp',
+};
+
 export default function CaptureScreen() {
   const { theme } = useTheme();
   const { collection, addBugToCollection, addBugToParty, removeBugFromParty, switchParty, updateBugNickname, loading } = useBugCollection();
@@ -89,7 +105,13 @@ export default function CaptureScreen() {
   };
 
   const loadMLModel = async () => {
-    const MODEL_LABELS = ["Bees", "Butterfly", "Ladybug", "ant", "dragonfly", "wasp"];
+    // YOLOv5 trained labels (12 classes from Kaggle insect dataset)
+    // Superset of the original 6 — also handles the old model format.
+    const MODEL_LABELS = [
+      "Butterfly", "Dragonfly", "Grasshopper", "Ladybug",
+      "Mosquito", "Moth", "Bees", "ant",
+      "beetle", "caterpillar", "earthworms", "wasp",
+    ];
 
     try {
       // 1. If a server-pushed model exists on disk, prefer that
@@ -368,13 +390,17 @@ export default function CaptureScreen() {
       // Use identification results (ML or image-based analysis)
       console.log('✅ Identification results:', mlCandidates);
       
-      // Convert predictions to BugIdentificationResult format
-      let candidates: IdentificationCandidate[] = mlCandidates.map(candidate => ({
-        label: candidate.label,
-        species: candidate.label,
-        confidence: candidate.confidence,
-        source: candidate.source || 'ML Model'
-      }));
+      // Convert predictions to BugIdentificationResult format.
+      // Apply YOLO_SPECIES_MAP so raw model labels become game-friendly names.
+      let candidates: IdentificationCandidate[] = mlCandidates.map(candidate => {
+        const mapped = YOLO_SPECIES_MAP[candidate.label] ?? candidate.label;
+        return {
+          label: mapped,
+          species: mapped,
+          confidence: candidate.confidence,
+          source: candidate.source || 'ML Model',
+        };
+      });
 
       // Refine ant predictions using color analysis (red vs black vs carpenter)
       if (candidates[0]?.label?.toLowerCase() === 'ant') {
@@ -594,7 +620,8 @@ export default function CaptureScreen() {
         const candidates = await onDeviceClassifier.classifyImage(mlInput, 3);
         const real = candidates.filter((c: any) => c.source !== 'stub');
         if (real.length > 0 && real[0].label) {
-          return { label: real[0].label, confidence: real[0].confidence };
+          const mappedLabel = YOLO_SPECIES_MAP[real[0].label] ?? real[0].label;
+          return { label: mappedLabel, confidence: real[0].confidence };
         }
         console.warn('⚠️ TFLite returned no real candidates for live scan');
       } catch (err) {

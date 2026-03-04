@@ -23,6 +23,12 @@ const KEYWORD_MAP: [RegExp, BugCategory][] = [
 
   // Ants / termites → ant sprite
   [/\b(ant|ants|fire\s*ant|carpenter\s*ant|termite|formicidae)\b/i, 'ant'],
+
+  // Grasshoppers / crickets / katydids → beetle sprite (closest visual match)
+  [/\b(grasshopper|cricket|katydid|locust)\b/i, 'beetle'],
+
+  // Earthworms / worms → ant sprite (closest visual match)
+  [/\b(earthworm|worm|millipede|centipede)\b/i, 'ant'],
 ];
 
 /**

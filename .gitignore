@@ -19,6 +19,7 @@ android/local.properties
 # --------------------
 training/
 **/training/**
+!training/yolov5_insect_train.py
 data/
 dataset/
 datasets/
