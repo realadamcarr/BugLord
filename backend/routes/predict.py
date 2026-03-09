@@ -111,18 +111,18 @@ async def predict(
         if prediction.mapped_buglord_type and top_enrichment.common_name:
             prediction.display_label = top_enrichment.common_name
 
-    # Enrich top predictions too.
+    # Enrich top predictions too (top_predictions are plain dicts).
     for tp in top_predictions:
         # Find matching enrichment by species name.
         for sp_name, enr in enrichments.items():
             parts = [p.strip() for p in sp_name.split(",")]
             common = parts[0].title()
-            if common == tp.species_name and enr.matched:
+            if common == tp["speciesName"] and enr.matched:
                 if enr.common_name:
-                    tp.common_name = enr.common_name
+                    tp["commonName"] = enr.common_name
                 # Override mapping if keyword map missed it.
-                if tp.mapped_buglord_type is None and enr.buglord_category:
-                    tp.mapped_buglord_type = enr.buglord_category
+                if tp["mappedBuglordType"] is None and enr.buglord_category:
+                    tp["mappedBuglordType"] = enr.buglord_category
                 break
 
     # ── 6. Apply confidence thresholds ───────────────────────────────
