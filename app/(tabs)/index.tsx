@@ -381,8 +381,14 @@ export default function CaptureScreen() {
         // Also accept when topPredictions are available — even if the main
         // prediction was below threshold, the species-level candidates are
         // far more informative than the 6-class on-device model.
-        const hasMainPrediction = backendResult.confidence > 0;
-        const hasTopPredictions = backendResult.topPredictions && backendResult.topPredictions.length > 0;
+        //
+        // IMPORTANT: When the backend says "No insect detected" it zeros
+        // out confidence and returns empty topPredictions, so both checks
+        // below will correctly be false and we fall through to local
+        // pipelines.  We also explicitly check the message as a safety net.
+        const noInsectDetected = backendResult.message?.includes('No insect detected');
+        const hasMainPrediction = backendResult.confidence > 0 && !noInsectDetected;
+        const hasTopPredictions = !noInsectDetected && backendResult.topPredictions && backendResult.topPredictions.length > 0;
 
         if (hasMainPrediction) {
             // Prefer common name from iNaturalist, then display label, then species name.
@@ -751,7 +757,8 @@ export default function CaptureScreen() {
     // 1. Backend (EVA-02 iNat21 model) — preferred path
     try {
       const backendResult = await predictInsect(photoUri);
-      if (backendResult.confidence > 0) {
+      const noInsect = backendResult.message?.includes('No insect detected');
+      if (backendResult.confidence > 0 && !noInsect) {
         const label = backendResult.commonName
           || backendResult.displayLabel
           || backendResult.speciesName
@@ -762,7 +769,7 @@ export default function CaptureScreen() {
         }
       }
       // Check top predictions as fallback
-      if (backendResult.topPredictions?.length) {
+      if (!noInsect && backendResult.topPredictions?.length) {
         const best = backendResult.topPredictions.find(t => t.mappedBuglordType) || backendResult.topPredictions[0];
         const label = (best as any).commonName
           || (best.mappedBuglordType

@@ -114,16 +114,38 @@ async def predict(
             insect_pred = rp
             break  # raw_preds are sorted by confidence desc
 
+    # When the insect filter had to *fall back* (top-1 wasn't an insect),
+    # the fallback insect is likely just noise among the model's low-ranked
+    # predictions.  Require a higher confidence floor (10 %) so we don't
+    # display a random insect species when the model clearly saw something
+    # else.  Example: model says "bird 25 %" and we'd otherwise pick
+    # "damselfly 5 %" which is near-random.
+    FALLBACK_INSECT_MIN_CONFIDENCE = 0.10
+
+    is_fallback = insect_pred is not None and insect_pred is not raw_preds[0]
+    if is_fallback and insect_pred.score < FALLBACK_INSECT_MIN_CONFIDENCE:
+        logger.info(
+            "Fallback insect '%s' (%.2f%%) below %.0f%% floor — treating as no insect",
+            insect_pred.label, insect_pred.score * 100,
+            FALLBACK_INSECT_MIN_CONFIDENCE * 100,
+        )
+        insect_pred = None  # reject it — too unreliable
+
     if insect_pred is None:
         # No insect/arachnid found in top-N predictions — reject.
+        # Zero out confidence so the app doesn't treat the non-insect
+        # prediction as a valid result (the app checks confidence > 0).
         logger.info(
             "No insect detected among top-%d predictions (top-1 was '%s')",
             len(raw_preds), raw_preds[0].label if raw_preds else "?",
         )
+        prediction.confidence = 0.0
+        prediction.mapped_buglord_type = None
+        prediction.display_label = "No insect detected"
         return PredictionResponse(
             success=False,
-            prediction=prediction,          # original for debug
-            top_predictions=top_predictions,
+            prediction=prediction,
+            top_predictions=[],             # empty — no insects to show
             low_confidence=True,
             message="No insect detected — try scanning a bug!",
         )
