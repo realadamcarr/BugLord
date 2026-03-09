@@ -75,6 +75,19 @@ async def predict(
     species_names = [pred.label for pred in raw_preds]
     enrichments = await enrich_predictions(species_names)
 
+    # ── DEBUG: Log raw predictions and enrichments ───────────────────
+    for i, rp in enumerate(raw_preds):
+        enr = enrichments.get(rp.label)
+        enr_info = (
+            f"matched={enr.matched}, common='{enr.common_name}', "
+            f"category={enr.buglord_category}, iconic={enr.iconic_taxon_name}"
+            if enr else "NO_ENRICHMENT"
+        )
+        logger.info(
+            "  raw[%d] %.4f  %s  →  %s",
+            i, rp.score, rp.label, enr_info,
+        )
+
     # ── 4. Map to BugLord result (keyword match first) ───────────────
     prediction = build_prediction_result(raw_preds)
     top_predictions = build_top_predictions(raw_preds)
@@ -204,6 +217,15 @@ async def predict(
     # Thresholds are deliberately low compared to a 6-class head.
     #
     confidence = prediction.confidence
+
+    # ── DEBUG: Log final result ──────────────────────────────────────
+    logger.info(
+        "FINAL → species='%s', common='%s', display='%s', "
+        "buglord_type=%s, confidence=%.4f",
+        prediction.species_name, prediction.common_name,
+        prediction.display_label, prediction.mapped_buglord_type,
+        confidence,
+    )
 
     #  < 0.05  → reject (practically random)
     if confidence < 0.05:
