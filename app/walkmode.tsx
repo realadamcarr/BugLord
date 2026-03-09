@@ -203,7 +203,7 @@ export default function WalkModeScreen() {
     }
 
     try {
-      await startWalkMode();
+      await startWalkMode(selectedBug.id, selectedBug.nickname || selectedBug.name);
 
       // On Android, prompt the user to disable battery optimization for reliable tracking
       if (Platform.OS === 'android') {

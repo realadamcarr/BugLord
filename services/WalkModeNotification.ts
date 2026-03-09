@@ -114,3 +114,28 @@ export async function dismissWalkModeNotification(): Promise<void> {
     // best effort
   }
 }
+
+/**
+ * Show a one-time notification when a bug levels up during walk mode.
+ * Uses the default notification channel so it plays a sound/vibration.
+ */
+export async function showLevelUpNotification(
+  bugName: string,
+  newLevel: number,
+): Promise<void> {
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '🎉 Level Up!',
+        body: `${bugName} grew to Level ${newLevel} while walking!`,
+        sound: true,
+        ...(Platform.OS === 'android' && {
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+        }),
+      },
+      trigger: null, // show immediately
+    });
+  } catch (e) {
+    console.warn('[WalkNotif] Failed to show level-up notification:', e);
+  }
+}

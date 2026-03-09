@@ -18,6 +18,10 @@ function cleanBugForTransfer(bug: Record<string, any>) {
   const copy = { ...bug };
   delete copy.lockedByTradeId;
   delete copy.lockedAt;
+  // Strip photo URIs — sprites are determined by speciesId and stay intact
+  delete copy.photoUri;
+  delete copy.imageUri;
+  delete copy.photo;
   return copy;
 }
 
@@ -38,16 +42,21 @@ export const acceptTrade = onCall(async (request) => {
     const trade = tradeSnap.data() as Partial<TradeDoc>;
     const { fromUid, toUid, fromBugId, toBugId, status } = trade;
 
-    if (!fromUid || !toUid || !fromBugId || !toBugId || !status) {
+    if (!fromUid || !toUid || !fromBugId || !status) {
       throw new HttpsError("failed-precondition", "Trade is missing required fields.");
+    }
+
+    if (!toBugId) {
+      throw new HttpsError("failed-precondition", "Recipient has not selected a bug yet.");
     }
 
     if (status !== "proposed") {
       throw new HttpsError("failed-precondition", "Trade is no longer available.");
     }
 
-    if (uid !== toUid) {
-      throw new HttpsError("permission-denied", "Only the recipient can accept this trade.");
+    // Either participant can trigger the final swap (both must have accepted client-side first)
+    if (uid !== fromUid && uid !== toUid) {
+      throw new HttpsError("permission-denied", "Only participants can complete this trade.");
     }
 
     const fromBugRef = db.doc(`inventories/${fromUid}/bugs/${fromBugId}`);
@@ -73,6 +82,11 @@ export const acceptTrade = onCall(async (request) => {
     // offered bug must be reserved for this trade
     if ((fromBug?.lockedByTradeId ?? null) !== tradeId) {
       throw new HttpsError("failed-precondition", "Offered bug is not reserved for this trade.");
+    }
+
+    // recipient's bug must be reserved for this trade
+    if ((toBug?.lockedByTradeId ?? null) !== tradeId) {
+      throw new HttpsError("failed-precondition", "Recipient's bug is not reserved for this trade.");
     }
 
     const newFromBugRefForToUser = db.doc(`inventories/${toUid}/bugs/${fromBugId}`);

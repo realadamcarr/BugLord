@@ -9,6 +9,7 @@
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as jpeg from 'jpeg-js';
 import { Image } from 'react-native';
 import { BoundingBox, DetectionModelConfig, DetectionResult, MLCandidate, MLClassifierConfig } from './types';
 
@@ -26,6 +27,10 @@ try {
   console.warn('⚠️  react-native-fast-tflite not available (running in Expo Go?)', e);
 }
 
+// Known label sets for backward compatibility.
+// The old bundled model (2.87 MB) has 6 output classes in this exact order:
+const OLD_6CLASS_LABELS = ["Bees", "Butterfly", "Ladybug", "ant", "dragonfly", "wasp"];
+
 class OnDeviceClassifier {
   private modelLoaded: boolean = false;
   private labels: string[] = [];
@@ -38,6 +43,25 @@ class OnDeviceClassifier {
   // TFLite model instances (react-native-fast-tflite)
   private model: any = null;
   private detectionModel: any = null;
+
+  /**
+   * Resolve the correct label array based on the model's actual output size.
+   * When the model outputs fewer classes than the configured label list,
+   * fall back to the known old label set (e.g. old 6-class model).
+   */
+  private resolveLabels(numOutputClasses: number): string[] {
+    if (numOutputClasses === this.labels.length) {
+      // Labels match model — use as-is
+      return this.labels;
+    }
+    if (numOutputClasses === OLD_6CLASS_LABELS.length) {
+      console.log(`🏷️ Model outputs ${numOutputClasses} classes — using OLD_6CLASS_LABELS`);
+      return OLD_6CLASS_LABELS;
+    }
+    // Unknown mismatch — truncate or pad labels as best we can
+    console.warn(`⚠️ Label mismatch: model outputs ${numOutputClasses} classes but labels has ${this.labels.length}. Truncating.`);
+    return this.labels.slice(0, numOutputClasses);
+  }
 
   /**
    * Ensure ML directory exists in document storage
@@ -110,6 +134,35 @@ class OnDeviceClassifier {
     // YOLOv5: total length divisible by stride (5 + numClasses)
     const stride = 5 + numClasses;
     return tensor.length > numClasses && tensor.length % stride === 0;
+  }
+
+  /**
+   * Extract RGB pixel values from raw JPEG/PNG file bytes.
+   * Uses jpeg-js for proper JPEG decoding to real RGBA pixel data,
+   * then extracts just the RGB channels.
+   */
+  private extractRgbFromBytes(fileBytes: Uint8Array, pixelCount: number): Uint8Array {
+    try {
+      // Decode JPEG → { data: Uint8Array(RGBA), width, height }
+      const decoded = jpeg.decode(fileBytes, { useTArray: true, formatAsRGBA: true });
+      const rgba = decoded.data as Uint8Array;
+      const rgbCount = pixelCount; // H * W * 3
+      const rgb = new Uint8Array(rgbCount);
+
+      const numPixels = rgbCount / 3;
+      for (let i = 0; i < numPixels; i++) {
+        rgb[i * 3]     = rgba[i * 4];     // R
+        rgb[i * 3 + 1] = rgba[i * 4 + 1]; // G
+        rgb[i * 3 + 2] = rgba[i * 4 + 2]; // B
+      }
+      console.log(`📷 Decoded JPEG: ${decoded.width}×${decoded.height} → ${rgbCount} RGB bytes`);
+      return rgb;
+    } catch (err) {
+      console.warn('⚠️ JPEG decode failed, filling with mid-grey:', err);
+      const rgb = new Uint8Array(pixelCount);
+      rgb.fill(128);
+      return rgb;
+    }
   }
 
   /**
@@ -388,40 +441,77 @@ class OnDeviceClassifier {
    * (N × [5 + numClasses]) or plain classification softmax ([numClasses]).
    */
   private async runInference(imageUri: string): Promise<MLCandidate[]> {
-    // Run inference directly — input should already be preprocessed to 224x224
-    const outputs = await this.model.run(imageUri);
+    // Determine model input shape and data type
+    const inputTensor = this.model.inputs?.[0];
+    const inputShape = inputTensor?.shape ?? [1, 224, 224, 3];
+    const inputType = inputTensor?.dataType ?? 'float32';
+    const height = inputShape[1] ?? 224;
+    const width  = inputShape[2] ?? 224;
+    const channels = inputShape[3] ?? 3;
+    const pixelCount = height * width * channels;
+
+    console.log(`🔢 Model input: ${inputType} shape=${JSON.stringify(inputShape)}`);
+
+    // Read image as base64 → decode to raw bytes → extract RGB → build tensor
+    const base64 = await FileSystem.readAsStringAsync(imageUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    const binaryStr = atob(base64);
+    const fileBytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      fileBytes[i] = binaryStr.codePointAt(i) ?? 0;
+    }
+
+    // Build the input typed array from raw JPEG/PNG bytes.
+    // For uint8 models the JPEG bytes directly won't work — we need decoded pixels.
+    // react-native doesn't have Canvas, so we approximate with the raw bytes of
+    // the JPEG file.  The expo-image-manipulator already resizes to 224×224 so
+    // the pixel count is deterministic. We extract pixel-level estimates from the
+    // JPEG body (skip headers, take uniformly-spaced samples).
+    let inputArray: Float32Array | Uint8Array;
+
+    if (inputType === 'uint8') {
+      inputArray = this.extractRgbFromBytes(fileBytes, pixelCount);
+    } else {
+      // float32 — normalise to [0, 1]
+      const raw = this.extractRgbFromBytes(fileBytes, pixelCount);
+      const f32 = new Float32Array(pixelCount);
+      for (let i = 0; i < pixelCount; i++) {
+        f32[i] = raw[i] / 255.0;
+      }
+      inputArray = f32;
+    }
+
+    console.log(`📊 Input tensor: ${inputArray.constructor.name}[${inputArray.length}]`);
+
+    // model.run() expects TypedArray[]
+    const outputs = await this.model.run([inputArray]);
     
     // Process output tensor into predictions
-    let outputTensor;
+    // outputs is TypedArray[] — first element is the output tensor
+    const rawOutput = Array.isArray(outputs) ? outputs[0] : outputs;
+    const outputTensor = Array.from(rawOutput as ArrayLike<number>);
     
-    // Handle different output formats from react-native-fast-tflite
-    if (Array.isArray(outputs)) {
-      outputTensor = outputs[0];
-    } else if (outputs && typeof outputs === 'object' && outputs.data) {
-      outputTensor = outputs.data;
-    } else if (outputs && typeof outputs === 'object') {
-      const keys = Object.keys(outputs);
-      outputTensor = keys.length > 0 ? outputs[keys[0]] : outputs;
-    } else {
-      outputTensor = outputs;
-    }
-    
-    if (!Array.isArray(outputTensor)) {
-      throw new TypeError(`Expected array tensor output, got: ${typeof outputTensor}`);
+    if (!Array.isArray(outputTensor) || outputTensor.length === 0) {
+      throw new TypeError(`Expected non-empty array tensor output, got: ${typeof rawOutput}`);
     }
 
-    const numClasses = this.labels.length;
+    const numLabels = this.labels.length;
+    const numOutputs = outputTensor.length;
 
     // ── Auto-detect YOLOv5 detection output vs classification output ──
-    if (this.isYoloOutput(outputTensor, numClasses)) {
+    if (this.isYoloOutput(outputTensor, numLabels)) {
       console.log('🎯 Detected YOLOv5 output format — parsing detections');
-      const detections = this.parseYoloOutput(outputTensor, numClasses, 0.25);
+      const detections = this.parseYoloOutput(outputTensor, numLabels, 0.25);
       console.log(`✅ YOLOv5: ${detections.length} detection(s) above threshold`);
       return detections;
     }
 
     // ── Standard classification output — apply softmax ──
-    console.log('📊 Standard classification output — applying softmax');
+    // Resolve the correct label set based on how many outputs the model actually produces.
+    const activeLabels = this.resolveLabels(numOutputs);
+    const numClasses = numOutputs;
+    console.log(`📊 Standard classification output — ${numClasses} classes, activeLabels: [${activeLabels.join(', ')}]`);
 
     const maxVal = Math.max(...outputTensor);
     const exps = outputTensor.map((v: number) => Math.exp(v - maxVal));
@@ -445,7 +535,7 @@ class OnDeviceClassifier {
       const predictions: MLCandidate[] = [];
       for (let i = 0; i < numClasses && i < softmaxValues.length; i++) {
         predictions.push({
-          label: this.labels[i],
+          label: activeLabels[i] ?? `class_${i}`,
           confidence: softmaxValues[i] * 0.3,
         });
       }
@@ -455,7 +545,7 @@ class OnDeviceClassifier {
     const predictions: MLCandidate[] = [];
     for (let i = 0; i < numClasses && i < softmaxValues.length; i++) {
       predictions.push({
-        label: this.labels[i],
+        label: activeLabels[i] ?? `class_${i}`,
         confidence: softmaxValues[i],
       });
     }
@@ -587,8 +677,28 @@ class OnDeviceClassifier {
           { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 }
         );
 
-        // Run detection inference
-        const outputs = await this.detectionModel.run(resized.uri);
+        // Run detection inference — convert image to tensor first
+        const detInputTensor = this.detectionModel.inputs?.[0];
+        const detInputType = detInputTensor?.dataType ?? 'uint8';
+        const detBase64 = await FileSystem.readAsStringAsync(resized.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const detBinary = atob(detBase64);
+        const detFileBytes = new Uint8Array(detBinary.length);
+        for (let i = 0; i < detBinary.length; i++) {
+          detFileBytes[i] = detBinary.codePointAt(i) ?? 0;
+        }
+        const detPixelCount = 320 * 320 * 3;
+        const detRgb = this.extractRgbFromBytes(detFileBytes, detPixelCount);
+        let detInput: Float32Array | Uint8Array;
+        if (detInputType === 'float32') {
+          const f = new Float32Array(detPixelCount);
+          for (let i = 0; i < detPixelCount; i++) f[i] = detRgb[i] / 255.0;
+          detInput = f;
+        } else {
+          detInput = detRgb;
+        }
+        const outputs = await this.detectionModel.run([detInput]);
         
         // Parse EfficientDet outputs
         // Typical format: [boxes, scores, classes, numDetections]

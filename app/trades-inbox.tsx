@@ -11,7 +11,6 @@ import { ThemedText } from '@/components/ThemedText';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { Trade } from '@/src/models/trades';
-import { callAcceptTrade } from '@/src/services/functions';
 import { declineTrade, subscribeIncomingTrades } from '@/src/services/tradeService';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -92,18 +91,14 @@ export default function TradesInboxScreen() {
   // ── Actions ────────────────────────────────────────────────────────
 
   const handleAccept = useCallback(
-    async (trade: Trade) => {
-      setRowLoading(trade.id, true);
-      try {
-        await callAcceptTrade(trade.id);
-        showToast('Trade completed!');
-      } catch (err) {
-        Alert.alert('Trade Failed', friendlyFirebaseError(err));
-      } finally {
-        setRowLoading(trade.id, false);
-      }
+    (trade: Trade) => {
+      // Navigate to the trade session where the recipient picks their bug
+      router.push({
+        pathname: '/social-trade-session' as any,
+        params: { tradeId: trade.id },
+      });
     },
-    [setRowLoading],
+    [],
   );
 
   const handleDecline = useCallback(
@@ -134,7 +129,7 @@ export default function TradesInboxScreen() {
             From: <Text style={styles.tradeUid}>{trade.fromUid.slice(0, 8)}…</Text>
           </ThemedText>
           <ThemedText style={styles.tradeBugs}>
-            Offering #{trade.fromBugId.slice(0, 6)} → Wants #{trade.toBugId.slice(0, 6)}
+            Offering bug #{trade.fromBugId.slice(0, 6)}
           </ThemedText>
         </View>
 
@@ -146,7 +141,7 @@ export default function TradesInboxScreen() {
               style={[styles.actionButton, styles.acceptButton]}
               onPress={() => handleAccept(trade)}
             >
-              <Text style={styles.acceptText}>Accept</Text>
+              <Text style={styles.acceptText}>View</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.actionButton, styles.declineButton]}

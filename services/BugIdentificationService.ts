@@ -21,11 +21,7 @@ const API_CONFIG = {
     API_KEY: '',
     ENABLED: false,
   },
-  PLANTNET: {
-    BASE_URL: 'https://my-api.plantnet.org/v2',
-    API_KEY: '',
-    ENABLED: false,
-  }
+ 
 };
 
 // ─── Image color analysis types ──────────────────────────
@@ -62,39 +58,33 @@ class BugIdentificationService {
     console.log('🔍 Starting bug identification for photo:', photoUri);
 
     try {
-      let iNatResult: BugIdentificationResult | null = null;
-
-      // Try iNaturalist if enabled
+      // ── Primary: iNaturalist makes the prediction ──────────────────────
+      // Local analysis is only used internally by identifyWithiNaturalist
+      // to detect a BROAD category ("ant", "beetle", …). iNat's own
+      // observation-count ranking then picks the actual species.
       if (API_CONFIG.INATURALIST.ENABLED) {
-        iNatResult = await this.identifyWithiNaturalist(photoUri);
+        const iNatResult = await this.identifyWithiNaturalist(photoUri);
         if (iNatResult && iNatResult.candidates.length > 0) {
-          console.log(`✅ iNaturalist returned ${iNatResult.candidates.length} candidate(s): ${iNatResult.candidates[0]?.label}`);
-        } else {
-          console.log('🌿 iNaturalist returned no usable candidates, falling back to image analysis');
-          iNatResult = null;
+          console.log(`✅ iNaturalist prediction: ${iNatResult.candidates[0]?.label} (${iNatResult.candidates.length} candidates)`);
+          return await this.applyLearningBoosts(iNatResult);
         }
+        console.log('🌿 iNaturalist returned no usable candidates, trying other sources...');
       }
 
-      // Try Google Vision API if available (only if iNaturalist failed)
-      if (!iNatResult && API_CONFIG.GOOGLE_VISION.ENABLED && API_CONFIG.GOOGLE_VISION.API_KEY) {
+      // ── Secondary: Google Vision ──────────────────────────────────────
+      if (API_CONFIG.GOOGLE_VISION.ENABLED && API_CONFIG.GOOGLE_VISION.API_KEY) {
         const result = await this.identifyWithGoogleVision(photoUri);
         if (result) {
           console.log('✅ Google Vision identification returned candidates');
-          return result;
+          return await this.applyLearningBoosts(result);
         }
       }
 
-      // Always run local image analysis for category sanity-check / override
+      // ── Fallback: local color analysis (last resort) ─────────────────
+      console.log('📱 Falling back to local color analysis...');
       const localResult = await this.identifyWithImageAnalysis(photoUri);
       console.log(`📱 Local analysis: ${localResult.candidates[0]?.label}`);
-
-      // If iNaturalist returned results, compare by broad category.
-      // Prefer local when they disagree — color profile is reliable for top-level category.
-      const baseResult = iNatResult
-        ? this.pickBestResult(iNatResult, localResult)
-        : localResult;
-
-      return await this.applyLearningBoosts(baseResult);
+      return await this.applyLearningBoosts(localResult);
 
     } catch (error) {
       console.error('❌ Bug identification error:', error);
@@ -104,8 +94,9 @@ class BugIdentificationService {
 
   /**
    * Compare iNaturalist and local-analysis results by broad bug category.
-   * If they disagree on category, prefer local (color profile is more reliable
-   * for broad category; iNaturalist is better for species-level precision).
+   * Prefer iNaturalist (real neural network trained on millions of photos)
+   * over local color heuristic for species-level precision. Local analysis
+   * only overrides when iNaturalist returns low-confidence guesses.
    */
   private pickBestResult(
     iNatResult: BugIdentificationResult,
@@ -113,6 +104,7 @@ class BugIdentificationService {
   ): BugIdentificationResult {
     const iNatLabel = iNatResult.candidates[0]?.label ?? '';
     const localLabel = localResult.candidates[0]?.label ?? '';
+    const iNatConf = iNatResult.candidates[0]?.confidence ?? 0;
 
     const iNatCat  = labelToCategory(iNatLabel);
     const localCat = labelToCategory(localLabel);
@@ -126,14 +118,18 @@ class BugIdentificationService {
       scorpionSpiderConflict ||
       (iNatCat && localCat && iNatCat !== localCat);
 
+    // iNaturalist leads unless its confidence is very low AND categories conflict
+    // (in that case the local color heuristic is more trustworthy for broad class).
+    const localShouldLead = categoryConflict && iNatConf < 0.25;
+
     if (categoryConflict) {
-      console.log(`🎨 Category conflict: iNat="${iNatLabel}" (${iNatCat ?? 'unknown'}) vs local="${localLabel}" (${localCat ?? 'unknown'}) → local leads, iNat appended`);
+      const leader = localShouldLead ? 'local' : 'iNat';
+      console.log(`🎨 Category conflict: iNat="${iNatLabel}" (${iNatCat ?? 'unknown'}, ${(iNatConf * 100).toFixed(0)}%) vs local="${localLabel}" (${localCat ?? 'unknown'}) → ${leader} leads`);
     }
 
     // Winner leads the merged list; the other source fills remaining slots.
-    // This ensures candidates from BOTH sources are available for rescan cycling.
-    const winner = categoryConflict ? localResult : iNatResult;
-    const filler = categoryConflict ? iNatResult : localResult;
+    const winner = localShouldLead ? localResult : iNatResult;
+    const filler = localShouldLead ? iNatResult : localResult;
 
     const seenLabels = new Set(winner.candidates.map(c => c.label));
     const extra = filler.candidates.filter(c => !seenLabels.has(c.label));
@@ -781,6 +777,31 @@ class BugIdentificationService {
             const isDragonfly = /dragonfly|damselfly/.test(n);
             let s = entry.score;
             if (isDragonfly) s *= 0.35;
+            return { ...entry, score: s };
+          })
+          .sort((a, b) => b.score - a.score);
+      }
+
+      // Global Red Velvet Ant guard: this rare desert species should almost never
+      // win from color heuristics alone.  Only allow it when profile is *very*
+      // specifically highly-saturated red (hue 0-18, sat > 0.55, moderate brightness)
+      // AND no other common profile matches (bee, butterfly, dark beetle, fly, spider).
+      const isStrictRedVelvetProfile =
+        profile.hue >= 0 &&
+        profile.hue <= 18 &&
+        profile.saturation >= 0.55 &&
+        profile.brightness >= 0.25 &&
+        profile.brightness <= 0.50 &&
+        !globalBeeLikeProfile &&
+        !globalFlyLikeProfile &&
+        !globalDarkBeetleLikeProfile &&
+        !globalSpiderBrownProfile;
+
+      if (!isStrictRedVelvetProfile) {
+        scored = scored
+          .map(entry => {
+            let s = entry.score;
+            if (entry.bug.name === 'Red Velvet Ant') s *= 0.08; // nearly eliminate
             return { ...entry, score: s };
           })
           .sort((a, b) => b.score - a.score);
@@ -1769,58 +1790,147 @@ class BugIdentificationService {
   /**
    * iNaturalist API - Free species identification service
    */
+  /**
+   * Public iNaturalist taxa search — NO authentication required.
+   * Accepts a hint label directly (e.g. from TFLite) so callers can skip
+   * local color analysis and send a real ML prediction to iNaturalist.
+   */
+  async identifyWithINaturalistQuery(hintLabel: string): Promise<BugIdentificationResult | null> {
+    return this._queryINatTaxa(hintLabel);
+  }
+
   private async identifyWithiNaturalist(photoUri: string): Promise<BugIdentificationResult | null> {
     try {
-      // Compress large gallery/camera images before upload to prevent timeouts
-      let uploadUri = photoUri;
-      try {
-        const compressed = await ImageManipulator.manipulateAsync(
-          photoUri,
-          [{ resize: { width: 800 } }],
-          { format: ImageManipulator.SaveFormat.JPEG, compress: 0.85 }
-        );
-        uploadUri = compressed.uri;
-        console.log('🌿 Image compressed for upload');
-      } catch {
-        // If compression fails, fall back to original URI
-      }
+      // Run local analysis ONLY to determine the broad category (ant, beetle, spider…)
+      // so iNaturalist receives a broad search term and its own observation-count
+      // ranking decides the actual species — not our local heuristic.
+      const localResult = await this.identifyWithImageAnalysis(photoUri);
+      const topLabel = localResult.candidates[0]?.label ?? '';
+      const broadCategory = labelToCategory(topLabel) ?? '';
 
-      const formData = new FormData();
-      formData.append('image', {
-        uri: uploadUri,
-        type: 'image/jpeg',
-        name: 'bug_photo.jpg',
-      } as any);
-
-      console.log('🌿 Sending photo to iNaturalist Computer Vision API...');
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-      let response: Response;
-      try {
-        response = await fetch(`${API_CONFIG.INATURALIST.BASE_URL}/computervision/score_image`, {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/json',
-            'User-Agent': 'BugLord/1.0 (github.com/realadamcarr/BugLord)',
-          },
-          body: formData,
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timeoutId);
-      }
-
-      if (!response.ok) {
-        console.warn(`🌿 iNaturalist CV API error: HTTP ${response.status} ${response.statusText}`);
+      if (!broadCategory) {
+        console.warn('🌿 Could not determine broad category from local analysis — skipping iNat');
         return null;
       }
 
-      const data = await response.json();
-      console.log(`🌿 iNaturalist CV raw top result: ${JSON.stringify(data?.results?.[0]?.taxon?.preferred_common_name ?? data?.results?.[0]?.taxon?.name ?? 'none')}`);
-      return this.processINaturalistResponse(data);
+      console.log(`🌿 Local analysis said "${topLabel}" → broad category "${broadCategory}" — querying iNat with broad term`);
+      return this._queryINatTaxa(broadCategory);
     } catch (error) {
-      console.warn('iNaturalist API error:', error);
+      console.warn('🌿 iNaturalist identification failed:', error);
+      return null;
+    }
+  }
+
+  private async _queryINatTaxa(label: string): Promise<BugIdentificationResult | null> {
+    try {
+      // Only disambiguate known problematic single words.
+      const disambiguate: Record<string, string> = { fly: 'fly insect' };
+      const raw = label.trim().toLowerCase();
+      const query = disambiguate[raw] ?? raw;
+      if (!query) {
+        console.warn('🌿 No usable label for public iNat taxa search');
+        return null;
+      }
+
+      const headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'BugLord/1.0 (github.com/realadamcarr/BugLord)',
+      };
+
+      // ── Step 1: Find the parent taxon ID for this broad category ──
+      // e.g. "spider" → Araneae (47118), "ant" → Formicidae (47336)
+      console.log(`🌿 Step 1: Finding parent taxon for "${query}"...`);
+
+      const controller1 = new AbortController();
+      const timeout1 = setTimeout(() => controller1.abort(), 8000);
+      let parentTaxonId: number | null = null;
+      try {
+        const taxaUrl = `${API_CONFIG.INATURALIST.BASE_URL}/taxa?q=${encodeURIComponent(query)}&per_page=5&is_active=true`;
+        const taxaResp = await fetch(taxaUrl, { headers, signal: controller1.signal });
+        if (taxaResp.ok) {
+          const taxaData = await taxaResp.json();
+          const taxa = taxaData?.results ?? [];
+          // Pick the first result that is above species rank (order/family/class)
+          // so we can ask for species_counts within it.
+          const parent = taxa.find((t: any) =>
+            ['order', 'family', 'superfamily', 'suborder', 'infraorder', 'class', 'phylum'].includes(t.rank)
+          );
+          if (parent) {
+            parentTaxonId = parent.id;
+            console.log(`🌿 Found parent taxon: "${parent.preferred_common_name || parent.name}" (id=${parent.id}, rank=${parent.rank})`);
+          }
+        }
+      } finally {
+        clearTimeout(timeout1);
+      }
+
+      // ── Step 2: Get most-observed species from iNaturalist ──
+      // This is where iNat makes the real prediction — ranked by
+      // community observation frequency, not our local heuristic.
+      if (parentTaxonId) {
+        console.log(`🌿 Step 2: Querying species_counts for taxon ${parentTaxonId}...`);
+        const controller2 = new AbortController();
+        const timeout2 = setTimeout(() => controller2.abort(), 10000);
+        try {
+          const speciesUrl = `${API_CONFIG.INATURALIST.BASE_URL}/observations/species_counts?taxon_id=${parentTaxonId}&per_page=10&verifiable=true&quality_grade=research`;
+          const speciesResp = await fetch(speciesUrl, { headers, signal: controller2.signal });
+
+          if (speciesResp.ok) {
+            const speciesData = await speciesResp.json();
+            const speciesResults = (speciesData?.results ?? []).map((r: any) => ({
+              score: (r.count ?? 1) / 100000,
+              taxon: {
+                name: r.taxon?.name,
+                preferred_common_name: r.taxon?.preferred_common_name,
+                iconic_taxon_name: r.taxon?.iconic_taxon_name,
+              },
+            }));
+
+            if (speciesResults.length > 0) {
+              console.log(`🌿 iNat species_counts returned ${speciesResults.length} species suggestions`);
+              return this.processINaturalistResponse({ results: speciesResults });
+            }
+          }
+        } finally {
+          clearTimeout(timeout2);
+        }
+      }
+
+      // ── Fallback: direct taxa text search with species-rank filter ──
+      console.log(`🌿 Fallback: querying taxa API with rank=species for "${query}"...`);
+      const controller3 = new AbortController();
+      const timeout3 = setTimeout(() => controller3.abort(), 10000);
+      try {
+        const url = `${API_CONFIG.INATURALIST.BASE_URL}/taxa?q=${encodeURIComponent(query)}&rank=species&per_page=15&is_active=true`;
+        const response = await fetch(url, { headers, signal: controller3.signal });
+
+        if (!response.ok) {
+          console.warn(`🌿 iNaturalist public taxa API error: HTTP ${response.status}`);
+          return null;
+        }
+
+        const data = await response.json();
+        const results = (data?.results ?? []).map((taxon: any) => ({
+          score: (taxon.observations_count ?? 1) / 100000,
+          taxon: {
+            name: taxon.name,
+            preferred_common_name: taxon.preferred_common_name,
+            iconic_taxon_name: taxon.iconic_taxon_name,
+          },
+        }));
+
+        if (results.length === 0) {
+          console.log('🌿 Public taxa search returned no results');
+          return null;
+        }
+
+        console.log(`🌿 Public taxa search returned ${results.length} species`);
+        return this.processINaturalistResponse({ results });
+      } finally {
+        clearTimeout(timeout3);
+      }
+    } catch (error) {
+      console.warn('🌿 iNaturalist public API error:', error);
       return null;
     }
   }
@@ -1873,9 +1983,12 @@ class BugIdentificationService {
       return null;
     }
 
-    // Only include insect / arachnid taxa
-    const ARTHROPOD_ICONIC = new Set(['insecta', 'arachnida', 'myriapoda', 'arthropoda']);
-    const bugKeywordRe = /insect|bug|beetle|fly|bee|ant|butterfly|moth|cricket|spider|dragonfly|mantis|wasp|grasshopper|cicada|cockroach|damselfly|katydid/i;
+    // Accept any arthropod / bug-related taxa
+    const ARTHROPOD_ICONIC = new Set([
+      'insecta', 'arachnida', 'myriapoda', 'arthropoda',
+      'chilopoda', 'diplopoda', 'collembola', 'entognatha',
+    ]);
+    const bugKeywordRe = /insect|bug|beetle|fly|bee|ant|butterfly|moth|cricket|spider|dragonfly|damselfly|mantis|wasp|grasshopper|cicada|cockroach|katydid|scorpion|tick|flea|mosquito|gnat|hornet|earwig|centipede|millipede|termite|louse|aphid|weevil|firefly|ladybug|ladybird|stink\s*bug|lanternfly|leafhopper|planthopper|thrip|mantid|roach|silverfish|mayfly|stonefly|caddisfly|lacewing|sawfly|borer|longhorn|scarab|dung\s*beetle|jewel|ground\s*beetle|water\s*bug|assassin\s*bug|shield\s*bug/i;
 
     const insectResults = results.filter((r: any) => {
       const iconic = (r?.taxon?.iconic_taxon_name ?? '').toLowerCase();

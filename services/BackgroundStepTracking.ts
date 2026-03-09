@@ -105,12 +105,25 @@ if (!TaskManager.isTaskDefined(BACKGROUND_STEP_TASK_NAME)) {
     }
 
     // 3. Query the OS pedometer for historical steps.
+    //    getStepCountAsync is NOT supported on Android — it only works
+    //    on iOS via HealthKit/CoreMotion.  On Android we just update the
+    //    timestamp so the window stays current for the next invocation.
+    if (Platform.OS === 'android') {
+      await writeBgStepData({
+        accumulatedSteps: bgData?.accumulatedSteps ?? 0,
+        lastQueryTimestamp: now.toISOString(),
+      });
+      // On Android, steps are only counted via the live watchStepCount
+      // subscription in the foreground.  Background fetch keeps the
+      // timestamp fresh but cannot query historical steps.
+      return BackgroundFetch.BackgroundFetchResult.NoData;
+    }
+
     let steps = 0;
     try {
       const result = await Pedometer.getStepCountAsync(fromDate, now);
       steps = result?.steps ?? 0;
     } catch {
-      // Pedometer.getStepCountAsync may not be supported (Android without Health Connect).
       return BackgroundFetch.BackgroundFetchResult.Failed;
     }
 
@@ -123,7 +136,7 @@ if (!TaskManager.isTaskDefined(BACKGROUND_STEP_TASK_NAME)) {
       return BackgroundFetch.BackgroundFetchResult.NoData;
     }
 
-    // 4. Accumulate steps.
+    // 4. Accumulate steps (iOS only path).
     const prevAccumulated = bgData?.accumulatedSteps ?? 0;
     await writeBgStepData({
       accumulatedSteps: prevAccumulated + steps,

@@ -10,6 +10,7 @@ import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useInventory } from '@/contexts/InventoryContext';
 import { useEffect, useState } from 'react';
 import { WalkHistoryEntry, WalkModeReward, walkModeService } from './WalkModeService';
+import { showLevelUpNotification } from './WalkModeNotification';
 
 export interface UseWalkModeReturn {
   // State
@@ -17,7 +18,7 @@ export interface UseWalkModeReturn {
   statistics: ReturnType<typeof walkModeService.getStatistics>;
   
   // Actions
-  startWalkMode: () => Promise<void>;
+  startWalkMode: (bugId?: string, bugName?: string) => Promise<void>;
   stopWalkMode: () => Promise<void>;
   resetWalkMode: () => Promise<void>;
   
@@ -37,8 +38,12 @@ export function useWalkMode(): UseWalkModeReturn {
   const { collection, addXpToBug } = useBugCollection();
   const { addItem } = useInventory();
   
-  const [isActive, setIsActive] = useState(false);
-  const [statistics, setStatistics] = useState(() => walkModeService.getStatistics());
+  // Initialize state from service immediately — if _layout.tsx already
+  // initialized the service, this gives us the correct isActive on first render
+  // instead of flashing "Start Training" before the polling corrects it.
+  const initialStats = walkModeService.getStatistics();
+  const [isActive, setIsActive] = useState(initialStats.isActive);
+  const [statistics, setStatistics] = useState(initialStats);
   const [isAvailable, setIsAvailable] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,12 +81,23 @@ export function useWalkMode(): UseWalkModeReturn {
       setIsAvailable(true);
       setError(null);
       
-      // Update initial state
+      // Update initial state from the now-loaded persisted data
       const stats = walkModeService.getStatistics();
       setStatistics(stats);
       setIsActive(stats.isActive);
+
+      // If walk mode was active, make sure the pedometer is subscribed.
+      // On some OEMs it may have failed during cold-start init.
+      walkModeService.retryPedometerIfNeeded();
       
     } catch (err) {
+      // Even if initialization threw, the state may have been loaded
+      // successfully from AsyncStorage.  Read it so the UI reflects
+      // the persisted isActive flag (polling also does this every 1s).
+      const stats = walkModeService.getStatistics();
+      setStatistics(stats);
+      setIsActive(stats.isActive);
+
       setError(err instanceof Error ? err.message : 'Unknown error');
       setIsAvailable(false);
       console.error('Failed to initialize Walk Mode:', err);
@@ -126,6 +142,9 @@ export function useWalkMode(): UseWalkModeReturn {
       return;
     }
 
+    // Snapshot the level before adding XP so we can detect a level-up
+    const levelBefore = activeBug.level;
+
     // Add XP to the active bug
     const success = await addXpToBug(activeBug.id, reward.xpAmount);
     
@@ -137,6 +156,21 @@ export function useWalkMode(): UseWalkModeReturn {
       
       // Update reward with bug name for better logging
       reward.bugName = activeBug.name;
+
+      // Check if the bug leveled up by computing what the new level would be
+      let simXp = activeBug.xp + reward.xpAmount;
+      let simLevel = levelBefore;
+      let simMaxXp = activeBug.maxXp;
+      while (simXp >= simMaxXp) {
+        simXp -= simMaxXp;
+        simLevel += 1;
+        simMaxXp = Math.floor(simMaxXp * 1.2);
+      }
+
+      if (simLevel > levelBefore) {
+        console.log(`🎉 Walk Mode: ${activeBug.name} leveled up! ${levelBefore} → ${simLevel}`);
+        showLevelUpNotification(activeBug.nickname || activeBug.name, simLevel).catch(() => {});
+      }
     } else {
       console.warn('🚶‍♂️ Failed to add XP to active bug');
     }
@@ -166,21 +200,31 @@ export function useWalkMode(): UseWalkModeReturn {
   }
 
   /**
-   * Start Walk Mode tracking
+   * Start Walk Mode tracking.
+   * @param bugId  — explicit bug ID to train (from the UI selection)
+   * @param bugName — display name for notifications / logging
+   * If omitted, falls back to the first alive party bug.
    */
-  async function startWalkMode(): Promise<void> {
+  async function startWalkMode(bugId?: string, bugName?: string): Promise<void> {
     try {
       setError(null);
+
+      let trackBugId = bugId;
+      let trackBugName = bugName;
+
+      // Fallback: pick first alive party bug if caller didn't specify
+      if (!trackBugId) {
+        const activeBug = collection.party.find(bug => {
+          if (!bug) return false;
+          const maxHp = bug.maxHp || bug.maxXp;
+          const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
+          return currentHp > 0;
+        });
+        trackBugId = activeBug?.id;
+        trackBugName = activeBug?.name || activeBug?.nickname;
+      }
       
-      // Find the first active bug in party
-      const activeBug = collection.party.find(bug => {
-        if (!bug) return false;
-        const maxHp = bug.maxHp || bug.maxXp;
-        const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
-        return currentHp > 0;
-      });
-      
-      await walkModeService.startTracking(activeBug?.id, activeBug?.name || activeBug?.nickname);
+      await walkModeService.startTracking(trackBugId, trackBugName);
       
       // Update state
       const stats = walkModeService.getStatistics();

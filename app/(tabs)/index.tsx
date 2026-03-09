@@ -9,17 +9,22 @@ import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { bugIdentificationService } from '@/services/BugIdentificationService';
+import { predictInsect } from '@/services/BackendPredictionService';
 import { datasetUploadService } from '@/services/DatasetUploadService';
 import { recordConfirmedLabel } from '@/services/LearningService';
 import { appendScanLog } from '@/services/ScanLogService';
 import { mlPreprocessingService } from '@/services/ml/MLPreprocessingService';
 import { modelUpdateService } from '@/services/ml/ModelUpdateService';
 import { onDeviceClassifier } from '@/services/ml/OnDeviceClassifier';
+import { runBugScanPipeline, ScanResult } from '@/src/features/scanner/scanPipeline';
+import { classifyBugImage, isClassifierReady, loadBugClassifier } from '@/src/ml/bugClassifier';
+import { GbifSpeciesSuggestion } from '@/src/services/gbifService';
+import { BugPrediction, buildPrediction } from '@/src/types/bugPrediction';
 import { Bug, BugIdentificationResult, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
 import { labelToCategory } from '@/utils/bugCategory';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -57,8 +62,36 @@ export default function CaptureScreen() {
   const [mlReady, setMlReady] = useState(false);
   const [modelVersion, setModelVersion] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<ScanMode>('photo');
+  const [lastPrediction, setLastPrediction] = useState<BugPrediction | null>(null);
+  const [lastGbifSuggestions, setLastGbifSuggestions] = useState<GbifSpeciesSuggestion[]>([]);
+
+  // Scan mode slider animation
+  const SCAN_MODES: ScanMode[] = ['photo', 'liveScan', 'gallery'];
+  const SCAN_LABELS: Record<ScanMode, string> = { photo: '📷 Photo', liveScan: '🎯 Live Scan', gallery: '🖼️ Gallery' };
+  const scanSliderAnim = useRef(new Animated.Value(0)).current;
+  const scanScaleAnims = useRef(SCAN_MODES.map(() => new Animated.Value(1))).current;
+  const [scanToggleWidth, setScanToggleWidth] = useState(0);
 
   const styles = createStyles(theme);
+
+  // Animate scan mode slider on mode change
+  useEffect(() => {
+    const index = SCAN_MODES.indexOf(scanMode);
+    Animated.spring(scanSliderAnim, {
+      toValue: index,
+      useNativeDriver: true,
+      tension: 68,
+      friction: 10,
+    }).start();
+    scanScaleAnims.forEach((anim, i) => {
+      Animated.spring(anim, {
+        toValue: i === index ? 1.08 : 1,
+        useNativeDriver: true,
+        tension: 300,
+        friction: 10,
+      }).start();
+    });
+  }, [scanMode]);
 
   // Initialize ML services on mount
   useEffect(() => {
@@ -93,6 +126,15 @@ export default function CaptureScreen() {
 
       // Load current model
       await loadMLModel();
+
+      // Also initialize the new honest classifier (src/ml/bugClassifier.ts)
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        await loadBugClassifier(require('../../assets/ml/model.tflite'));
+        console.log('✅ New BugClassifier ready:', isClassifierReady());
+      } catch (err) {
+        console.warn('⚠️ New BugClassifier init failed (non-fatal):', err);
+      }
 
       // Process upload queue
       datasetUploadService.processQueue().catch(err =>
@@ -284,6 +326,8 @@ export default function CaptureScreen() {
     setShowBugIdentification(true);
     setIsIdentifying(true);
     setRescanCount(0);
+    setLastPrediction(null);
+    setLastGbifSuggestions([]);
 
     try {
       console.log('🖼️ Processing insect photo...');
@@ -304,90 +348,143 @@ export default function CaptureScreen() {
       // Use detected crop whenever available so identification isn't biased by background.
       const analysisPhoto = processedImage.croppedImage || imageToClassify || originalPhoto;
 
-      // If we already have a confirmed result from live scan, use it directly
+      // ── NEW HONEST PIPELINE ────────────────────────────────
+      // Primary path: runBugScanPipeline → offline TFLite classifier + GBIF enrichment.
+      // Falls back to legacy path only when the new classifier isn't loaded.
+
       let mlCandidates: any[] = [];
-      if (preConfirmedResult) {
-        console.log('✅ Using pre-confirmed live scan result:', preConfirmedResult);
-        mlCandidates = [{ label: preConfirmedResult.label, confidence: preConfirmedResult.confidence }];
-      } else {
-        // ── Happy path: run TFLite + iNaturalist in parallel, merge results ──
-        // This ensures we get both on-device ML and cloud-based identification
-        // instead of falling through to local color analysis stubs.
+      let prediction: BugPrediction | null = null;
+      let pipelineGbif: GbifSpeciesSuggestion[] = [];
 
-        // Check ML model state for debug logging
-        const usingRealModel = onDeviceClassifier.isUsingRealModel();
-        const modelRunnable = onDeviceClassifier.isRunnable();
-        console.log(`🔍 ML Debug — mlReady: ${mlReady}, isReady: ${onDeviceClassifier.isReady()}, isUsingRealModel: ${usingRealModel}, isRunnable: ${modelRunnable}`);
+      // ── PRIORITY 1: FastAPI backend (EVA-02 iNat21 model) ──────────
+      let backendHandled = false;
+      if (!preConfirmedResult) {
+        try {
+          console.log('🌐 Trying FastAPI backend prediction…');
+          const backendResult = await predictInsect(analysisPhoto);
+          console.log('🌐 Backend result:', backendResult);
 
-        // Launch TFLite and iNaturalist concurrently
-        const tflitePromise = (async (): Promise<any[]> => {
-          if (!(mlReady && onDeviceClassifier.isReady())) return [];
-          try {
-            const mlInput = await mlPreprocessingService.preprocessForInference(analysisPhoto, {
-              targetSize: 224,
-              quality: 0.9,
-            });
-            console.log('🧠 Running on-device TFLite classification...');
-            const candidates = await onDeviceClassifier.classifyImage(mlInput, 5);
-            // Discard stubs so they never pollute results
-            const allStubs = candidates.length > 0 && candidates.every((c: any) => c.source === 'stub');
-            if (allStubs) {
-              console.warn('⚠️ TFLite returned stubs (no real model) — discarding');
-              return [];
+          if (backendResult.confidence > 0) {
+            // Use the display label from the backend (e.g. "Monarch Butterfly")
+            const label = backendResult.displayLabel || backendResult.speciesName || 'Unknown Bug';
+            mlCandidates = [{
+              label,
+              confidence: backendResult.confidence,
+              source: 'backend-eva02',
+            }];
+
+            // If the backend returned top predictions, add them as runner-ups
+            if (backendResult.topPredictions && backendResult.topPredictions.length > 0) {
+              backendResult.topPredictions.slice(1, 5).forEach(t => {
+                if (t.speciesName !== backendResult.speciesName) {
+                  mlCandidates.push({
+                    label: t.mappedBuglordType
+                      ? t.mappedBuglordType.charAt(0).toUpperCase() + t.mappedBuglordType.slice(1)
+                      : t.speciesName,
+                    confidence: t.confidence,
+                    source: 'backend-eva02',
+                  });
+                }
+              });
             }
-            console.log('✅ TFLite classification complete:', candidates.map((c: any) => `${c.label} ${(c.confidence * 100).toFixed(1)}%`).join(', '));
-            return candidates;
-          } catch (err) {
-            console.warn('⚠️ TFLite classification failed:', err);
-            return [];
+
+            backendHandled = true;
+            console.log('✅ Backend identification accepted:', mlCandidates[0]);
           }
-        })();
-
-        const iNatPromise = (async (): Promise<any[]> => {
-          try {
-            console.log('🌿 Running iNaturalist identification...');
-            const iNatResult = await bugIdentificationService.identify(analysisPhoto);
-            if (iNatResult?.candidates?.length > 0) {
-              console.log(`✅ iNaturalist/image analysis returned: ${iNatResult.candidates[0].label} (source: ${iNatResult.provider})`);
-              return iNatResult.candidates.map((c: any) => ({
-                label: c.label || c.species,
-                confidence: c.confidence,
-                source: c.source || iNatResult.provider || 'iNaturalist',
-              }));
-            }
-            return [];
-          } catch (err) {
-            console.warn('⚠️ iNaturalist/image analysis failed:', err);
-            return [];
-          }
-        })();
-
-        // Wait for both to finish
-        const [tfliteCandidates, iNatCandidates] = await Promise.all([tflitePromise, iNatPromise]);
-
-        // Merge results: TFLite leads when available, iNaturalist fills gaps
-        if (tfliteCandidates.length > 0 && iNatCandidates.length > 0) {
-          // Both sources returned results — merge with TFLite leading
-          console.log('🔀 Merging TFLite + iNaturalist results');
-          const seenLabels = new Set(tfliteCandidates.map((c: any) => c.label));
-          const extra = iNatCandidates.filter((c: any) => !seenLabels.has(c.label));
-          mlCandidates = [...tfliteCandidates, ...extra].slice(0, 10);
-        } else if (tfliteCandidates.length > 0) {
-          console.log('🧠 Using TFLite results (iNaturalist unavailable)');
-          mlCandidates = tfliteCandidates;
-        } else if (iNatCandidates.length > 0) {
-          console.log('🌿 Using iNaturalist/image analysis results (TFLite unavailable)');
-          mlCandidates = iNatCandidates;
-        }
-
-        // If still no candidates at all, allow manual entry instead of blocking
-        if (mlCandidates.length === 0) {
-          console.log('⚠️ No identification possible — allowing manual add');
-          mlCandidates = [{ label: 'Unknown Bug', confidence: 0, source: 'manual' }];
+        } catch (backendErr) {
+          console.warn('⚠️ Backend prediction failed, falling back to local pipeline:', backendErr);
         }
       }
 
-      // Use identification results (ML or image-based analysis)
+      if (backendHandled) {
+        // Backend handled it — skip all other pipelines
+      } else if (preConfirmedResult) {
+        console.log('✅ Using pre-confirmed live scan result:', preConfirmedResult);
+        mlCandidates = [{ label: preConfirmedResult.label, confidence: preConfirmedResult.confidence }];
+        // Build a synthetic prediction for the UI
+        prediction = buildPrediction([{ label: preConfirmedResult.label, confidence: preConfirmedResult.confidence }]);
+      } else if (isClassifierReady()) {
+        // ── Run the new honest scan pipeline ──
+        console.log('🔬 Running honest scan pipeline (offline model + GBIF enrichment)…');
+        const scanResult: ScanResult = await runBugScanPipeline(analysisPhoto);
+        prediction = scanResult.prediction;
+        pipelineGbif = scanResult.gbifSuggestions;
+
+        if (prediction.accepted) {
+          // Map the broad class through YOLO_SPECIES_MAP for game-friendly names
+          const mapped = YOLO_SPECIES_MAP[prediction.broadClass] ?? prediction.broadClass;
+          mlCandidates = [{ label: mapped, confidence: prediction.confidence, source: 'offline-model' }];
+          // Also add runner-up classes as lower-priority candidates
+          prediction.scores.slice(1, 5).forEach(s => {
+            const m = YOLO_SPECIES_MAP[s.label] ?? s.label;
+            mlCandidates.push({ label: m, confidence: s.confidence, source: 'offline-model' });
+          });
+        } else {
+          // Model not confident — still provide candidates for manual selection
+          prediction.scores.slice(0, 5).forEach(s => {
+            const m = YOLO_SPECIES_MAP[s.label] ?? s.label;
+            mlCandidates.push({ label: m, confidence: s.confidence, source: 'offline-model' });
+          });
+          if (mlCandidates.length === 0) {
+            mlCandidates = [{ label: 'Unknown Bug', confidence: 0, source: 'manual' }];
+          }
+        }
+      } else {
+        // ── Legacy fallback when new classifier isn't available ──
+        console.log('⚠️ New classifier not ready — falling back to legacy pipeline');
+        const usingRealModel = onDeviceClassifier.isUsingRealModel();
+        console.log(`🔍 ML Debug — mlReady: ${mlReady}, isUsingRealModel: ${usingRealModel}`);
+
+        // Step 1: Run old TFLite on-device classification
+        let tfliteCandidates: any[] = [];
+        if (mlReady && onDeviceClassifier.isReady()) {
+          try {
+            const mlInput = await mlPreprocessingService.preprocessForInference(analysisPhoto, { targetSize: 224, quality: 0.9 });
+            const candidates = await onDeviceClassifier.classifyImage(mlInput, 5);
+            const allStubs = candidates.length > 0 && candidates.every((c: any) => c.source === 'stub');
+            if (!allStubs) tfliteCandidates = candidates;
+          } catch (err) { console.warn('⚠️ TFLite classification failed:', err); }
+        }
+
+        // Step 2: Query iNaturalist as enrichment
+        let iNatCandidates: any[] = [];
+        try {
+          const tfliteTopLabel = tfliteCandidates[0]?.label;
+          if (tfliteTopLabel) {
+            const iNatResult = await bugIdentificationService.identifyWithINaturalistQuery(tfliteTopLabel);
+            if (iNatResult?.candidates?.length) {
+              iNatCandidates = iNatResult.candidates.map((c: any) => ({ label: c.label || c.species, confidence: c.confidence, source: c.source || 'iNaturalist' }));
+            }
+          }
+          if (iNatCandidates.length === 0) {
+            const fullResult = await bugIdentificationService.identify(analysisPhoto);
+            if (fullResult?.candidates?.length) {
+              iNatCandidates = fullResult.candidates.map((c: any) => ({ label: c.label || c.species, confidence: c.confidence, source: c.source || fullResult.provider || 'iNaturalist' }));
+            }
+          }
+        } catch (err) { console.warn('⚠️ iNaturalist failed:', err); }
+
+        // Merge
+        const TFLITE_CONFIDENCE_FLOOR = 0.4;
+        const tfliteTopConf = tfliteCandidates.length > 0 ? Math.max(...tfliteCandidates.map((c: any) => c.confidence)) : 0;
+        if (tfliteCandidates.length > 0 && iNatCandidates.length > 0) {
+          if (tfliteTopConf >= TFLITE_CONFIDENCE_FLOOR) {
+            const seenLabels = new Set(tfliteCandidates.map((c: any) => c.label));
+            mlCandidates = [...tfliteCandidates, ...iNatCandidates.filter((c: any) => !seenLabels.has(c.label))].slice(0, 10);
+          } else {
+            const seenLabels = new Set(iNatCandidates.map((c: any) => c.label));
+            mlCandidates = [...iNatCandidates, ...tfliteCandidates.filter((c: any) => !seenLabels.has(c.label))].slice(0, 10);
+          }
+        } else if (tfliteCandidates.length > 0) { mlCandidates = tfliteCandidates; }
+        else if (iNatCandidates.length > 0) { mlCandidates = iNatCandidates; }
+        if (mlCandidates.length === 0) mlCandidates = [{ label: 'Unknown Bug', confidence: 0, source: 'manual' }];
+      }
+
+      // Store pipeline results for BugInfoModal
+      setLastPrediction(prediction);
+      setLastGbifSuggestions(pipelineGbif);
+
+      // Use identification results
       console.log('✅ Identification results:', mlCandidates);
       
       // Convert predictions to BugIdentificationResult format.
@@ -418,14 +515,8 @@ export default function CaptureScreen() {
             ...candidates.filter((c) => c.label !== butterflyCandidate.label),
           ];
           console.log(`🦋 ML rescue: promoted ${butterflyCandidate.label} over Ladybug`);
-        } else {
-          // Deterministic fallback for classic orange butterfly photos.
-          candidates = [
-            { label: 'Monarch Butterfly', species: 'Danaus plexippus', confidence: 0.84, source: 'ImageAnalysis' },
-            ...candidates.filter((c) => c.label !== 'Monarch Butterfly'),
-          ];
-          console.log('🦋 ML rescue: replaced Ladybug with Monarch Butterfly');
         }
+        // Otherwise trust the Ladybug prediction — no forced Monarch override.
       }
 
       const result = {
@@ -588,6 +679,8 @@ export default function CaptureScreen() {
     setCapturedPhoto(null);
     setIdentificationResult(null);
     setIdentifiedBug(null);
+    setLastPrediction(null);
+    setLastGbifSuggestions([]);
   };
 
   const handleRescan = async () => {
@@ -605,12 +698,30 @@ export default function CaptureScreen() {
 
   // ─── Live Scan Callbacks ──────────────────────────────────────
   /** Classify a single photo for live scan.
-   *  Priority: TFLite (fast) → iNaturalist API (accurate) → local color analysis (fallback).
+   *  Priority: New bugClassifier (honest) → legacy TFLite → Unknown.
    *  Returns null ONLY when nothing at all is ready yet. */
   const handleClassifyPhoto = useCallback(async (photoUri: string): Promise<{ label: string; confidence: number } | null> => {
-    console.log(`🔍 handleClassifyPhoto — mlReady: ${mlReady}, isReady: ${onDeviceClassifier.isReady()}, isRunnable: ${onDeviceClassifier.isRunnable()}, isUsingRealModel: ${onDeviceClassifier.isUsingRealModel()}`);
+    console.log(`🔍 handleClassifyPhoto — newClassifierReady: ${isClassifierReady()}, mlReady: ${mlReady}`);
 
-    // 1. TFLite — fastest path
+    // 1. New honest classifier — preferred path
+    if (isClassifierReady()) {
+      try {
+        const scores = await classifyBugImage(photoUri);
+        if (scores.length > 0 && scores[0].confidence >= 0.4) {
+          const mapped = YOLO_SPECIES_MAP[scores[0].label] ?? scores[0].label;
+          return { label: mapped, confidence: scores[0].confidence };
+        }
+        // Low confidence — fall through
+        if (scores.length > 0) {
+          const mapped = YOLO_SPECIES_MAP[scores[0].label] ?? scores[0].label;
+          return { label: mapped, confidence: scores[0].confidence };
+        }
+      } catch (err) {
+        console.warn('New classifier live scan error:', err);
+      }
+    }
+
+    // 2. Legacy TFLite fallback
     if (mlReady && onDeviceClassifier.isReady() && onDeviceClassifier.isUsingRealModel()) {
       try {
         const mlInput = await mlPreprocessingService.preprocessForInference(photoUri, {
@@ -623,33 +734,9 @@ export default function CaptureScreen() {
           const mappedLabel = YOLO_SPECIES_MAP[real[0].label] ?? real[0].label;
           return { label: mappedLabel, confidence: real[0].confidence };
         }
-        console.warn('⚠️ TFLite returned no real candidates for live scan');
       } catch (err) {
         console.warn('TFLite live scan error:', err);
       }
-    }
-
-    // 2. iNaturalist API — slower but accurate, runs the full identify() chain
-    console.log('🌿 Live scan: trying iNaturalist + image analysis...');
-    try {
-      const result = await bugIdentificationService.identify(photoUri);
-      if (result?.candidates?.length > 0 && result.candidates[0].label) {
-        return {
-          label: result.candidates[0].label,
-          confidence: result.candidates[0].confidence ?? 0.6,
-        };
-      }
-    } catch (err) {
-      console.warn('iNaturalist live scan failed:', err);
-    }
-
-    // 3. Local color analysis — instant fallback
-    console.log('🎨 Live scan: falling back to local color analysis');
-    try {
-      const result = await bugIdentificationService.classifyForLiveScan(photoUri);
-      if (result && result.label && result.label !== 'Unknown Bug') return result;
-    } catch (err) {
-      console.warn('Color analysis live scan failed:', err);
     }
 
     return { label: 'Unknown Bug', confidence: 0.15 };
@@ -745,44 +832,49 @@ export default function CaptureScreen() {
               </View>
             </View>
           )}
-          {/* Scan Mode Toggle */}
-          <View style={styles.scanModeToggle}>
-            <TouchableOpacity
-              style={[
-                styles.scanModeOption,
-                scanMode === 'photo' && { backgroundColor: theme.colors.primary },
-              ]}
-              onPress={() => setScanMode('photo')}
-            >
-              <Text style={[
-                styles.scanModeText,
-                scanMode === 'photo' && styles.scanModeTextActive,
-              ]}>📷 Photo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.scanModeOption,
-                scanMode === 'liveScan' && { backgroundColor: theme.colors.primary },
-              ]}
-              onPress={() => setScanMode('liveScan')}
-            >
-              <Text style={[
-                styles.scanModeText,
-                scanMode === 'liveScan' && styles.scanModeTextActive,
-              ]}>🎯 Live Scan</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.scanModeOption,
-                scanMode === 'gallery' && { backgroundColor: theme.colors.primary },
-              ]}
-              onPress={() => setScanMode('gallery')}
-            >
-              <Text style={[
-                styles.scanModeText,
-                scanMode === 'gallery' && styles.scanModeTextActive,
-              ]}>🖼️ Gallery</Text>
-            </TouchableOpacity>
+          {/* Scan Mode Toggle — animated slider */}
+          <View
+            style={styles.scanModeToggle}
+            onLayout={(e) => setScanToggleWidth(e.nativeEvent.layout.width - 8)}
+          >
+            {/* Sliding highlight indicator */}
+            {scanToggleWidth > 0 && (
+              <Animated.View
+                style={{
+                  position: 'absolute',
+                  top: 4,
+                  left: 4,
+                  bottom: 4,
+                  width: scanToggleWidth / 3,
+                  backgroundColor: theme.colors.primary,
+                  borderRadius: 8,
+                  transform: [{
+                    translateX: scanSliderAnim.interpolate({
+                      inputRange: [0, 1, 2],
+                      outputRange: [0, scanToggleWidth / 3, (scanToggleWidth / 3) * 2],
+                    }),
+                  }],
+                }}
+              />
+            )}
+            {/* Scan mode options */}
+            {SCAN_MODES.map((mode, index) => (
+              <Animated.View
+                key={mode}
+                style={{ flex: 1, transform: [{ scale: scanScaleAnims[index] }] }}
+              >
+                <TouchableOpacity
+                  style={styles.scanModeOption}
+                  onPress={() => setScanMode(mode)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[
+                    styles.scanModeText,
+                    scanMode === mode && styles.scanModeTextActive,
+                  ]}>{SCAN_LABELS[mode]}</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            ))}
           </View>
 
           {/* Main Action Button — opens camera or gallery depending on mode */}
@@ -964,6 +1056,8 @@ export default function CaptureScreen() {
         onRescan={handleRescan}
         isNewCatch={true}
         candidates={identificationResult?.candidates || []}
+        prediction={lastPrediction}
+        scanGbifSuggestions={lastGbifSuggestions}
       />
 
       {/* Recent Bug Info Modal */}

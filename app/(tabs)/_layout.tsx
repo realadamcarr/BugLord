@@ -1,95 +1,65 @@
+import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { Platform } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { HapticTab } from '@/components/HapticTab';
+import { AnimatedTabBar } from '@/components/AnimatedTabBar';
 import { IconSymbol } from '@/components/ui/IconSymbol';
-import TabBarBackground from '@/components/ui/TabBarBackground';
-import { useTheme } from '@/contexts/ThemeContext';
+
+function renderTabBar(props: BottomTabBarProps) {
+  return <AnimatedTabBar {...props} />;
+}
+
+type IconProps = Readonly<{ color: string; focused: boolean }>;
+
+function TrainIcon({ color, focused }: IconProps) {
+  return <IconSymbol size={focused ? 30 : 26} name="dumbbell" color={color} />;
+}
+
+function CaptureIcon({ color, focused }: IconProps) {
+  return <IconSymbol size={focused ? 34 : 30} name="camera" color={color} />;
+}
+
+function PlayerIcon({ color, focused }: IconProps) {
+  return <IconSymbol size={focused ? 30 : 26} name="person.circle" color={color} />;
+}
+
+function SocialIcon({ color, focused }: IconProps) {
+  return <IconSymbol size={focused ? 30 : 26} name="person.2.fill" color={color} />;
+}
 
 export default function TabLayout() {
-  const { theme } = useTheme();
-  const insets = useSafeAreaInsets();
-
   return (
     <Tabs
+      tabBar={renderTabBar}
       screenOptions={{
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.textMuted,
         headerShown: false,
-        tabBarButton: HapticTab,
-        tabBarBackground: TabBarBackground,
-        tabBarStyle: Platform.select({
-          ios: {
-            position: 'absolute',
-            backgroundColor: theme.colors.surface + 'F5',
-            borderTopWidth: 3,
-            borderTopColor: theme.colors.border,
-            paddingTop: 8,
-            paddingBottom: insets.bottom > 0 ? insets.bottom : 20,
-            height: 60 + (insets.bottom > 0 ? insets.bottom : 20),
-          },
-          default: {
-            backgroundColor: theme.colors.surface,
-            borderTopWidth: 3,
-            borderTopColor: theme.colors.border,
-            paddingTop: 6,
-            paddingBottom: insets.bottom > 0 ? insets.bottom : 6,
-            height: 60 + (insets.bottom > 0 ? insets.bottom : 6),
-            elevation: 12,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: -3 },
-            shadowOpacity: 0.15,
-            shadowRadius: 6,
-          },
-        }),
-        tabBarLabelStyle: {
-          fontSize: 13,
-          fontWeight: '800',
-          letterSpacing: 1,
-          textTransform: 'uppercase',
-          textAlign: 'center',
-          marginTop: 2,
-        },
-        tabBarIconStyle: {
-          marginBottom: -2,
-        },
       }}>
       <Tabs.Screen
         name="train"
         options={{
           title: 'Train',
-          tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={focused ? 30 : 26} name="dumbbell" color={color} />
-          ),
+          tabBarIcon: TrainIcon,
         }}
       />
       <Tabs.Screen
         name="index"
         options={{
           title: 'Capture',
-          tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={focused ? 34 : 30} name="camera" color={color} />
-          ),
+          tabBarIcon: CaptureIcon,
         }}
       />
       <Tabs.Screen
         name="player"
         options={{
           title: 'Player',
-          tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={focused ? 30 : 26} name="person.circle" color={color} />
-          ),
+          tabBarIcon: PlayerIcon,
         }}
       />
       <Tabs.Screen
         name="social"
         options={{
           title: 'Social',
-          tabBarIcon: ({ color, focused }) => (
-            <IconSymbol size={focused ? 30 : 26} name="person.2.fill" color={color} />
-          ),
+          tabBarIcon: SocialIcon,
         }}
       />
     </Tabs>

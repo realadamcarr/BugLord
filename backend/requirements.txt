@@ -1,0 +1,14 @@
+# BugLord Classification API – Python dependencies
+# Install:  pip install -r requirements.txt
+
+# --- Web framework ---
+fastapi
+uvicorn[standard]
+python-multipart                # required for UploadFile
+
+# --- ML / Vision ---
+torch
+torchvision
+timm                            # Hugging Face image-classification models
+huggingface_hub                 # model downloads & caching
+Pillow                          # image decoding

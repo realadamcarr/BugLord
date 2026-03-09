@@ -4,7 +4,7 @@ import { ThemedView } from '@/components/ThemedView';
 import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { Bug, BugRarity, RARITY_CONFIG } from '@/types/Bug';
+import { BiomeType, BIOME_CONFIG, Bug, BugRarity, RARITY_CONFIG } from '@/types/Bug';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     Dimensions,
@@ -24,9 +24,10 @@ const ITEM_SIZE = (screenWidth - 60) / GRID_COLUMNS; // Account for padding and 
 interface CollectionScreenProps {
   onClose: () => void;
   initialRarityFilter?: BugRarity | 'all';
+  initialBiomeFilter?: BiomeType | 'all';
 }
 
-export const CollectionScreen: React.FC<CollectionScreenProps> = ({ onClose, initialRarityFilter = 'all' }) => {
+export const CollectionScreen: React.FC<CollectionScreenProps> = ({ onClose, initialRarityFilter = 'all', initialBiomeFilter = 'all' }) => {
   const { theme } = useTheme();
   const { collection } = useBugCollection();
   const [selectedBug, setSelectedBug] = useState<Bug | null>(null);
@@ -35,6 +36,7 @@ export const CollectionScreen: React.FC<CollectionScreenProps> = ({ onClose, ini
   // Filter / sort state
   const [showAll, setShowAll] = useState(true); // true = all bugs, false = storage only
   const [rarityFilter, setRarityFilter] = useState<BugRarity | 'all'>(initialRarityFilter);
+  const [biomeFilter, setBiomeFilter] = useState<BiomeType | 'all'>(initialBiomeFilter);
   const [sortBy, setSortBy] = useState<'newest' | 'level-asc' | 'level-desc' | 'rarity'>('newest');
 
   const styles = createStyles(theme);
@@ -57,10 +59,21 @@ export const CollectionScreen: React.FC<CollectionScreenProps> = ({ onClose, ini
 
   const RARITY_ORDER: Record<string, number> = { legendary: 0, epic: 1, rare: 2, uncommon: 3, common: 4 };
 
+  const BIOMES: { key: BiomeType | 'all'; label: string; color: string; emoji: string }[] = [
+    { key: 'all', label: 'All', color: theme.colors.primary, emoji: '🌍' },
+    ...Object.entries(BIOME_CONFIG).map(([key, cfg]) => ({
+      key: key as BiomeType,
+      label: key.charAt(0).toUpperCase() + key.slice(1),
+      color: cfg.color,
+      emoji: cfg.emoji,
+    })),
+  ];
+
   useEffect(() => {
     setRarityFilter(initialRarityFilter);
+    setBiomeFilter(initialBiomeFilter);
     setShowAll(true);
-  }, [initialRarityFilter]);
+  }, [initialRarityFilter, initialBiomeFilter]);
 
   // Derive filtered + sorted bugs list
   const partyBugIds = new Set(collection.party.filter(Boolean).map(bug => bug!.id));
@@ -70,6 +83,10 @@ export const CollectionScreen: React.FC<CollectionScreenProps> = ({ onClose, ini
 
     if (rarityFilter !== 'all') {
       bugs = bugs.filter(b => b.rarity === rarityFilter);
+    }
+
+    if (biomeFilter !== 'all') {
+      bugs = bugs.filter(b => b.biome === biomeFilter);
     }
 
     switch (sortBy) {
@@ -89,7 +106,7 @@ export const CollectionScreen: React.FC<CollectionScreenProps> = ({ onClose, ini
         break;
     }
     return bugs;
-  }, [collection.bugs, showAll, rarityFilter, sortBy]);
+  }, [collection.bugs, showAll, rarityFilter, biomeFilter, sortBy]);
 
   const handleBugPress = (bug: Bug) => {
     setSelectedBug(bug);
@@ -203,6 +220,22 @@ export const CollectionScreen: React.FC<CollectionScreenProps> = ({ onClose, ini
                 onPress={() => setRarityFilter(r.key)}
               >
                 <Text style={[styles.chipText, active && { color: '#fff' }]}>{r.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {/* Biome filter chips */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          {BIOMES.map(b => {
+            const active = biomeFilter === b.key;
+            return (
+              <TouchableOpacity
+                key={b.key}
+                style={[styles.chip, active && { backgroundColor: b.color, borderColor: b.color }]}
+                onPress={() => setBiomeFilter(b.key)}
+              >
+                <Text style={[styles.chipText, active && { color: '#fff' }]}>{b.emoji} {b.label}</Text>
               </TouchableOpacity>
             );
           })}

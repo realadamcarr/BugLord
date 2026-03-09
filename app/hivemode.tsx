@@ -657,6 +657,50 @@ export default function HiveModeScreen() {
     setShowRunSummary(true);
   };
 
+  // ═══════════════════════════════
+  //  ABANDON RUN (Exit Run)
+  // ═══════════════════════════════
+  const handleAbandonRun = () => {
+    Alert.alert(
+      'Exit Run',
+      'Are you sure? Your bugs will keep any damage taken and fainted bugs stay fainted until revived.',
+      [
+        { text: 'Keep Fighting', style: 'cancel' },
+        {
+          text: 'Exit Run',
+          style: 'destructive',
+          onPress: () => {
+            // Persist current active bug HP
+            if (hiveState.playerBug) {
+              updateBugHp(hiveState.playerBug.id, hiveState.playerBug.currentHp);
+            }
+
+            // Persist HP for all party bugs tracked during the run
+            Object.entries(partyBugHp).forEach(([bugId, hp]) => {
+              if (bugId !== hiveState.playerBug?.id) {
+                updateBugHp(bugId, hp.current);
+              }
+            });
+
+            // Fainted bugs stay at 0 HP (already persisted via updateBugHp)
+            faintedBugIds.forEach(bugId => {
+              updateBugHp(bugId, 0);
+            });
+
+            setHiveState(prev => ({
+              ...prev,
+              isActive: false,
+              runCompleted: true,
+              runWon: false,
+            }));
+
+            setShowRunSummary(true);
+          },
+        },
+      ],
+    );
+  };
+
   // ═══════════════════════════════════════════
   //  RENDER: Bug selector (party only, no heal)
   // ═══════════════════════════════════════════
@@ -1268,6 +1312,15 @@ export default function HiveModeScreen() {
           <ThemedText style={styles.statText}>Caught: {hiveState.bugsCaught.length}</ThemedText>
           <ThemedText style={styles.statText}>Items: {hiveState.itemsGained.length}</ThemedText>
         </View>
+
+        {/* Exit Run */}
+        <TouchableOpacity
+          style={styles.endRunButton}
+          onPress={handleAbandonRun}
+          disabled={isProcessingTurn}
+        >
+          <ThemedText style={styles.endRunButtonText}>🚪 Exit Run</ThemedText>
+        </TouchableOpacity>
       </ScrollView>
 
       {renderItemSelector()}

@@ -40,7 +40,7 @@ export async function appendTradeEvent(
     events: arrayUnion({
       type: event.type,
       by: event.by,
-      at: serverTimestamp(),
+      at: Timestamp.now(),
     }),
   });
 }
@@ -156,15 +156,27 @@ export async function declineTrade(
   await updateDoc(ref, {
     status: 'declined' satisfies TradeStatus,
     updatedAt: serverTimestamp(),
+    events: arrayUnion({
+      type: 'declined',
+      by: uid,
+      at: Timestamp.now(),
+    }),
   });
-
-  await appendTradeEvent(ref, { type: 'declined', by: uid });
 
   // Release the sender's locked bug
   try {
     await unlockOfferedBug(data.fromUid, data.fromBugId, tradeId);
   } catch (err) {
-    console.warn('[tradeService] Failed to unlock bug after decline:', err);
+    console.warn('[tradeService] Failed to unlock fromBug after decline:', err);
+  }
+
+  // Release the recipient's locked bug (if they had chosen one)
+  if (data.toBugId) {
+    try {
+      await unlockOfferedBug(data.toUid, data.toBugId, tradeId);
+    } catch (err) {
+      console.warn('[tradeService] Failed to unlock toBug after decline:', err);
+    }
   }
 }
 
@@ -189,16 +201,86 @@ export async function cancelTrade(
   await updateDoc(ref, {
     status: 'cancelled' satisfies TradeStatus,
     updatedAt: serverTimestamp(),
+    events: arrayUnion({
+      type: 'cancelled',
+      by: uid,
+      at: Timestamp.now(),
+    }),
   });
-
-  await appendTradeEvent(ref, { type: 'cancelled', by: uid });
 
   // Release the sender's locked bug
   try {
     await unlockOfferedBug(data.fromUid, data.fromBugId, tradeId);
   } catch (err) {
-    console.warn('[tradeService] Failed to unlock bug after cancel:', err);
+    console.warn('[tradeService] Failed to unlock fromBug after cancel:', err);
   }
+
+  // Release the recipient's locked bug (if they had chosen one)
+  if (data.toBugId) {
+    try {
+      await unlockOfferedBug(data.toUid, data.toBugId, tradeId);
+    } catch (err) {
+      console.warn('[tradeService] Failed to unlock toBug after cancel:', err);
+    }
+  }
+}
+
+// ── Recipient sets their offered bug ─────────────────────────────────
+
+/**
+ * Called by the trade recipient (toUid) to select which bug they offer.
+ * Validates ownership, lock-free state, then writes toBugId on the
+ * trade doc and locks the bug.
+ */
+export async function setToBugId(
+  tradeId: string,
+  uid: string,
+  bugId: string,
+): Promise<void> {
+  const tradeRef = doc(db, TRADES, tradeId);
+  const bugRef = doc(db, 'inventories', uid, 'bugs', bugId);
+
+  await runTransaction(db, async (tx) => {
+    const tradeSnap = await tx.get(tradeRef);
+    if (!tradeSnap.exists()) throw new Error('Trade not found');
+
+    const trade = tradeSnap.data() as Omit<Trade, 'id'>;
+
+    if (trade.toUid !== uid) {
+      throw new Error('Only the trade recipient can set their offered bug');
+    }
+    if (trade.status !== 'proposed') {
+      throw new Error(`Cannot modify a trade with status "${trade.status}"`);
+    }
+    if (trade.toBugId) {
+      throw new Error('Recipient has already chosen a bug for this trade');
+    }
+
+    const bugSnap = await tx.get(bugRef);
+    if (!bugSnap.exists()) throw new Error('Bug not found in your inventory');
+
+    const bugData = bugSnap.data() as Omit<BugInstance, 'id'>;
+    if (bugData.isTradeLocked) {
+      throw new Error('This bug is trade-locked and cannot be traded');
+    }
+    if (bugData.lockedByTradeId) {
+      throw new Error('This bug is already part of an active trade');
+    }
+
+    // Update trade with the recipient's offered bug
+    tx.update(tradeRef, {
+      toBugId: bugId,
+      updatedAt: serverTimestamp(),
+    });
+
+    // Lock the recipient's bug to this trade
+    tx.update(bugRef, {
+      lockedByTradeId: tradeId,
+      lockedAt: serverTimestamp(),
+    });
+  });
+
+  await appendTradeEvent(tradeRef, { type: 'to_bug_set', by: uid });
 }
 
 // ── Accept (delegates to Cloud Function) ─────────────────────────────
@@ -262,6 +344,11 @@ export async function setTradeAcceptFlag(
       updatedAt: serverTimestamp(),
     });
     throw new Error('This trade has expired');
+  }
+
+  // Both bugs must be selected before either side can accept
+  if (!data.toBugId) {
+    throw new Error('The recipient hasn\'t selected a bug yet');
   }
 
   const isFrom = data.fromUid === uid;

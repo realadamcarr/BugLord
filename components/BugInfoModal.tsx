@@ -2,6 +2,8 @@ import { ThemedText } from '@/components/ThemedText';
 import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { GbifSpeciesSuggestion, getSpeciesSuggestionsForBugType } from '@/src/services/gbifService';
+import { BugPrediction } from '@/src/types/bugPrediction';
 import { Bug, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
 import React, { useEffect, useState } from 'react';
 import {
@@ -19,6 +21,9 @@ import {
 
 const { width: screenWidth } = Dimensions.get('window');
 
+/** Stable empty array – avoids creating a new [] reference on every render. */
+const EMPTY_GBIF: GbifSpeciesSuggestion[] = [];
+
 interface BugInfoModalProps {
   visible: boolean;
   bug: Bug | null;
@@ -27,6 +32,10 @@ interface BugInfoModalProps {
   onRescan?: () => void;
   isNewCatch?: boolean;
   candidates?: IdentificationCandidate[];
+  /** Honest offline-model prediction from scanPipeline. */
+  prediction?: BugPrediction | null;
+  /** GBIF enrichment results from scanPipeline. */
+  scanGbifSuggestions?: GbifSpeciesSuggestion[];
 }
 
 export const BugInfoModal: React.FC<BugInfoModalProps> = ({
@@ -36,7 +45,9 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   onConfirm,
   onRescan,
   isNewCatch = false,
-  candidates = []
+  candidates = [],
+  prediction = null,
+  scanGbifSuggestions = EMPTY_GBIF,
 }) => {
   const { theme } = useTheme();
   const { collection, releaseBug } = useBugCollection();
@@ -47,6 +58,8 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   const [manualMode, setManualMode] = useState(false);
   const [manualOrder, setManualOrder] = useState('');
   const [manualFamily, setManualFamily] = useState('');
+  const [gbifSuggestions, setGbifSuggestions] = useState<GbifSpeciesSuggestion[]>([]);
+  const [gbifLoading, setGbifLoading] = useState(false);
 
   const styles = createStyles(theme);
 
@@ -58,6 +71,33 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
       setNickname('');
     }
   }, [bug, isNewCatch, visible]);
+
+  // Fetch GBIF real-world species suggestions when modal opens
+  // Only runs as fallback when scanPipeline didn't provide suggestions.
+  useEffect(() => {
+    if (!visible || !bug) {
+      setGbifSuggestions(prev => (prev.length === 0 ? prev : []));
+      return;
+    }
+    // Use pipeline-provided suggestions when available
+    if (scanGbifSuggestions.length > 0) {
+      setGbifSuggestions(scanGbifSuggestions);
+      return;
+    }
+    const bugType = bug.category || bug.name;
+    if (!bugType) return;
+
+    let cancelled = false;
+    setGbifLoading(true);
+    getSpeciesSuggestionsForBugType(bugType)
+      .then((results) => {
+        if (!cancelled) setGbifSuggestions(results);
+      })
+      .finally(() => {
+        if (!cancelled) setGbifLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [visible, bug, scanGbifSuggestions]);
 
   if (!bug) return null;
 
@@ -398,47 +438,96 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
             </View>
           </View>
 
-          {/* Candidates Selection */}
-          {isNewCatch && candidates.length > 0 && !showPartySwap && (
+          {/* ── Section A: Local BugLord Scan ── */}
+          {isNewCatch && !showPartySwap && (
             <View style={styles.section}>
-              {/* Identification engine badge */}
-              {(() => {
-                const sources = candidates.map(c => c.source).filter(Boolean);
-                const hasTflite = sources.some(s => /tflite/i.test(s ?? ''));
-                const hasINat = sources.some(s => /inat/i.test(s ?? ''));
-                const hasImageAnalysis = sources.some(s => /image|color|local/i.test(s ?? ''));
-                const engine = hasTflite && hasINat ? '🧠 TFLite + 🌿 iNaturalist'
-                  : hasTflite ? '🧠 On-Device TFLite Model'
-                  : hasINat ? '🌿 iNaturalist API'
-                  : hasImageAnalysis ? '🎨 Local Color Analysis'
-                  : '🤖 AI';
-                return (
-                  <View style={{ backgroundColor: hasTflite ? '#1B5E20' : hasINat ? '#0D47A1' : '#4A148C', borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10, marginBottom: 8, alignSelf: 'flex-start' }}>
-                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Identified by: {engine}</Text>
+              {prediction ? (
+                <>
+                  {/* Confidence badge */}
+                  <View style={{
+                    backgroundColor: prediction.accepted ? '#1B5E20' : '#BF360C',
+                    borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10,
+                    marginBottom: 8, alignSelf: 'flex-start',
+                  }}>
+                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
+                      {prediction.accepted
+                        ? `Confidence: ${(prediction.confidence * 100).toFixed(0)}%`
+                        : '⚠️ Low Confidence'}
+                    </Text>
                   </View>
-                );
-              })()}
-              <ThemedText style={styles.sectionTitle}>🤖 AI Suggestions</ThemedText>
-              {candidates.map((c) => (
+
+                  {prediction.accepted ? (
+                    <>
+                      <ThemedText style={styles.sectionTitle}>Local BugLord Scan</ThemedText>
+                      <ThemedText style={{ fontSize: 13, marginBottom: 6 }}>
+                        Detected: <Text style={{ fontWeight: '900' }}>{prediction.broadClass}</Text>
+                      </ThemedText>
+                      <ThemedText style={{ fontSize: 12, marginBottom: 6, color: theme.colors.textSecondary }}>
+                        Confidence: {(prediction.confidence * 100).toFixed(0)}%
+                      </ThemedText>
+                    </>
+                  ) : (
+                    <>
+                      <ThemedText style={styles.sectionTitle}>Local BugLord Scan</ThemedText>
+                      <ThemedText style={{ fontSize: 13, marginBottom: 4 }}>
+                        Couldn't confidently identify this bug.
+                      </ThemedText>
+                      <ThemedText style={{ fontSize: 12, marginBottom: 6, color: theme.colors.textSecondary }}>
+                        Try a closer photo, better lighting, or a simpler background.
+                      </ThemedText>
+                    </>
+                  )}
+
+                  {/* Score breakdown (debug) */}
+                  {prediction.scores.slice(0, 5).map((s, i) => (
+                    <View key={`${s.label}-${i}`} style={styles.candidateRow}>
+                      <ThemedText style={styles.candidateLabel}>{s.label}</ThemedText>
+                      <Text style={styles.candidateConfidence}>
+                        {(s.confidence * 100).toFixed(0)}%
+                      </Text>
+                    </View>
+                  ))}
+                </>
+              ) : candidates.length > 0 ? (
+                <>
+                  {/* Legacy path: show old-style candidates when prediction is not provided */}
+                  {(() => {
+                    const sources = candidates.map(c => c.source).filter(Boolean);
+                    const hasTflite = sources.some(s => /tflite/i.test(s ?? ''));
+                    const engine = hasTflite ? '🧠 On-Device TFLite Model' : '🤖 AI';
+                    return (
+                      <View style={{ backgroundColor: hasTflite ? '#1B5E20' : '#4A148C', borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10, marginBottom: 8, alignSelf: 'flex-start' }}>
+                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Identified by: {engine}</Text>
+                      </View>
+                    );
+                  })()}
+                  <ThemedText style={styles.sectionTitle}>🤖 AI Suggestions</ThemedText>
+                  {candidates.map((c, i) => (
+                    <TouchableOpacity
+                      key={`${c.label}-${i}`}
+                      style={[styles.candidateRow, selectedLabel === c.label && styles.selectedCandidate]}
+                      onPress={() => { setSelectedLabel(c.label); setManualMode(false); }}
+                    >
+                      <ThemedText style={styles.candidateLabel}>{c.label}</ThemedText>
+                      <Text style={styles.candidateConfidence}>
+                        {typeof c.confidence === 'number' ? `${Math.round(c.confidence * 100)}%` : ''}
+                      </Text>
+                      <Text style={styles.candidateSource}>{c.source}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </>
+              ) : null}
+
+              {/* "None of these" / manual override */}
+              {(prediction || candidates.length > 0) && (
                 <TouchableOpacity
-                  key={c.label}
-                  style={[styles.candidateRow, selectedLabel === c.label && styles.selectedCandidate]}
-                  onPress={() => { setSelectedLabel(c.label); setManualMode(false); }}
+                  style={[styles.candidateRow, manualMode && styles.selectedCandidate, { marginTop: 4 }]}
+                  onPress={() => { setManualMode(true); setSelectedLabel(null); }}
                 >
-                  <ThemedText style={styles.candidateLabel}>{c.label}</ThemedText>
-                  <Text style={styles.candidateConfidence}>
-                    {typeof c.confidence === 'number' ? `${Math.round(c.confidence * 100)}%` : ''}
-                  </Text>
-                  <Text style={styles.candidateSource}>{c.source}</Text>
+                  <ThemedText style={styles.candidateLabel}>None of these</ThemedText>
+                  <Text style={styles.candidateSource}>Manual</Text>
                 </TouchableOpacity>
-              ))}
-              <TouchableOpacity
-                style={[styles.candidateRow, manualMode && styles.selectedCandidate]}
-                onPress={() => { setManualMode(true); setSelectedLabel(null); }}
-              >
-                <ThemedText style={styles.candidateLabel}>None of these</ThemedText>
-                <Text style={styles.candidateSource}>Manual</Text>
-              </TouchableOpacity>
+              )}
             </View>
           )}
 
@@ -469,6 +558,91 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
             <ThemedText style={styles.sectionTitle}>🎭 Personality</ThemedText>
             <ThemedText style={styles.personalityText}>{bugPersonality}</ThemedText>
           </View>
+
+          {/* ── Section B: GBIF Enrichment (only when prediction accepted) ── */}
+          {isNewCatch && (prediction?.accepted || gbifSuggestions.length > 0 || gbifLoading) && (
+            <View style={styles.section}>
+              <View style={{ backgroundColor: '#0D47A1', borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10, marginBottom: 8, alignSelf: 'flex-start' }}>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>🌍 GBIF — Enrichment Only</Text>
+              </View>
+              <ThemedText style={styles.sectionTitle}>🌍 Possible Real-World Species</ThemedText>
+              <ThemedText style={{ fontSize: 11, color: theme.colors.textSecondary, marginBottom: 8 }}>
+                These species from the GBIF database match the broad class "{prediction?.broadClass ?? bug?.category ?? '?'}". 
+                GBIF did NOT identify your photo — it only provides taxonomy context.
+              </ThemedText>
+              {gbifLoading ? (
+                <ThemedText style={styles.gbifFallback}>Loading suggestions…</ThemedText>
+              ) : gbifSuggestions.length > 0 ? (
+                gbifSuggestions.map((s) => (
+                  <View key={s.speciesKey} style={styles.gbifRow}>
+                    <View style={[styles.gbifIcon]}>
+                      <Text style={{ fontSize: 18 }}>🐛</Text>
+                    </View>
+                    <View style={styles.gbifInfo}>
+                      <ThemedText style={styles.gbifCanonical} numberOfLines={1}>
+                        {s.canonicalName ?? s.scientificName}
+                      </ThemedText>
+                      <ThemedText style={styles.gbifScientific} numberOfLines={1}>
+                        {s.scientificName}
+                      </ThemedText>
+                      {(s.family || s.order) && (
+                        <ThemedText style={styles.gbifTaxonomy} numberOfLines={1}>
+                          {[s.order, s.family].filter(Boolean).join(' · ')}
+                        </ThemedText>
+                      )}
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <ThemedText style={styles.gbifFallback}>No GBIF matches found.</ThemedText>
+              )}
+            </View>
+          )}
+
+          {/* ── Section C: Fallback messaging ── */}
+          {isNewCatch && prediction && !prediction.accepted && gbifSuggestions.length === 0 && (
+            <View style={styles.section}>
+              <ThemedText style={styles.sectionTitle}>💡 What Happened?</ThemedText>
+              <ThemedText style={{ fontSize: 13, lineHeight: 20, color: theme.colors.textSecondary }}>
+                {prediction.confidence === 0
+                  ? 'The offline classifier is not loaded. Build with EAS dev-client (not Expo Go) to enable on-device TFLite inference.'
+                  : 'The model wasn\'t confident enough to classify this insect. Try a closer, well-lit photo of the bug. You can still add it to your collection via manual entry.'}
+              </ThemedText>
+            </View>
+          )}
+
+          {/* GBIF fallback for non-new-catch views */}
+          {!isNewCatch && (
+            <View style={styles.section}>
+              <ThemedText style={styles.sectionTitle}>🌍 Possible Real-World Matches</ThemedText>
+              {gbifLoading ? (
+                <ThemedText style={styles.gbifFallback}>Loading suggestions…</ThemedText>
+              ) : gbifSuggestions.length > 0 ? (
+                gbifSuggestions.map((s) => (
+                  <View key={s.speciesKey} style={styles.gbifRow}>
+                    <View style={[styles.gbifIcon]}>
+                      <Text style={{ fontSize: 18 }}>🐛</Text>
+                    </View>
+                    <View style={styles.gbifInfo}>
+                      <ThemedText style={styles.gbifCanonical} numberOfLines={1}>
+                        {s.canonicalName ?? s.scientificName}
+                      </ThemedText>
+                      <ThemedText style={styles.gbifScientific} numberOfLines={1}>
+                        {s.scientificName}
+                      </ThemedText>
+                      {(s.family || s.order) && (
+                        <ThemedText style={styles.gbifTaxonomy} numberOfLines={1}>
+                          {[s.order, s.family].filter(Boolean).join(' · ')}
+                        </ThemedText>
+                      )}
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <ThemedText style={styles.gbifFallback}>No GBIF matches found.</ThemedText>
+              )}
+            </View>
+          )}
 
           {/* Facts */}
           <View style={styles.section}>
@@ -939,5 +1113,51 @@ const createStyles = (theme: any) => StyleSheet.create({
     textAlign: 'right',
     textTransform: 'uppercase',
     letterSpacing: 0.2,
+  },
+  // GBIF suggestion styles
+  gbifRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginBottom: 8,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 6,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  gbifIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 6,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  gbifInfo: {
+    flex: 1,
+  },
+  gbifCanonical: {
+    fontSize: 13,
+    fontWeight: '800' as const,
+  },
+  gbifScientific: {
+    fontSize: 11,
+    fontStyle: 'italic' as const,
+    color: theme.colors.textSecondary,
+  },
+  gbifTaxonomy: {
+    fontSize: 10,
+    color: theme.colors.textSecondary,
+    marginTop: 2,
+  },
+  gbifFallback: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    fontStyle: 'italic' as const,
+    textAlign: 'center' as const,
+    paddingVertical: 12,
   },
 });

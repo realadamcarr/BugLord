@@ -54,6 +54,9 @@ export const BugCamera: React.FC<BugCameraProps> = ({
   if (!permission) {
     return (
       <SafeAreaView style={styles.permissionContainer}>
+        <TouchableOpacity style={styles.permissionClose} onPress={onClose}>
+          <Text style={styles.permissionCloseText}>✕</Text>
+        </TouchableOpacity>
         <Text style={styles.permissionText}>
           Camera permission is required to photograph bugs for your collection.
         </Text>
@@ -64,6 +67,9 @@ export const BugCamera: React.FC<BugCameraProps> = ({
   if (!permission.granted) {
     return (
       <SafeAreaView style={styles.permissionContainer}>
+        <TouchableOpacity style={styles.permissionClose} onPress={onClose}>
+          <Text style={styles.permissionCloseText}>✕</Text>
+        </TouchableOpacity>
         <Text style={styles.permissionText}>
           We need access to your camera to photograph bugs for your collection.
         </Text>
@@ -424,6 +430,25 @@ function createStyles(theme: any) {
       alignItems: 'center',
       backgroundColor: theme.colors.background,
       paddingHorizontal: 40,
+    },
+    permissionClose: {
+      position: 'absolute',
+      top: Platform.OS === 'ios' ? 16 : 12,
+      right: 16,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: theme.colors.card,
+      borderWidth: 2,
+      borderColor: theme.colors.border,
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 10,
+    },
+    permissionCloseText: {
+      fontSize: 20,
+      fontWeight: '900',
+      color: theme.colors.text,
     },
     permissionText: {
       textAlign: 'center',

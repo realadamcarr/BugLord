@@ -93,7 +93,7 @@ export interface WalkHistoryEntry {
 export const WALK_MODE_CONFIG = {
   // XP Conversion
   STEPS_PER_XP_GAIN: 20,        // TESTING: 20 steps per milestone (normally 1312)
-  XP_PER_MILESTONE: 5,           // 5 XP per milestone reached
+  XP_PER_MILESTONE: 15,          // 15 XP per milestone reached (3× base rate for walking)
   
   // Item Drop System  
   ITEM_DROP_CHANCE: 1.0,         // TESTING: 100% drop chance (normally 0.15)
@@ -150,6 +150,7 @@ export interface WalkModeReward {
 class WalkModeService {
   private state: WalkModeState = { ...DEFAULT_WALK_MODE_STATE };
   private isInitialized = false;
+  private _initPromise: Promise<void> | null = null;
   private pedometerSubscription: any = null;
   private rewardCallbacks: ((reward: WalkModeReward) => void)[] = [];
   private _subscriptionBaseline = 0;
@@ -169,7 +170,8 @@ class WalkModeService {
 
   /**
    * Initialize Walk Mode service
-   * Loads persisted state and starts step tracking
+   * Loads persisted state and starts step tracking.
+   * Uses a promise-based mutex so concurrent callers await the same init.
    */
   async initialize(): Promise<void> {
     if (this.isInitialized) {
@@ -177,6 +179,24 @@ class WalkModeService {
       return;
     }
 
+    // Concurrency guard: if an init is already in-flight, wait for it
+    if (this._initPromise) {
+      this.log('🚶 Walk Mode init already in-flight, waiting...');
+      return this._initPromise;
+    }
+
+    this._initPromise = this._doInitialize();
+    try {
+      await this._initPromise;
+    } finally {
+      this._initPromise = null;
+    }
+  }
+
+  /**
+   * Internal initializer — called exactly once by the mutex in initialize().
+   */
+  private async _doInitialize(): Promise<void> {
     try {
       this.log('🚶 Initializing Walk Mode service...');
       
@@ -218,12 +238,20 @@ class WalkModeService {
         this._subscriptionBaseline = 0;
         this._subscriptionBaselineSet = false;
         
-        // Re-subscribe to pedometer so steps are actually tracked
-        this.pedometerSubscription = PedometerAPI.watchStepCount((result) => {
-          if (result && typeof result.steps === 'number') {
-            this.handleStepUpdate(result.steps);
-          }
-        });
+        // Re-subscribe to pedometer so steps are actually tracked.
+        // Wrapped in try-catch: on some OEMs (OnePlus, Xiaomi) the pedometer
+        // may not be available immediately on cold start. Walk mode state
+        // must still be considered active so the UI reflects correctly;
+        // the subscription will be retried when the user opens the screen.
+        try {
+          this.pedometerSubscription = PedometerAPI.watchStepCount((result) => {
+            if (result && typeof result.steps === 'number') {
+              this.handleStepUpdate(result.steps);
+            }
+          });
+        } catch (pedometerErr) {
+          this.log('⚠️ Pedometer subscription failed during resume (will retry):', pedometerErr);
+        }
 
         // Re-register background fetch task in case OS unregistered it
         // (Android may drop tasks after app update or prolonged inactivity)
@@ -254,6 +282,28 @@ class WalkModeService {
     } catch (error) {
       this.log('❌ Failed to initialize Walk Mode:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Retry pedometer subscription if it wasn't set up during initialization.
+   * Call this when the walk mode screen is opened.
+   */
+  retryPedometerIfNeeded(): void {
+    if (!this.state.isActive || this.pedometerSubscription) return;
+
+    this.log('🔄 Retrying pedometer subscription...');
+    try {
+      this._subscriptionBaseline = 0;
+      this._subscriptionBaselineSet = false;
+      this.pedometerSubscription = PedometerAPI.watchStepCount((result) => {
+        if (result && typeof result.steps === 'number') {
+          this.handleStepUpdate(result.steps);
+        }
+      });
+      this.log('✅ Pedometer subscription established on retry');
+    } catch (err) {
+      this.log('⚠️ Pedometer retry also failed:', err);
     }
   }
 
@@ -446,8 +496,8 @@ class WalkModeService {
       }
 
       // ── 2. Also query Pedometer.getStepCountAsync as a fallback ──
-      //    Only attempt if the gap is > 5 seconds and < 7 days.
-      if (elapsed >= 5000 && elapsed <= 7 * 24 * 60 * 60 * 1000) {
+      //    Only on iOS — Android does not support getStepCountAsync.
+      if (Platform.OS !== 'android' && elapsed >= 5000 && elapsed <= 7 * 24 * 60 * 60 * 1000) {
         try {
           const result = await PedometerAPI.getStepCountAsync(lastUpdate, now);
           if (result && result.steps > 0) {
@@ -459,10 +509,9 @@ class WalkModeService {
             }
           }
         } catch (pedometerError) {
-          // getStepCountAsync can fail on Android without Health Connect / Google Fit
-          this.log('⚠️ Pedometer.getStepCountAsync failed (platform limitation):', pedometerError);
+          this.log('⚠️ Pedometer.getStepCountAsync failed:', pedometerError);
         }
-      } else if (recoveredSteps === 0) {
+      } else if (recoveredSteps === 0 && Platform.OS !== 'android') {
         this.log('⏭️ Skipping pedometer recovery (gap too short or too long):', Math.round(elapsed / 1000), 's');
       }
 
@@ -647,14 +696,20 @@ class WalkModeService {
 
   /**
    * Force save — called when app goes to background or is about to close.
-   * Flushes any pending state and writes immediately.
+   * Flushes any pending state and writes immediately and synchronously
+   * (as much as possible) to avoid data loss when the OS kills the process.
    */
   private forceSave(): void {
     if (this._saveTimer) {
       clearTimeout(this._saveTimer);
       this._saveTimer = null;
     }
-    this.saveState();
+    // Fire-and-forget but log failures. On aggressive OEMs (OnePlus, Xiaomi)
+    // the process may be killed before the write completes; the most critical
+    // state (isActive, activeBugId) is already saved from startTracking().
+    this.saveState().catch((err) => {
+      this.log('⚠️ forceSave failed:', err);
+    });
     this._lastSavedSteps = this.state.sessionSteps;
   }
 
@@ -731,9 +786,11 @@ class WalkModeService {
       if (savedData) {
         const parsedData = JSON.parse(savedData);
         this.state = { ...DEFAULT_WALK_MODE_STATE, ...parsedData };
-        this.log('📱 Loaded Walk Mode state:', this.state);
+        this.log('📱 Loaded Walk Mode state — isActive:', this.state.isActive,
+          'activeBugId:', this.state.activeBugId,
+          'totalSteps:', this.state.totalSteps);
       } else {
-        this.log('📱 No saved Walk Mode state, using defaults');
+        this.log('📱 No saved Walk Mode state found in AsyncStorage, using defaults');
       }
     } catch (error) {
       this.log('❌ Failed to load Walk Mode state:', error);
@@ -746,8 +803,11 @@ class WalkModeService {
    */
   private async saveState(): Promise<void> {
     try {
-      await AsyncStorage.setItem(WALK_MODE_STORAGE_KEY, JSON.stringify(this.state));
-      this.log('💾 Walk Mode state saved');
+      const payload = JSON.stringify(this.state);
+      await AsyncStorage.setItem(WALK_MODE_STORAGE_KEY, payload);
+      // Verification read in dev — uncomment for debugging:
+      // const verify = await AsyncStorage.getItem(WALK_MODE_STORAGE_KEY);
+      // if (verify !== payload) this.log('⚠️ Save verification FAILED');
     } catch (error) {
       this.log('❌ Failed to save Walk Mode state:', error);
     }

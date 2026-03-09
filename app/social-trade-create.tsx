@@ -1,11 +1,12 @@
 import { ThemedText } from '@/components/ThemedText';
+import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuthUser } from '@/hooks/useAuthUser';
-import { BugInstance } from '@/src/models/bugs';
-import { listMyBugs } from '@/src/services/inventoryService';
+import { syncLocalBugToFirestore } from '@/src/services/inventoryService';
 import { createTrade } from '@/src/services/tradeService';
+import { Bug } from '@/types/Bug';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -28,38 +29,40 @@ export default function TradeCreateScreen() {
   const { theme } = useTheme();
   const { user } = useAuthUser();
   const router = useRouter();
+  const { collection } = useBugCollection();
   const params = useLocalSearchParams<{ friendUid: string; friendName: string }>();
   const friendUid = params.friendUid;
   const friendName = params.friendName ?? 'Friend';
 
-  const [myBugs, setMyBugs] = useState<BugInstance[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedBug, setSelectedBug] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
-  useEffect(() => {
-    if (!user) return;
-    const unsub = listMyBugs(
-      user.uid,
-      (bugs) => {
-        // Filter out bugs already locked in a trade
-        setMyBugs(bugs.filter((b) => !b.lockedByTradeId));
-        setLoading(false);
-      },
-      () => setLoading(false),
-    );
-    return unsub;
-  }, [user]);
+  // ── All local bugs (collection + party), deduplicated ──────────
+  const allBugs = useMemo(() => {
+    const map = new Map<string, Bug>();
+    for (const b of collection.bugs) map.set(b.id, b);
+    for (const b of collection.party) {
+      if (b) map.set(b.id, b);
+    }
+    return Array.from(map.values());
+  }, [collection.bugs, collection.party]);
+
+  const selectedBugData = allBugs.find((b) => b.id === selectedBug);
 
   const handleCreateTrade = async () => {
     if (!user || !friendUid || !selectedBug) return;
+    const bug = allBugs.find((b) => b.id === selectedBug);
+    if (!bug) return;
 
     setCreating(true);
     try {
-      // For now, use the selected bug as both fromBugId and toBugId
-      // The recipient will choose their bug in the trade session
-      const tradeId = await createTrade(user.uid, friendUid, selectedBug, '');
-      Alert.alert('Trade Sent!', `Trade proposal sent to ${friendName}.`);
+      // Sync the selected local bug to Firestore so the trade system can
+      // reference it (idempotent — won't duplicate if already synced)
+      await syncLocalBugToFirestore(user.uid, bug);
+
+      // toBugId is empty — the recipient will choose their bug in the trade session
+      const tradeId = await createTrade(user.uid, friendUid, bug.id, '');
+      Alert.alert('Trade Sent!', `Trade proposal sent to ${friendName}. They'll choose their bug to offer.`);
       router.replace({
         pathname: '/social-trade-session' as any,
         params: { tradeId },
@@ -89,19 +92,32 @@ export default function TradeCreateScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.headerSection}>
-        <ThemedText style={styles.heading}>
-          Trade with {friendName}
-        </ThemedText>
+        <ThemedText style={styles.heading}>Trade with {friendName}</ThemedText>
         <ThemedText style={[styles.subheading, { color: theme.colors.textMuted }]}>
-          Select a bug to offer
+          Select a bug from your collection to offer
         </ThemedText>
       </View>
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={theme.colors.primary} />
+      {/* ── Selected summary ─────────────────────────────────── */}
+      {selectedBugData && (
+        <View style={[styles.selectedBanner, { backgroundColor: theme.colors.card, borderColor: theme.colors.primary }]}>
+          <ThemedText style={[styles.selectedLabel, { color: theme.colors.textMuted }]}>
+            YOUR OFFER
+          </ThemedText>
+          <View style={styles.selectedRow}>
+            <View style={[styles.rarityDot, { backgroundColor: RARITY_COLORS[selectedBugData.rarity] ?? '#9CA3AF' }]} />
+            <ThemedText style={styles.selectedName}>
+              {selectedBugData.nickname ?? selectedBugData.name}
+            </ThemedText>
+            <ThemedText style={[styles.selectedMeta, { color: theme.colors.textMuted }]}>
+              Lv.{selectedBugData.level} • {selectedBugData.rarity}
+            </ThemedText>
+          </View>
         </View>
-      ) : myBugs.length === 0 ? (
+      )}
+
+      {/* ── Bug list ─────────────────────────────────────────── */}
+      {allBugs.length === 0 ? (
         <View style={styles.center}>
           <ThemedText style={[styles.emptyText, { color: theme.colors.textMuted }]}>
             No bugs available for trading.
@@ -109,7 +125,7 @@ export default function TradeCreateScreen() {
         </View>
       ) : (
         <FlatList
-          data={myBugs}
+          data={allBugs}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => {
@@ -123,23 +139,19 @@ export default function TradeCreateScreen() {
                   {
                     backgroundColor: theme.colors.card,
                     borderColor: isSelected ? theme.colors.primary : theme.colors.border,
-                    borderWidth: isSelected ? 3 : 2,
+                    borderWidth: isSelected ? 3 : 1,
                   },
                 ]}
                 onPress={() => setSelectedBug(isSelected ? null : item.id)}
                 activeOpacity={0.7}
               >
                 <View style={styles.bugRow}>
-                  <View
-                    style={[styles.rarityDot, { backgroundColor: rarityColor }]}
-                  />
+                  <View style={[styles.rarityDot, { backgroundColor: rarityColor }]} />
                   <View style={styles.bugInfo}>
                     <ThemedText style={styles.bugName}>
-                      {item.nickname ?? item.speciesId}
+                      {item.nickname ?? item.name}
                     </ThemedText>
-                    <ThemedText
-                      style={[styles.bugMeta, { color: theme.colors.textMuted }]}
-                    >
+                    <ThemedText style={[styles.bugMeta, { color: theme.colors.textMuted }]}>
                       Lv.{item.level} • {item.rarity}
                     </ThemedText>
                   </View>
@@ -155,7 +167,7 @@ export default function TradeCreateScreen() {
         />
       )}
 
-      {/* ── Send button ────────────────────────────────────────── */}
+      {/* ── Send button ──────────────────────────────────────── */}
       <View style={styles.footer}>
         <TouchableOpacity
           style={[
@@ -171,7 +183,9 @@ export default function TradeCreateScreen() {
           {creating ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
-            <ThemedText style={styles.sendBtnText}>Send Trade Offer</ThemedText>
+            <ThemedText style={styles.sendBtnText}>
+              {selectedBug ? 'Send Trade Offer' : 'Select a bug to offer'}
+            </ThemedText>
           )}
         </TouchableOpacity>
       </View>
@@ -186,6 +200,22 @@ function createStyles(theme: any) {
     headerSection: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
     heading: { fontSize: 22, fontWeight: '900', letterSpacing: 0.5 },
     subheading: { fontSize: 14, marginTop: 4 },
+
+    // Selected banner
+    selectedBanner: {
+      marginHorizontal: 16,
+      marginTop: 8,
+      marginBottom: 4,
+      borderRadius: 12,
+      borderWidth: 2,
+      padding: 12,
+    },
+    selectedLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 6 },
+    selectedRow: { flexDirection: 'row', alignItems: 'center' },
+    selectedName: { fontSize: 16, fontWeight: '800', marginRight: 8 },
+    selectedMeta: { fontSize: 12, fontWeight: '600' },
+
+    // Bug list
     list: { padding: 16, paddingBottom: 120 },
     bugCard: {
       borderRadius: 12,
@@ -199,6 +229,8 @@ function createStyles(theme: any) {
     bugMeta: { fontSize: 12, marginTop: 2 },
     checkmark: { fontSize: 22, fontWeight: '900' },
     emptyText: { fontSize: 15, fontStyle: 'italic', textAlign: 'center' },
+
+    // Footer
     footer: {
       position: 'absolute',
       bottom: 0,

@@ -40,8 +40,11 @@ service cloud.firestore {
     // ── Friendships ─────────────────────────────────────────────────
 
     match /friendships/{friendshipId} {
+      // resource is null when the document doesn't exist (e.g. existence
+      // checks in sendFriendRequest).  Allow the get so the client
+      // receives exists()==false instead of a permission error.
       allow read: if isSignedIn()
-        && request.auth.uid in resource.data.uids;
+        && (resource == null || request.auth.uid in resource.data.uids);
 
       // Allow creation only when the authenticated user is one of the two UIDs.
       // The acceptFriendRequest transaction validates the pending request before
@@ -89,7 +92,18 @@ service cloud.firestore {
     // ── Inventories ─────────────────────────────────────────────────
 
     match /inventories/{uid}/bugs/{bugId} {
+      // Owner can always read and write
       allow read, write: if isMe(uid);
+
+      // Allow a trade participant to clear the trade lock on the other
+      // party's bug.  Only lockedByTradeId and lockedAt may be changed,
+      // and both must be set to null.
+      allow update: if isSignedIn()
+        && resource.data.lockedByTradeId != null
+        && request.resource.data.lockedByTradeId == null
+        && request.resource.data.lockedAt == null
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['lockedByTradeId', 'lockedAt']);
     }
 
     // ── Trades ──────────────────────────────────────────────────────
@@ -105,7 +119,8 @@ service cloud.firestore {
         && request.auth.uid == request.resource.data.fromUid
         && request.resource.data.status == 'proposed';
 
-      // Update rules: cancel (fromUid) or decline (toUid), never 'completed' from client
+      // Update rules for active trades (status must still be 'proposed')
+      // Client can never set status to 'completed' — only the Cloud Function does that
       allow update: if isSignedIn()
         && resource.data.status == 'proposed'
         && request.resource.data.status != 'completed'
@@ -117,6 +132,19 @@ service cloud.firestore {
           // toUid can decline
           (request.auth.uid == resource.data.toUid
             && request.resource.data.status == 'declined')
+          ||
+          // toUid can set their offered bug (toBugId) when it's still empty
+          (request.auth.uid == resource.data.toUid
+            && resource.data.toBugId == ''
+            && request.resource.data.toBugId != ''
+            && request.resource.data.status == 'proposed')
+          ||
+          // Either participant can toggle their accept flag
+          (request.auth.uid == resource.data.fromUid
+            && request.resource.data.status == 'proposed')
+          ||
+          (request.auth.uid == resource.data.toUid
+            && request.resource.data.status == 'proposed')
         );
 
       allow delete: if false;

@@ -17,6 +17,7 @@ export default function PlayerScreen() {
   const { collection } = useBugCollection();
   const [showCollection, setShowCollection] = useState(false);
   const [collectionInitialRarity, setCollectionInitialRarity] = useState<BugRarity | 'all'>('all');
+  const [collectionInitialBiome, setCollectionInitialBiome] = useState<string>('all');
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<ScanLogEntry[]>([]);
 
@@ -65,8 +66,9 @@ export default function PlayerScreen() {
     </View>
   );
 
-  const openCollection = (rarity: BugRarity | 'all' = 'all') => {
+  const openCollection = (rarity: BugRarity | 'all' = 'all', biome: string = 'all') => {
     setCollectionInitialRarity(rarity);
+    setCollectionInitialBiome(biome);
     setShowCollection(true);
   };
 
@@ -197,7 +199,12 @@ export default function PlayerScreen() {
           
           <View style={styles.biomeGrid}>
             {Object.entries(BIOME_CONFIG).map(([biome, config]) => (
-              <View key={biome} style={styles.biomeCard}>
+              <TouchableOpacity
+                key={biome}
+                style={styles.biomeCard}
+                onPress={() => openCollection('all', biome)}
+                activeOpacity={0.7}
+              >
                 <Text style={styles.biomeEmoji}>{config.emoji}</Text>
                 <ThemedText style={styles.biomeName}>
                   {biome.charAt(0).toUpperCase() + biome.slice(1)}
@@ -205,7 +212,7 @@ export default function PlayerScreen() {
                 <ThemedText style={styles.biomeCount}>
                   {biomeStats[biome] || 0} bugs
                 </ThemedText>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         </View>
@@ -280,6 +287,7 @@ export default function PlayerScreen() {
           <CollectionScreen
             onClose={() => setShowCollection(false)}
             initialRarityFilter={collectionInitialRarity}
+            initialBiomeFilter={collectionInitialBiome as any}
           />
         </View>
       </Modal>

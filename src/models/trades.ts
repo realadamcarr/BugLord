@@ -12,7 +12,9 @@ export interface Trade {
   id: string;
   fromUid: string;
   toUid: string;
+  /** Bug offered by the trade initiator */
   fromBugId: string;
+  /** Bug offered by the recipient — empty string until they choose */
   toBugId: string;
   status: TradeStatus;
   /** Both parties must accept for the trade to complete */
