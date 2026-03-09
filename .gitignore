@@ -21,6 +21,7 @@ training/
 **/training/**
 !training/yolov5_insect_train.py
 data/
+!backend/data/
 dataset/
 datasets/
 inaturalist/
