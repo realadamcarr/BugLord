@@ -115,12 +115,11 @@ async def predict(
             break  # raw_preds are sorted by confidence desc
 
     # When the insect filter had to *fall back* (top-1 wasn't an insect),
-    # the fallback insect is likely just noise among the model's low-ranked
-    # predictions.  Require a higher confidence floor (10 %) so we don't
-    # display a random insect species when the model clearly saw something
-    # else.  Example: model says "bird 25 %" and we'd otherwise pick
-    # "damselfly 5 %" which is near-random.
-    FALLBACK_INSECT_MIN_CONFIDENCE = 0.10
+    # the fallback insect may be noise.  We now search top-20 predictions
+    # (up from top-5) so the correct insect species is more likely to appear.
+    # A 2 % floor is still well above uniform random (0.01 % for 10k classes)
+    # but low enough that valid insects deep in the ranking get through.
+    FALLBACK_INSECT_MIN_CONFIDENCE = 0.02
 
     is_fallback = insect_pred is not None and insect_pred is not raw_preds[0]
     if is_fallback and insect_pred.score < FALLBACK_INSECT_MIN_CONFIDENCE:

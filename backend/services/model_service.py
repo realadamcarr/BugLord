@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # HuggingFace-hosted EVA-02 Large, fine-tuned on iNaturalist-2021 (10k classes)
 MODEL_ID: str = "hf-hub:timm/eva02_large_patch14_clip_336.merged2b_ft_inat21"
-TOP_K_DEFAULT: int = 5
+TOP_K_DEFAULT: int = 20
 
 # Preprocessing constants for the CLIP-based EVA-02 model
 IMAGE_SIZE: int = 336
