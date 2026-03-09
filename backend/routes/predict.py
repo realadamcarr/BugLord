@@ -74,20 +74,25 @@ async def predict(
     top_predictions = build_top_predictions(raw_preds)
 
     # ── 4. Apply confidence thresholds ───────────────────────────────
+    #
+    # The EVA-02 model classifies into ~10 000 iNat21 species.  A top-1
+    # confidence of 20 %+ is a strong signal (random baseline = 0.01 %).
+    # Thresholds are deliberately low compared to a 6-class head.
+    #
     confidence = prediction.confidence
 
-    #  < 0.35  → reject (success=false, no usable prediction)
-    if confidence < 0.35:
+    #  < 0.05  → reject (practically random)
+    if confidence < 0.05:
         return PredictionResponse(
             success=False,
-            prediction=None,
+            prediction=prediction,          # still include for debug / top-N
             top_predictions=top_predictions,
             low_confidence=True,
             message="Uncertain scan, try another image",
         )
 
-    # 0.35–0.59 → accept with low-confidence warning
-    if confidence < 0.60:
+    # 0.05–0.19 → accept with low-confidence warning
+    if confidence < 0.20:
         return PredictionResponse(
             success=True,
             prediction=prediction,
@@ -96,7 +101,7 @@ async def predict(
             message="Low confidence — result may be inaccurate",
         )
 
-    # >= 0.60  → normal success
+    # >= 0.20  → normal success
     return PredictionResponse(
         success=True,
         prediction=prediction,

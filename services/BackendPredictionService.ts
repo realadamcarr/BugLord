@@ -15,7 +15,9 @@ import { BugCategory } from '@/constants/bugSprites';
 /** Base URL of the FastAPI backend. Change for production / staging. */
 // const API_BASE_URL = 'http://10.0.2.2:8000'; // Android emulator → host
 // const API_BASE_URL = 'http://localhost:8000';  // iOS simulator / web
-const API_BASE_URL = 'http://10.59.130.194:8000'; // Physical device → PC Wi-Fi IP
+// const API_BASE_URL = 'http://10.59.130.194:8000'; // Physical device → PC Wi-Fi IP
+// const API_BASE_URL = 'https://api.buglord.app'; // Production HTTPS (needs domain + cert)
+const API_BASE_URL = 'http://37.27.8.1'; // Hetzner VPS via Nginx
 
 const PREDICT_ENDPOINT = `${API_BASE_URL}/api/predict`;
 

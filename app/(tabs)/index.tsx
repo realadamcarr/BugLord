@@ -357,14 +357,23 @@ export default function CaptureScreen() {
       let pipelineGbif: GbifSpeciesSuggestion[] = [];
 
       // ── PRIORITY 1: FastAPI backend (EVA-02 iNat21 model) ──────────
+      // Always try the backend first — even for live-scan confirmed results,
+      // the backend provides species-level precision the on-device model can't.
       let backendHandled = false;
-      if (!preConfirmedResult) {
-        try {
-          console.log('🌐 Trying FastAPI backend prediction…');
-          const backendResult = await predictInsect(analysisPhoto);
-          console.log('🌐 Backend result:', backendResult);
+      try {
+        console.log('🌐 Trying FastAPI backend prediction…');
+        const backendResult = await predictInsect(analysisPhoto);
+        console.log('🌐 Backend result:', backendResult);
 
-          if (backendResult.confidence > 0) {
+        // Accept any result where the backend returned a real prediction
+        // (confidence > 0 means the model produced a usable output).
+        // Also accept when topPredictions are available — even if the main
+        // prediction was below threshold, the species-level candidates are
+        // far more informative than the 6-class on-device model.
+        const hasMainPrediction = backendResult.confidence > 0;
+        const hasTopPredictions = backendResult.topPredictions && backendResult.topPredictions.length > 0;
+
+        if (hasMainPrediction) {
             // Use the display label from the backend (e.g. "Monarch Butterfly")
             const label = backendResult.displayLabel || backendResult.speciesName || 'Unknown Bug';
             mlCandidates = [{
@@ -372,29 +381,49 @@ export default function CaptureScreen() {
               confidence: backendResult.confidence,
               source: 'backend-eva02',
             }];
-
-            // If the backend returned top predictions, add them as runner-ups
-            if (backendResult.topPredictions && backendResult.topPredictions.length > 0) {
-              backendResult.topPredictions.slice(1, 5).forEach(t => {
-                if (t.speciesName !== backendResult.speciesName) {
-                  mlCandidates.push({
-                    label: t.mappedBuglordType
-                      ? t.mappedBuglordType.charAt(0).toUpperCase() + t.mappedBuglordType.slice(1)
-                      : t.speciesName,
-                    confidence: t.confidence,
-                    source: 'backend-eva02',
-                  });
-                }
-              });
-            }
-
             backendHandled = true;
+        } else if (hasTopPredictions) {
+            // Main prediction was below threshold, but we still have top-N species.
+            // Use the best one that maps to a BugLord category, or the overall best.
+            const topPreds = backendResult.topPredictions!;
+            const bestMapped = topPreds.find(t => t.mappedBuglordType);
+            const best = bestMapped || topPreds[0];
+            const label = best.mappedBuglordType
+              ? best.mappedBuglordType.charAt(0).toUpperCase() + best.mappedBuglordType.slice(1)
+              : best.speciesName;
+            mlCandidates = [{
+              label,
+              confidence: best.confidence,
+              source: 'backend-eva02',
+            }];
+            backendHandled = true;
+            console.log('🌐 Using backend top prediction (main was below threshold):', mlCandidates[0]);
+        }
+
+        // Add runner-up candidates from topPredictions
+        if (backendHandled && hasTopPredictions) {
+            const topPreds = backendResult.topPredictions!;
+            const primaryLabel = mlCandidates[0]?.label;
+            topPreds.slice(0, 5).forEach(t => {
+              const candidateLabel = t.mappedBuglordType
+                ? t.mappedBuglordType.charAt(0).toUpperCase() + t.mappedBuglordType.slice(1)
+                : t.speciesName;
+              if (candidateLabel !== primaryLabel) {
+                mlCandidates.push({
+                  label: candidateLabel,
+                  confidence: t.confidence,
+                  source: 'backend-eva02',
+                });
+              }
+            });
+        }
+
+        if (backendHandled) {
             console.log('✅ Backend identification accepted:', mlCandidates[0]);
           }
         } catch (backendErr) {
           console.warn('⚠️ Backend prediction failed, falling back to local pipeline:', backendErr);
         }
-      }
 
       if (backendHandled) {
         // Backend handled it — skip all other pipelines
@@ -744,10 +773,11 @@ export default function CaptureScreen() {
 
   /** Called when user taps "Capture!" after live scan lock */
   const handleLiveScanConfirm = async (photoUri: string, label: string, confidence: number) => {
+    console.log('🎯 Live scan confirmed — sending to backend for species-level ID…', { label, confidence });
     setShowCamera(false);
     setCapturedPhoto(photoUri);
 
-    // Pass the already-confirmed ML result to skip redundant re-classification
+    // Backend is tried first inside processAndClassify; preConfirmedResult is the local fallback.
     await processAndClassify(photoUri, photoUri, { label, confidence });
   };
 
