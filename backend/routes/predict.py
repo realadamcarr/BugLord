@@ -79,10 +79,62 @@ async def predict(
     prediction = build_prediction_result(raw_preds)
     top_predictions = build_top_predictions(raw_preds)
 
-    # ── 5. Apply iNat enrichment ─────────────────────────────────────
+    # ── 5. Insect-only filtering ────────────────────────────────────
+    # The EVA-02 iNat21 model covers ~10 000 species across ALL taxa
+    # (birds, mammals, plants, fungi, etc.).  BugLord only cares about
+    # insects and arachnids.  We walk through raw_preds and pick the
+    # highest-confidence prediction that maps to a BugLord category via
+    # iNat taxonomy.  If none of the top-N predictions are insects, we
+    # reject the scan.
+
+    def _is_insect(label: str) -> bool:
+        """Return True if *label* maps to any BugLord category."""
+        enr = enrichments.get(label)
+        if enr and enr.matched and enr.buglord_category:
+            return True
+        return False
+
+    # Find the best insect prediction.
+    insect_pred = None
+    for rp in raw_preds:
+        if _is_insect(rp.label):
+            insect_pred = rp
+            break  # raw_preds are sorted by confidence desc
+
+    if insect_pred is None:
+        # No insect/arachnid found in top-N predictions — reject.
+        logger.info(
+            "No insect detected among top-%d predictions (top-1 was '%s')",
+            len(raw_preds), raw_preds[0].label if raw_preds else "?",
+        )
+        return PredictionResponse(
+            success=False,
+            prediction=prediction,          # original for debug
+            top_predictions=top_predictions,
+            low_confidence=True,
+            message="No insect detected — try scanning a bug!",
+        )
+
+    # If the top-1 prediction wasn't an insect, rebuild using the best
+    # insect prediction instead.
+    if insect_pred is not raw_preds[0]:
+        logger.info(
+            "Top-1 '%s' is not an insect; falling back to '%s' (%.2f%%)",
+            raw_preds[0].label, insect_pred.label, insect_pred.score * 100,
+        )
+        # Rebuild prediction result with the insect as primary.
+        prediction = build_prediction_result([insect_pred] + [
+            p for p in raw_preds if p is not insect_pred
+        ])
+
+    # Rebuild top_predictions from insect-only raw predictions.
+    insect_raw_preds = [rp for rp in raw_preds if _is_insect(rp.label)]
+    top_predictions = build_top_predictions(insect_raw_preds)
+
+    # ── 5a. Apply iNat enrichment ────────────────────────────────────
     # Override keyword-based mapping with taxonomy-based mapping when
     # iNat returned a match and the keyword map failed.
-    top_label = raw_preds[0].label if raw_preds else ""
+    top_label = insect_pred.label if insect_pred else ""
     top_enrichment = enrichments.get(top_label)
 
     if top_enrichment and top_enrichment.matched:
