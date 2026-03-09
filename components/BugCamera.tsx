@@ -23,6 +23,8 @@ interface BugCameraProps {
   onClassifyPhoto?: (photoUri: string) => Promise<{ label: string; confidence: number } | null>;
   /** Called when the user confirms a live scan result */
   onLiveScanConfirm?: (photoUri: string, label: string, confidence: number) => void;
+  /** Optional: called after local ML result to get a refined species-level label from the backend */
+  onRefineScanLabel?: (photoUri: string) => Promise<{ label: string; confidence: number } | null>;
 }
 
 export const BugCamera: React.FC<BugCameraProps> = ({
@@ -31,6 +33,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
   mode = 'photo',
   onClassifyPhoto,
   onLiveScanConfirm,
+  onRefineScanLabel,
 }) => {
   const { theme } = useTheme();
   const facing: CameraType = 'back';
@@ -47,6 +50,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
   const [scanPhotoUri, setScanPhotoUri] = useState<string | null>(null);
   const [scanLabel, setScanLabel] = useState<string | null>(null);
   const [scanConfidence, setScanConfidence] = useState<number>(0);
+  const [isRefiningLabel, setIsRefiningLabel] = useState(false);
 
   const styles = createStyles(theme);
 
@@ -175,6 +179,21 @@ export const BugCamera: React.FC<BugCameraProps> = ({
         setScanLabel(result.label);
         setScanConfidence(result.confidence);
         setLiveScanState('result');
+
+        // Fire off backend refinement in background — updates label when ready
+        if (onRefineScanLabel && photo?.uri) {
+          setIsRefiningLabel(true);
+          onRefineScanLabel(photo.uri)
+            .then((refined) => {
+              if (refined?.label) {
+                console.log(`🎯 Backend refined: "${result.label}" → "${refined.label}" (${Math.round(refined.confidence * 100)}%)`);
+                setScanLabel(refined.label);
+                setScanConfidence(refined.confidence);
+              }
+            })
+            .catch((err) => console.warn('⚠️ Backend refinement failed (keeping local):', err))
+            .finally(() => setIsRefiningLabel(false));
+        }
       } else {
         setLiveScanState('idle');
         Alert.alert(
@@ -236,6 +255,12 @@ export const BugCamera: React.FC<BugCameraProps> = ({
             <View style={styles.resultCard}>
               <Text style={styles.resultEmoji}>🐛</Text>
               <Text style={styles.resultLabel}>{scanLabel}</Text>
+              {isRefiningLabel && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                  <ActivityIndicator size="small" color={theme.colors.primary} style={{ marginRight: 6 }} />
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>Identifying species…</Text>
+                </View>
+              )}
 
               {/* Confidence bar */}
               <View style={styles.confidenceRow}>

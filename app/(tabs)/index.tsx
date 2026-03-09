@@ -776,6 +776,36 @@ export default function CaptureScreen() {
     return { label: 'Unknown Bug', confidence: 0.15 };
   }, [mlReady]);
 
+  /** Called in background after local ML result — sends photo to backend for species-level ID */
+  const handleRefineScanLabel = useCallback(async (photoUri: string): Promise<{ label: string; confidence: number } | null> => {
+    try {
+      const backendResult = await predictInsect(photoUri);
+      if (backendResult.confidence > 0) {
+        const label = backendResult.commonName
+          || backendResult.displayLabel
+          || backendResult.speciesName
+          || null;
+        if (label) {
+          return { label, confidence: backendResult.confidence };
+        }
+      }
+      // Check top predictions as fallback
+      if (backendResult.topPredictions?.length) {
+        const best = backendResult.topPredictions.find(t => t.mappedBuglordType) || backendResult.topPredictions[0];
+        const label = (best as any).commonName
+          || (best.mappedBuglordType
+            ? best.mappedBuglordType.charAt(0).toUpperCase() + best.mappedBuglordType.slice(1)
+            : best.speciesName);
+        if (label) {
+          return { label, confidence: best.confidence };
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ Backend refine failed:', err);
+    }
+    return null;
+  }, []);
+
   /** Called when user taps "Capture!" after live scan lock */
   const handleLiveScanConfirm = async (photoUri: string, label: string, confidence: number) => {
     console.log('🎯 Live scan confirmed — sending to backend for species-level ID…', { label, confidence });
@@ -1051,6 +1081,7 @@ export default function CaptureScreen() {
           mode={scanMode}
           onClassifyPhoto={handleClassifyPhoto}
           onLiveScanConfirm={handleLiveScanConfirm}
+          onRefineScanLabel={handleRefineScanLabel}
         />
       </Modal>
 
