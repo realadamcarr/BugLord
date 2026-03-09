@@ -66,6 +66,21 @@ class PredictionResult(BaseModel):
         description="Human-friendly label shown in the React Native UI.",
         examples=["Monarch Butterfly (92%)"],
     )
+    common_name: str = Field(
+        default="",
+        alias="commonName",
+        description=(
+            "English common name from iNaturalist (e.g. 'Small Tortoiseshell'). "
+            "Empty string if iNat look-up failed or species not found."
+        ),
+        examples=["Small Tortoiseshell"],
+    )
+    inat_photo_url: str = Field(
+        default="",
+        alias="inatPhotoUrl",
+        description="Small square photo URL from iNaturalist for reference.",
+        examples=["https://inaturalist-open-data.s3.amazonaws.com/photos/12345/square.jpg"],
+    )
 
     model_config = {"populate_by_name": True}
 
@@ -74,7 +89,7 @@ class PredictionResult(BaseModel):
 # Debugging — lightweight summary of each top-K prediction
 # ---------------------------------------------------------------------------
 class TopPredictionItem(BaseModel):
-    """Minimal prediction info for a single top-K entry (debugging use)."""
+    """Minimal prediction info for a single top-K entry."""
 
     species_name: str = Field(
         ...,
@@ -96,6 +111,12 @@ class TopPredictionItem(BaseModel):
             "BugLord category this prediction maps to, or null if unmapped."
         ),
         examples=["butterfly"],
+    )
+    common_name: str = Field(
+        default="",
+        alias="commonName",
+        description="English common name from iNaturalist.",
+        examples=["Small Tortoiseshell"],
     )
 
     model_config = {"populate_by_name": True}

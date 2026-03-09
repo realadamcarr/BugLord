@@ -374,8 +374,11 @@ export default function CaptureScreen() {
         const hasTopPredictions = backendResult.topPredictions && backendResult.topPredictions.length > 0;
 
         if (hasMainPrediction) {
-            // Use the display label from the backend (e.g. "Monarch Butterfly")
-            const label = backendResult.displayLabel || backendResult.speciesName || 'Unknown Bug';
+            // Prefer common name from iNaturalist, then display label, then species name.
+            const label = backendResult.commonName
+              || backendResult.displayLabel
+              || backendResult.speciesName
+              || 'Unknown Bug';
             mlCandidates = [{
               label,
               confidence: backendResult.confidence,
@@ -388,9 +391,10 @@ export default function CaptureScreen() {
             const topPreds = backendResult.topPredictions!;
             const bestMapped = topPreds.find(t => t.mappedBuglordType);
             const best = bestMapped || topPreds[0];
-            const label = best.mappedBuglordType
-              ? best.mappedBuglordType.charAt(0).toUpperCase() + best.mappedBuglordType.slice(1)
-              : best.speciesName;
+            const label = (best as any).commonName
+              || (best.mappedBuglordType
+                ? best.mappedBuglordType.charAt(0).toUpperCase() + best.mappedBuglordType.slice(1)
+                : best.speciesName);
             mlCandidates = [{
               label,
               confidence: best.confidence,
@@ -405,9 +409,10 @@ export default function CaptureScreen() {
             const topPreds = backendResult.topPredictions!;
             const primaryLabel = mlCandidates[0]?.label;
             topPreds.slice(0, 5).forEach(t => {
-              const candidateLabel = t.mappedBuglordType
-                ? t.mappedBuglordType.charAt(0).toUpperCase() + t.mappedBuglordType.slice(1)
-                : t.speciesName;
+              const candidateLabel = (t as any).commonName
+                || (t.mappedBuglordType
+                  ? t.mappedBuglordType.charAt(0).toUpperCase() + t.mappedBuglordType.slice(1)
+                  : t.speciesName);
               if (candidateLabel !== primaryLabel) {
                 mlCandidates.push({
                   label: candidateLabel,

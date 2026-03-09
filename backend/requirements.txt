@@ -12,3 +12,6 @@ torchvision
 timm                            # Hugging Face image-classification models
 huggingface_hub                 # model downloads & caching
 Pillow                          # image decoding
+
+# --- External APIs ---
+httpx                           # async HTTP client for iNaturalist enrichment

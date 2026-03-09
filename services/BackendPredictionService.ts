@@ -37,6 +37,8 @@ export interface BackendPrediction {
   isInPrimaryCollection: boolean;
   fallbackCategory: string;
   displayLabel: string;
+  commonName?: string;
+  inatPhotoUrl?: string;
 }
 
 /** Full JSON envelope returned by POST /api/predict. */
@@ -47,6 +49,7 @@ interface BackendResponse {
     speciesName: string;
     confidence: number;
     mappedBuglordType: BugCategory | null;
+    commonName?: string;
   }[];
   lowConfidence?: boolean;
   message?: string;
@@ -64,16 +67,18 @@ export interface PredictionResult {
   confidence: number;
   /** Whether the species maps to one of the 6 primary BugLord types. */
   isInPrimaryCollection: boolean;
-  /** Backend display label (e.g. "Butterfly" or "Unknown Bug"). */
+  /** Backend display label (e.g. "Small Tortoiseshell" or "Unknown Bug"). */
   displayLabel: string;
-  /** True when confidence is 0.35–0.59 — model is uncertain. */
+  /** English common name from iNaturalist (e.g. "Small Tortoiseshell"). */
+  commonName: string;
+  /** True when confidence is low — model is uncertain. */
   lowConfidence: boolean;
   /** Optional message from the backend (e.g. "Uncertain scan"). */
   message?: string;
   /** Raw backend prediction for advanced / debug usage. */
   raw: BackendPrediction | null;
   /** Top-N predictions from backend for runner-up display. */
-  topPredictions: { speciesName: string; confidence: number; mappedBuglordType: BugCategory | null }[];
+  topPredictions: { speciesName: string; confidence: number; mappedBuglordType: BugCategory | null; commonName?: string }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +205,7 @@ export async function predictInsect(imageUri: string): Promise<PredictionResult>
     confidence: pred?.confidence ?? 0,
     isInPrimaryCollection: pred?.isInPrimaryCollection ?? false,
     displayLabel: pred?.displayLabel ?? 'Unknown Bug',
+    commonName: pred?.commonName ?? '',
     lowConfidence: data.lowConfidence ?? false,
     message: data.message,
     raw: pred,
