@@ -743,52 +743,12 @@ export default function CaptureScreen() {
 
   // ─── Live Scan Callbacks ──────────────────────────────────────
   /** Classify a single photo for live scan.
-   *  Priority: New bugClassifier (honest) → legacy TFLite → Unknown.
+   *  Priority: Backend (EVA-02 + iNat) → local on-device model → Unknown.
    *  Returns null ONLY when nothing at all is ready yet. */
-  const handleClassifyPhoto = useCallback(async (photoUri: string): Promise<{ label: string; confidence: number } | null> => {
-    console.log(`🔍 handleClassifyPhoto — newClassifierReady: ${isClassifierReady()}, mlReady: ${mlReady}`);
+  const handleClassifyPhoto = useCallback(async (photoUri: string): Promise<{ label: string; confidence: number; source: 'local' | 'backend' } | null> => {
+    console.log('🔍 handleClassifyPhoto — calling backend for species-level ID…');
 
-    // 1. New honest classifier — preferred path
-    if (isClassifierReady()) {
-      try {
-        const scores = await classifyBugImage(photoUri);
-        if (scores.length > 0 && scores[0].confidence >= 0.4) {
-          const mapped = YOLO_SPECIES_MAP[scores[0].label] ?? scores[0].label;
-          return { label: mapped, confidence: scores[0].confidence };
-        }
-        // Low confidence — fall through
-        if (scores.length > 0) {
-          const mapped = YOLO_SPECIES_MAP[scores[0].label] ?? scores[0].label;
-          return { label: mapped, confidence: scores[0].confidence };
-        }
-      } catch (err) {
-        console.warn('New classifier live scan error:', err);
-      }
-    }
-
-    // 2. Legacy TFLite fallback
-    if (mlReady && onDeviceClassifier.isReady() && onDeviceClassifier.isUsingRealModel()) {
-      try {
-        const mlInput = await mlPreprocessingService.preprocessForInference(photoUri, {
-          targetSize: 224,
-          quality: 0.7,
-        });
-        const candidates = await onDeviceClassifier.classifyImage(mlInput, 3);
-        const real = candidates.filter((c: any) => c.source !== 'stub');
-        if (real.length > 0 && real[0].label) {
-          const mappedLabel = YOLO_SPECIES_MAP[real[0].label] ?? real[0].label;
-          return { label: mappedLabel, confidence: real[0].confidence };
-        }
-      } catch (err) {
-        console.warn('TFLite live scan error:', err);
-      }
-    }
-
-    return { label: 'Unknown Bug', confidence: 0.15 };
-  }, [mlReady]);
-
-  /** Called in background after local ML result — sends photo to backend for species-level ID */
-  const handleRefineScanLabel = useCallback(async (photoUri: string): Promise<{ label: string; confidence: number } | null> => {
+    // 1. Backend (EVA-02 iNat21 model) — preferred path
     try {
       const backendResult = await predictInsect(photoUri);
       if (backendResult.confidence > 0) {
@@ -797,7 +757,8 @@ export default function CaptureScreen() {
           || backendResult.speciesName
           || null;
         if (label) {
-          return { label, confidence: backendResult.confidence };
+          console.log(`✅ Backend live scan: "${label}" (${Math.round(backendResult.confidence * 100)}%)`);
+          return { label, confidence: backendResult.confidence, source: 'backend' };
         }
       }
       // Check top predictions as fallback
@@ -808,14 +769,47 @@ export default function CaptureScreen() {
             ? best.mappedBuglordType.charAt(0).toUpperCase() + best.mappedBuglordType.slice(1)
             : best.speciesName);
         if (label) {
-          return { label, confidence: best.confidence };
+          console.log(`✅ Backend live scan (top prediction): "${label}" (${Math.round(best.confidence * 100)}%)`);
+          return { label, confidence: best.confidence, source: 'backend' };
         }
       }
     } catch (err) {
-      console.warn('⚠️ Backend refine failed:', err);
+      console.warn('⚠️ Backend live scan failed, falling back to local model:', err);
     }
-    return null;
-  }, []);
+
+    // 2. Local on-device classifier fallback
+    if (isClassifierReady()) {
+      try {
+        const scores = await classifyBugImage(photoUri);
+        if (scores.length > 0) {
+          const mapped = YOLO_SPECIES_MAP[scores[0].label] ?? scores[0].label;
+          return { label: mapped, confidence: scores[0].confidence, source: 'local' };
+        }
+      } catch (err) {
+        console.warn('Local classifier live scan error:', err);
+      }
+    }
+
+    // 3. Legacy TFLite fallback
+    if (mlReady && onDeviceClassifier.isReady() && onDeviceClassifier.isUsingRealModel()) {
+      try {
+        const mlInput = await mlPreprocessingService.preprocessForInference(photoUri, {
+          targetSize: 224,
+          quality: 0.7,
+        });
+        const candidates = await onDeviceClassifier.classifyImage(mlInput, 3);
+        const real = candidates.filter((c: any) => c.source !== 'stub');
+        if (real.length > 0 && real[0].label) {
+          const mappedLabel = YOLO_SPECIES_MAP[real[0].label] ?? real[0].label;
+          return { label: mappedLabel, confidence: real[0].confidence, source: 'local' };
+        }
+      } catch (err) {
+        console.warn('TFLite live scan error:', err);
+      }
+    }
+
+    return { label: 'Unknown Bug', confidence: 0.15, source: 'local' };
+  }, [mlReady]);
 
   /** Called when user taps "Capture!" after live scan lock */
   const handleLiveScanConfirm = async (photoUri: string, label: string, confidence: number, source: 'local' | 'backend' = 'local') => {
@@ -1092,7 +1086,6 @@ export default function CaptureScreen() {
           mode={scanMode}
           onClassifyPhoto={handleClassifyPhoto}
           onLiveScanConfirm={handleLiveScanConfirm}
-          onRefineScanLabel={handleRefineScanLabel}
         />
       </Modal>
 

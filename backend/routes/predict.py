@@ -19,7 +19,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from schemas.prediction import PredictionResponse
-from services.inat_service import enrich_predictions
+from services.inat_service import enrich_predictions, qualify_common_name
 from services.mapping_service import (build_prediction_result,
                                       build_top_predictions)
 from services.model_service import predict_image_bytes
@@ -111,6 +111,20 @@ async def predict(
         if prediction.mapped_buglord_type and top_enrichment.common_name:
             prediction.display_label = top_enrichment.common_name
 
+    # ── 5b. Qualify common names with type suffix ────────────────────
+    # Ensures names like "Monarch" become "Monarch Butterfly", etc.
+    ancestors = top_enrichment.ancestors if top_enrichment else None
+    if prediction.common_name and prediction.mapped_buglord_type:
+        qualified = qualify_common_name(
+            prediction.common_name,
+            prediction.mapped_buglord_type,
+            ancestors,
+        )
+        prediction.common_name = qualified
+        prediction.species_name = qualified
+        if prediction.display_label:
+            prediction.display_label = qualified
+
     # Enrich top predictions too (top_predictions are plain dicts).
     for tp in top_predictions:
         # Find matching enrichment by species name.
@@ -119,7 +133,13 @@ async def predict(
             common = parts[0].title()
             if common == tp["speciesName"] and enr.matched:
                 if enr.common_name:
-                    tp["commonName"] = enr.common_name
+                    # Qualify with type suffix
+                    qualified_tp = qualify_common_name(
+                        enr.common_name,
+                        enr.buglord_category or tp.get("mappedBuglordType"),
+                        enr.ancestors,
+                    )
+                    tp["commonName"] = qualified_tp
                 # Override mapping if keyword map missed it.
                 if tp["mappedBuglordType"] is None and enr.buglord_category:
                     tp["mappedBuglordType"] = enr.buglord_category

@@ -101,6 +101,91 @@ _BEE_FAMILIES = {
     "Melittidae", "Stenotritidae",
 }
 
+# ---------------------------------------------------------------------------
+# Type-suffix helpers — ensure common names include what the creature is
+# ---------------------------------------------------------------------------
+
+# BugLord category → words that indicate the type is already present.
+_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "butterfly": ["butterfly", "moth", "skipper", "swallowtail", "hawkmoth",
+                   "monarch", "admiral", "painted lady", "fritillary",
+                   "blue", "copper", "hairstreak", "metalmark", "ringlet",
+                   "satyr", "nymph"],
+    "bee":       ["bee", "wasp", "hornet", "yellowjacket", "sawfly",
+                   "bumblebee", "honeybee"],
+    "ant":       ["ant"],
+    "beetle":    ["beetle", "weevil", "ladybug", "ladybird", "firefly",
+                   "lightning bug", "longhorn", "scarab", "stag beetle",
+                   "cockroach", "cricket", "grasshopper", "mantis",
+                   "stick insect", "cicada", "aphid", "bug"],
+    "fly":       ["fly", "dragonfly", "damselfly", "mayfly", "lacewing",
+                   "caddisfly", "midge", "gnat", "mosquito", "crane fly",
+                   "hoverfly", "horsefly"],
+    "spider":    ["spider", "tarantula", "scorpion", "tick", "mite",
+                   "harvestman", "daddy longlegs"],
+}
+
+# BugLord category → the type noun to append when missing.
+_CATEGORY_SUFFIX: dict[str, str] = {
+    "butterfly": "Butterfly",
+    "bee":       "Bee",
+    "ant":       "Ant",
+    "beetle":    "Beetle",
+    "fly":       "Fly",
+    "spider":    "Spider",
+}
+
+# Special overrides: when the order is specifically moths, append "Moth" not "Butterfly".
+_MOTH_FAMILIES = {
+    "Sphingidae", "Noctuidae", "Geometridae", "Saturniidae", "Erebidae",
+    "Arctiidae", "Crambidae", "Pyralidae", "Tortricidae", "Oecophoridae",
+    "Zygaenidae", "Sesiidae", "Cossidae", "Hepialidae", "Lasiocampidae",
+    "Lymantriidae", "Notodontidae", "Bombycidae",
+}
+
+
+def qualify_common_name(
+    common_name: str,
+    buglord_category: str | None,
+    ancestors: list[dict] | None = None,
+) -> str:
+    """
+    Ensure *common_name* includes a type descriptor so users see
+    "Monarch Butterfly" rather than just "Monarch".
+
+    If the name already contains a keyword for the category (e.g. "Painted
+    Lady" already implies butterfly via our keyword list), it is returned
+    unchanged.  Otherwise the category suffix is appended.
+
+    For Lepidoptera, we check whether the family is a moth family to decide
+    between "Butterfly" and "Moth".
+    """
+    if not common_name or not buglord_category:
+        return common_name
+
+    lower = common_name.lower()
+
+    # Check if any keyword for this category already appears in the name.
+    keywords = _CATEGORY_KEYWORDS.get(buglord_category, [])
+    for kw in keywords:
+        if kw in lower:
+            return common_name  # already descriptive enough
+
+    # Determine the right suffix.
+    suffix = _CATEGORY_SUFFIX.get(buglord_category, "")
+
+    # Lepidoptera: distinguish moths from butterflies using family.
+    if buglord_category == "butterfly" and ancestors:
+        families = {a.get("name", "") for a in ancestors if a.get("rank") == "family"}
+        if families & _MOTH_FAMILIES:
+            suffix = "Moth"
+        # Also check if "moth" appears in scientific family names' common usage
+        # (hawkmoths are Sphingidae, already caught above).
+
+    if suffix:
+        return f"{common_name} {suffix}"
+    return common_name
+
 
 def taxon_to_buglord_category(
     ancestors: list[dict],

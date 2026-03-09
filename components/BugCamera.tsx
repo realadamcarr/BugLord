@@ -19,12 +19,10 @@ interface BugCameraProps {
   onCapture: (photoUri: string) => void;
   onClose: () => void;
   mode?: ScanMode;
-  /** Called in liveScan mode after taking a photo — runs ML and returns top label + confidence */
-  onClassifyPhoto?: (photoUri: string) => Promise<{ label: string; confidence: number } | null>;
+  /** Called in liveScan mode after taking a photo — calls backend for species-level ID */
+  onClassifyPhoto?: (photoUri: string) => Promise<{ label: string; confidence: number; source: 'local' | 'backend' } | null>;
   /** Called when the user confirms a live scan result */
   onLiveScanConfirm?: (photoUri: string, label: string, confidence: number, source: 'local' | 'backend') => void;
-  /** Optional: called after local ML result to get a refined species-level label from the backend */
-  onRefineScanLabel?: (photoUri: string) => Promise<{ label: string; confidence: number } | null>;
 }
 
 export const BugCamera: React.FC<BugCameraProps> = ({
@@ -33,7 +31,6 @@ export const BugCamera: React.FC<BugCameraProps> = ({
   mode = 'photo',
   onClassifyPhoto,
   onLiveScanConfirm,
-  onRefineScanLabel,
 }) => {
   const { theme } = useTheme();
   const facing: CameraType = 'back';
@@ -50,8 +47,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
   const [scanPhotoUri, setScanPhotoUri] = useState<string | null>(null);
   const [scanLabel, setScanLabel] = useState<string | null>(null);
   const [scanConfidence, setScanConfidence] = useState<number>(0);
-  const [isRefiningLabel, setIsRefiningLabel] = useState(false);
-  // Track whether the current scanLabel came from backend refinement
+  // Track whether the current scanLabel came from backend or local model
   const scanLabelSourceRef = useRef<'local' | 'backend'>('local');
 
   const styles = createStyles(theme);
@@ -177,27 +173,11 @@ export const BugCamera: React.FC<BugCameraProps> = ({
           ]
         );
       } else if (result.label && result.confidence > 0) {
-        // Always show result — even low confidence — let the user decide
+        // Show the result directly (backend provides species-level names)
         setScanLabel(result.label);
         setScanConfidence(result.confidence);
-        scanLabelSourceRef.current = 'local';
+        scanLabelSourceRef.current = (result as any).source || 'local';
         setLiveScanState('result');
-
-        // Fire off backend refinement in background — updates label when ready
-        if (onRefineScanLabel && photo?.uri) {
-          setIsRefiningLabel(true);
-          onRefineScanLabel(photo.uri)
-            .then((refined) => {
-              if (refined?.label) {
-                console.log(`🎯 Backend refined: "${result.label}" → "${refined.label}" (${Math.round(refined.confidence * 100)}%)`);
-                setScanLabel(refined.label);
-                setScanConfidence(refined.confidence);
-                scanLabelSourceRef.current = 'backend';
-              }
-            })
-            .catch((err) => console.warn('⚠️ Backend refinement failed (keeping local):', err))
-            .finally(() => setIsRefiningLabel(false));
-        }
       } else {
         setLiveScanState('idle');
         Alert.alert(
@@ -260,12 +240,6 @@ export const BugCamera: React.FC<BugCameraProps> = ({
             <View style={styles.resultCard}>
               <Text style={styles.resultEmoji}>🐛</Text>
               <Text style={styles.resultLabel}>{scanLabel}</Text>
-              {isRefiningLabel && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                  <ActivityIndicator size="small" color={theme.colors.primary} style={{ marginRight: 6 }} />
-                  <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>Identifying species…</Text>
-                </View>
-              )}
 
               {/* Confidence bar */}
               <View style={styles.confidenceRow}>
