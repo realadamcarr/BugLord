@@ -321,7 +321,7 @@ export default function CaptureScreen() {
   const processAndClassify = async (
     imageToClassify: string,
     originalPhoto: string,
-    preConfirmedResult?: { label: string; confidence: number }
+    preConfirmedResult?: { label: string; confidence: number; source?: 'local' | 'backend' }
   ) => {
     setShowBugIdentification(true);
     setIsIdentifying(true);
@@ -357,10 +357,21 @@ export default function CaptureScreen() {
       let pipelineGbif: GbifSpeciesSuggestion[] = [];
 
       // ── PRIORITY 1: FastAPI backend (EVA-02 iNat21 model) ──────────
-      // Always try the backend first — even for live-scan confirmed results,
-      // the backend provides species-level precision the on-device model can't.
+      // Skip the backend if we already have a backend-refined result from the
+      // live scan overlay — avoids a second call on the cropped image that
+      // may produce a worse prediction than the one the user already confirmed.
       let backendHandled = false;
-      try {
+      if (preConfirmedResult?.source === 'backend') {
+        console.log('✅ Using backend-refined live scan result directly:', preConfirmedResult.label);
+        mlCandidates = [{
+          label: preConfirmedResult.label,
+          confidence: preConfirmedResult.confidence,
+          source: 'backend-eva02',
+        }];
+        backendHandled = true;
+      }
+
+      if (!backendHandled) try {
         console.log('🌐 Trying FastAPI backend prediction…');
         const backendResult = await predictInsect(analysisPhoto);
         console.log('🌐 Backend result:', backendResult);
@@ -807,13 +818,13 @@ export default function CaptureScreen() {
   }, []);
 
   /** Called when user taps "Capture!" after live scan lock */
-  const handleLiveScanConfirm = async (photoUri: string, label: string, confidence: number) => {
-    console.log('🎯 Live scan confirmed — sending to backend for species-level ID…', { label, confidence });
+  const handleLiveScanConfirm = async (photoUri: string, label: string, confidence: number, source: 'local' | 'backend' = 'local') => {
+    console.log('🎯 Live scan confirmed:', { label, confidence, source });
     setShowCamera(false);
     setCapturedPhoto(photoUri);
 
-    // Backend is tried first inside processAndClassify; preConfirmedResult is the local fallback.
-    await processAndClassify(photoUri, photoUri, { label, confidence });
+    // Pass source so processAndClassify knows whether to skip the backend call
+    await processAndClassify(photoUri, photoUri, { label, confidence, source });
   };
 
   const renderPartySlot = (bug: Bug | null, index: number) => (

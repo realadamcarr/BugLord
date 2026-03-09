@@ -22,7 +22,7 @@ interface BugCameraProps {
   /** Called in liveScan mode after taking a photo — runs ML and returns top label + confidence */
   onClassifyPhoto?: (photoUri: string) => Promise<{ label: string; confidence: number } | null>;
   /** Called when the user confirms a live scan result */
-  onLiveScanConfirm?: (photoUri: string, label: string, confidence: number) => void;
+  onLiveScanConfirm?: (photoUri: string, label: string, confidence: number, source: 'local' | 'backend') => void;
   /** Optional: called after local ML result to get a refined species-level label from the backend */
   onRefineScanLabel?: (photoUri: string) => Promise<{ label: string; confidence: number } | null>;
 }
@@ -51,6 +51,8 @@ export const BugCamera: React.FC<BugCameraProps> = ({
   const [scanLabel, setScanLabel] = useState<string | null>(null);
   const [scanConfidence, setScanConfidence] = useState<number>(0);
   const [isRefiningLabel, setIsRefiningLabel] = useState(false);
+  // Track whether the current scanLabel came from backend refinement
+  const scanLabelSourceRef = useRef<'local' | 'backend'>('local');
 
   const styles = createStyles(theme);
 
@@ -178,6 +180,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
         // Always show result — even low confidence — let the user decide
         setScanLabel(result.label);
         setScanConfidence(result.confidence);
+        scanLabelSourceRef.current = 'local';
         setLiveScanState('result');
 
         // Fire off backend refinement in background — updates label when ready
@@ -189,6 +192,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
                 console.log(`🎯 Backend refined: "${result.label}" → "${refined.label}" (${Math.round(refined.confidence * 100)}%)`);
                 setScanLabel(refined.label);
                 setScanConfidence(refined.confidence);
+                scanLabelSourceRef.current = 'backend';
               }
             })
             .catch((err) => console.warn('⚠️ Backend refinement failed (keeping local):', err))
@@ -213,7 +217,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
 
   const handleConfirmScan = () => {
     if (scanPhotoUri && scanLabel && onLiveScanConfirm) {
-      onLiveScanConfirm(scanPhotoUri, scanLabel, scanConfidence);
+      onLiveScanConfirm(scanPhotoUri, scanLabel, scanConfidence, scanLabelSourceRef.current);
     }
   };
 
@@ -221,6 +225,7 @@ export const BugCamera: React.FC<BugCameraProps> = ({
     setScanPhotoUri(null);
     setScanLabel(null);
     setScanConfidence(0);
+    scanLabelSourceRef.current = 'local';
     setLiveScanState('idle');
   };
 
