@@ -1,4 +1,4 @@
-package com.anonymous.buglord
+package com.realadamcarr.buglord
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

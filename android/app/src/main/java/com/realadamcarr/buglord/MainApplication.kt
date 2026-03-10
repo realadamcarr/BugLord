@@ -1,4 +1,4 @@
-package com.anonymous.buglord
+package com.realadamcarr.buglord
 
 import android.app.Application
 import android.content.res.Configuration
