@@ -1010,7 +1010,7 @@ export default function CaptureScreen() {
                   ) : bug.pixelArt ? (
                     <Image source={{ uri: bug.pixelArt }} style={styles.recentBugPhoto} />
                   ) : (
-                    <View style={styles.recentBugPhoto}>
+                    <View style={[styles.recentBugPhoto, styles.recentBugPlaceholder]}>
                       <PixelatedEmoji type="bug" size={24} color={theme.colors.text} />
                     </View>
                   )}

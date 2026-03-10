@@ -22,6 +22,12 @@
         "NSMotionUsageDescription": "Allow BugLord to track your steps for Walk Mode"
       }
     },
+    "healthConnectPermissions": [
+      {
+        "accessType": "read",
+        "recordType": "Steps"
+      }
+    ],
     "android": {
       "package": "com.anonymous.buglord",
       "versionCode": 1,
@@ -39,7 +45,8 @@
         "android.permission.FOREGROUND_SERVICE_HEALTH",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.health.READ_STEPS"
       ],
       "navigationBar": {
         "visible": "immersive"
@@ -102,7 +109,15 @@
           "photosPermission": "Allow BugLord to access your photos to scan existing bug images"
         }
       ],
-      "expo-build-properties"
+      "expo-build-properties",
+      "react-native-health-connect",
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "Allow BugLord to read your step count for Walk Mode",
+          "background": false
+        }
+      ]
     ],
     "assetBundlePatterns": [
       "assets/**"

@@ -18,15 +18,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Pedometer } from 'expo-sensors';
 import { AppState, AppStateStatus, Platform } from 'react-native';
 import {
-  consumeBackgroundSteps,
-  registerBackgroundStepTracking,
-  unregisterBackgroundStepTracking,
+    consumeBackgroundSteps,
+    registerBackgroundStepTracking,
+    unregisterBackgroundStepTracking,
 } from './BackgroundStepTracking';
 import {
-  dismissWalkModeNotification,
-  requestNotificationPermission,
-  showWalkModeNotification,
-  updateWalkModeNotification,
+    dismissWalkModeNotification,
+    requestNotificationPermission,
+    showWalkModeNotification,
+    updateWalkModeNotification,
 } from './WalkModeNotification';
 
 // Mock Pedometer for web/simulator
@@ -495,20 +495,29 @@ class WalkModeService {
         this.log('⚠️ Failed to consume background steps:', error_);
       }
 
-      // ── 2. Query Pedometer.getStepCountAsync for steps while app was closed ──
-      //    Works on both iOS (CoreMotion) and Android (TYPE_STEP_COUNTER).
-      //    This is the primary recovery mechanism — it asks the OS how many
-      //    steps the device recorded between lastUpdateTimestamp and now.
+      // ── 2. Query native health APIs for steps while app was closed ──
+      //    Android: Health Connect, iOS: HealthKit.
+      //    These record steps at the OS level even when the app is killed,
+      //    so this is the most reliable recovery source.
+      if (elapsed >= 5000 && elapsed <= 30 * 24 * 60 * 60 * 1000) {
+        try {
+          const nativeSteps = await queryNativeStepHistory(lastUpdate, now);
+          if (nativeSteps > 0 && nativeSteps > recoveredSteps) {
+            this.log(`🔄 Native health API reported ${nativeSteps} steps (more than bg: ${recoveredSteps}), using native value`);
+            recoveredSteps = nativeSteps;
+          }
+        } catch (nativeError) {
+          this.log('⚠️ Native step history query failed:', nativeError);
+        }
+      }
+
+      // ── 3. Fallback: expo-sensors Pedometer (works on iOS via CoreMotion) ──
       if (elapsed >= 5000 && elapsed <= 7 * 24 * 60 * 60 * 1000) {
         try {
           const result = await PedometerAPI.getStepCountAsync(lastUpdate, now);
-          if (result && result.steps > 0) {
-            // Use the larger of background-accumulated or pedometer-reported steps
-            // to avoid double-counting while still getting the best coverage.
-            if (result.steps > recoveredSteps) {
-              this.log(`🔄 Pedometer reported ${result.steps} steps (more than bg: ${recoveredSteps}), using pedometer value`);
-              recoveredSteps = result.steps;
-            }
+          if (result && result.steps > 0 && result.steps > recoveredSteps) {
+            this.log(`🔄 Pedometer reported ${result.steps} steps (more than current: ${recoveredSteps}), using pedometer value`);
+            recoveredSteps = result.steps;
           }
         } catch (pedometerError) {
           this.log('⚠️ Pedometer.getStepCountAsync failed:', pedometerError);

@@ -1,6 +1,7 @@
 import { useTheme } from '@/contexts/ThemeContext';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Divider } from 'react-native-paper';
 
 interface SectionHeaderProps {
   title: string;

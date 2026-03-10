@@ -15,6 +15,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { requestNativeStepPermissions } from '@/services/NativeStepHistory';
 import { useWalkMode } from '@/services/useWalkMode';
 import { Bug, RARITY_CONFIG } from '@/types/Bug';
 import { router } from 'expo-router';
@@ -64,6 +65,11 @@ export default function WalkModeScreen() {
       try {
         const { status } = await Pedometer.getPermissionsAsync();
         setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
+        // Also request native health permissions (Health Connect / HealthKit)
+        // so step recovery works when the app was killed.
+        if (status === 'granted') {
+          requestNativeStepPermissions().catch(() => {});
+        }
       } catch {
         setPermissionStatus('na');
       }
@@ -78,6 +84,8 @@ export default function WalkModeScreen() {
       const { status, canAskAgain } = await Pedometer.requestPermissionsAsync();
       if (status === 'granted') {
         setPermissionStatus('granted');
+        // Also request native health permissions for step recovery
+        requestNativeStepPermissions().catch(() => {});
       } else if (!canAskAgain) {
         Alert.alert(
           'Permission Required',
