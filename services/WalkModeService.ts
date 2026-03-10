@@ -495,9 +495,11 @@ class WalkModeService {
         this.log('⚠️ Failed to consume background steps:', error_);
       }
 
-      // ── 2. Also query Pedometer.getStepCountAsync as a fallback ──
-      //    Only on iOS — Android does not support getStepCountAsync.
-      if (Platform.OS !== 'android' && elapsed >= 5000 && elapsed <= 7 * 24 * 60 * 60 * 1000) {
+      // ── 2. Query Pedometer.getStepCountAsync for steps while app was closed ──
+      //    Works on both iOS (CoreMotion) and Android (TYPE_STEP_COUNTER).
+      //    This is the primary recovery mechanism — it asks the OS how many
+      //    steps the device recorded between lastUpdateTimestamp and now.
+      if (elapsed >= 5000 && elapsed <= 7 * 24 * 60 * 60 * 1000) {
         try {
           const result = await PedometerAPI.getStepCountAsync(lastUpdate, now);
           if (result && result.steps > 0) {
@@ -511,7 +513,7 @@ class WalkModeService {
         } catch (pedometerError) {
           this.log('⚠️ Pedometer.getStepCountAsync failed:', pedometerError);
         }
-      } else if (recoveredSteps === 0 && Platform.OS !== 'android') {
+      } else if (recoveredSteps === 0) {
         this.log('⏭️ Skipping pedometer recovery (gap too short or too long):', Math.round(elapsed / 1000), 's');
       }
 

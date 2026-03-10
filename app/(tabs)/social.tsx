@@ -1,4 +1,7 @@
+import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
+import { getProfilePictureSource } from '@/constants/profilePictures';
+import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { isValidFriendCode } from '@/src/lib/friendCode';
@@ -14,23 +17,26 @@ import {
     subscribeOutgoingFriendRequests,
 } from '@/src/services/friendsService';
 import { ensureUserProfile, getUserProfile, logout, UserProfile } from '@/src/services/socialAuth';
-import { subscribeIncomingTrades } from '@/src/services/tradeService';
+import { cancelTrade, subscribeIncomingTrades, subscribeOutgoingTrades } from '@/src/services/tradeService';
 import * as Clipboard from 'expo-clipboard';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    Image,
     ScrollView,
     StyleSheet,
     TextInput,
     TouchableOpacity,
-    View,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function SocialScreen() {
   const { theme } = useTheme();
+  const { collection } = useBugCollection();
+  const profilePicSource = getProfilePictureSource(collection.profilePicture);
   const { user, loading: authLoading } = useAuthUser();
   const router = useRouter();
 
@@ -49,8 +55,10 @@ export default function SocialScreen() {
   const [friendProfiles, setFriendProfiles] = useState<UserProfile[]>([]);
   const [processingRequest, setProcessingRequest] = useState<string | null>(null);
 
-  // ── Incoming trades ──────────────────────────────────────────────
+  // ── Trades ───────────────────────────────────────────────────────
   const [incomingTrades, setIncomingTrades] = useState<Trade[]>([]);
+  const [outgoingTrades, setOutgoingTrades] = useState<Trade[]>([]);
+  const [cancellingTradeId, setCancellingTradeId] = useState<string | null>(null);
 
   // ── Copied badge ─────────────────────────────────────────────────
   const [copiedVisible, setCopiedVisible] = useState(false);
@@ -118,6 +126,34 @@ export default function SocialScreen() {
     if (!user) return;
     const unsub = subscribeIncomingTrades(user.uid, setIncomingTrades);
     return unsub;
+  }, [user]);
+
+  // Subscribe to outgoing trades
+  useEffect(() => {
+    if (!user) return;
+    const unsub = subscribeOutgoingTrades(user.uid, setOutgoingTrades);
+    return unsub;
+  }, [user]);
+
+  const handleCancelTrade = useCallback(async (tradeId: string) => {
+    if (!user) return;
+    Alert.alert('Cancel Trade', 'Cancel this trade offer?', [
+      { text: 'No', style: 'cancel' },
+      {
+        text: 'Yes, Cancel',
+        style: 'destructive',
+        onPress: async () => {
+          setCancellingTradeId(tradeId);
+          try {
+            await cancelTrade(tradeId, user.uid);
+          } catch (err) {
+            Alert.alert('Error', err instanceof Error ? err.message : 'Failed to cancel trade');
+          } finally {
+            setCancellingTradeId(null);
+          }
+        },
+      },
+    ]);
   }, [user]);
 
   // ── Handlers ─────────────────────────────────────────────────────
@@ -234,7 +270,16 @@ export default function SocialScreen() {
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* ── Header ──────────────────────────────────────────────── */}
         <View style={styles.header}>
-          <ThemedText style={styles.title}>🐛 Social</ThemedText>
+          <View style={styles.headerLeft}>
+            <View style={styles.socialAvatar}>
+              {profilePicSource ? (
+                <Image source={profilePicSource} style={styles.socialAvatarImage} />
+              ) : (
+                <PixelatedEmoji type="bug" size={28} color={theme.colors.text} />
+              )}
+            </View>
+            <ThemedText style={styles.title}>🐛 Social</ThemedText>
+          </View>
           <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
             <ThemedText style={styles.logoutText}>Sign Out</ThemedText>
           </TouchableOpacity>
@@ -352,6 +397,9 @@ export default function SocialScreen() {
           ) : (
             friendProfiles.map((friend) => (
               <View key={friend.uid} style={styles.friendRow}>
+                <View style={styles.friendAvatar}>
+                  <PixelatedEmoji type="bug" size={24} color={theme.colors.text} />
+                </View>
                 <View style={styles.friendInfo}>
                   <ThemedText style={styles.friendName}>
                     {friend.displayName}
@@ -400,6 +448,45 @@ export default function SocialScreen() {
                   →
                 </ThemedText>
               </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* ── Outgoing Trades ──────────────────────────────────────── */}
+        {outgoingTrades.length > 0 && (
+          <View style={[styles.card, { backgroundColor: theme.colors.card }]}>
+            <ThemedText style={styles.cardTitle}>
+              Sent Trades ({outgoingTrades.length})
+            </ThemedText>
+            {outgoingTrades.map((trade) => (
+              <View key={trade.id} style={styles.tradeRow}>
+                <TouchableOpacity
+                  style={{ flex: 1 }}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/social-trade-session' as any,
+                      params: { tradeId: trade.id },
+                    })
+                  }
+                >
+                  <ThemedText style={styles.tradeRowText}>
+                    Trade to {trade.toUid.slice(0, 8)}…
+                  </ThemedText>
+                  <ThemedText style={[styles.tradeRowSub, { color: theme.colors.textMuted }]}>
+                    {trade.toBugId ? 'Awaiting acceptance' : 'Waiting for their offer'}
+                  </ThemedText>
+                </TouchableOpacity>
+                {cancellingTradeId === trade.id ? (
+                  <ActivityIndicator size="small" color="#EF4444" />
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.cancelTradeBtn, { borderColor: '#EF4444' }]}
+                    onPress={() => handleCancelTrade(trade.id)}
+                  >
+                    <ThemedText style={styles.cancelTradeBtnText}>Cancel</ThemedText>
+                  </TouchableOpacity>
+                )}
+              </View>
             ))}
           </View>
         )}
@@ -517,6 +604,27 @@ function createStyles(theme: any) {
       marginBottom: 16,
     },
     title: { fontSize: 28, fontWeight: '900', letterSpacing: 1 },
+    headerLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    socialAvatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      backgroundColor: theme.colors.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 2,
+      borderColor: theme.colors.border,
+      overflow: 'hidden',
+    },
+    socialAvatarImage: {
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+    },
     subtitle: {
       fontSize: 16,
       textAlign: 'center',
@@ -577,11 +685,31 @@ function createStyles(theme: any) {
       borderBottomWidth: 1,
       borderBottomColor: 'rgba(128,128,128,0.15)',
     },
+    friendAvatar: {
+      width: 36,
+      height: 36,
+      borderRadius: 6,
+      backgroundColor: theme.colors.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 10,
+      borderWidth: 2,
+      borderColor: theme.colors.border,
+    },
     friendInfo: { flex: 1 },
     friendName: { fontSize: 15, fontWeight: '700' },
     friendSub: { fontSize: 12, marginTop: 2 },
     tradeBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
     tradeBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+    tradeRowSub: { fontSize: 12, marginTop: 2 },
+    cancelTradeBtn: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+      borderWidth: 2,
+      marginLeft: 10,
+    },
+    cancelTradeBtnText: { color: '#EF4444', fontWeight: '700', fontSize: 12 },
     tradeRow: {
       flexDirection: 'row',
       alignItems: 'center',

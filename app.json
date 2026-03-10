@@ -60,6 +60,14 @@
       "expo-router",
       "react-native-fast-tflite",
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "Allow BugLord to access your camera to capture insects"
@@ -93,7 +101,8 @@
         {
           "photosPermission": "Allow BugLord to access your photos to scan existing bug images"
         }
-      ]
+      ],
+      "expo-build-properties"
     ],
     "assetBundlePatterns": [
       "assets/**"

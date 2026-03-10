@@ -2,20 +2,28 @@ import { CollectionScreen } from '@/components/CollectionScreen';
 import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
 import { XPProgressBar } from '@/components/XPProgressBar';
+import { FadeInView } from '@/components/animated/FadeInView';
+import { ScalePressable } from '@/components/animated/ScalePressable';
+import { SkiaSparkles } from '@/components/effects/SkiaSparkles';
+import { SectionHeader } from '@/components/ui/SectionHeader';
+import { StatPill } from '@/components/ui/StatPill';
+import { getProfilePictureSource, PROFILE_PICTURES } from '@/constants/profilePictures';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { clearScanLogs, getScanLogs, ScanLogEntry } from '@/services/ScanLogService';
 import { BIOME_CONFIG, BugRarity, RARITY_CONFIG } from '@/types/Bug';
 import React, { useEffect, useState } from 'react';
-import { Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dialog, Button as PaperButton, Portal } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
 export default function PlayerScreen() {
   const { theme } = useTheme();
-  const { collection } = useBugCollection();
+  const { collection, setProfilePicture } = useBugCollection();
   const [showCollection, setShowCollection] = useState(false);
+  const [showPfpPicker, setShowPfpPicker] = useState(false);
   const [collectionInitialRarity, setCollectionInitialRarity] = useState<BugRarity | 'all'>('all');
   const [collectionInitialBiome, setCollectionInitialBiome] = useState<string>('all');
   const [showLogs, setShowLogs] = useState(false);
@@ -28,6 +36,7 @@ export default function PlayerScreen() {
   }, [showLogs]);
 
   const styles = createStyles(theme);
+  const profilePicSource = getProfilePictureSource(collection.profilePicture);
 
   // Calculate player statistics
   const totalBugs = collection.bugs.length;
@@ -77,9 +86,23 @@ export default function PlayerScreen() {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Player Header */}
         <View style={styles.header}>
-          <View style={styles.playerAvatar}>
-            <PixelatedEmoji type="bug" size={48} color={theme.colors.text} />
+          {/* Skia sparkle particles behind the avatar */}
+          <View style={{ position: 'absolute', top: 0, alignSelf: 'center' }}>
+            <SkiaSparkles
+              width={180}
+              height={120}
+              count={10}
+              colors={[theme.colors.primary, '#FFD700', '#F0B429', theme.colors.text + '60']}
+            />
           </View>
+          <TouchableOpacity style={styles.playerAvatar} onPress={() => setShowPfpPicker(true)}>
+            {profilePicSource ? (
+              <Image source={profilePicSource} style={styles.playerAvatarImage} />
+            ) : (
+              <PixelatedEmoji type="bug" size={48} color={theme.colors.text} />
+            )}
+          </TouchableOpacity>
+          <ThemedText style={styles.changeAvatarHint}>Tap to change</ThemedText>
           <ThemedText style={styles.playerName}>Bug Explorer</ThemedText>
           <ThemedText style={styles.playerLevel}>Level {collection.level}</ThemedText>
           
@@ -97,71 +120,53 @@ export default function PlayerScreen() {
         </View>
 
         {/* Quick Stats */}
-        <View style={styles.statsContainer}>
-          <View style={styles.sectionTitleContainer}>
-            <PixelatedEmoji type="stat" size={20} color={theme.colors.text} />
-            <ThemedText style={styles.sectionTitle}>Collection Stats</ThemedText>
+        <FadeInView delay={60} style={styles.statsContainer}>
+          <SectionHeader title="Collection Stats" icon="📊" />
+          <View style={styles.statPillRow}>
+            <StatPill icon="🐛" value={totalBugs} label="Total Bugs" style={styles.statPill} />
+            <StatPill icon="⚔️" value={`${partyCount}/6`} label="Party" color={theme.colors.warning} style={styles.statPill} />
           </View>
-          
-          <View style={styles.statRow}>
-            <View style={styles.statCard}>
-              <ThemedText style={styles.statNumber}>{totalBugs}</ThemedText>
-              <ThemedText style={styles.statLabel}>Total Bugs</ThemedText>
-            </View>
-            <View style={styles.statCard}>
-              <ThemedText style={styles.statNumber}>{partyCount}/6</ThemedText>
-              <ThemedText style={styles.statLabel}>Active Party</ThemedText>
-            </View>
+          <View style={styles.statPillRow}>
+            <StatPill icon="🗺️" value={Object.keys(biomeStats).length} label="Biomes" color={theme.colors.success} style={styles.statPill} />
+            <StatPill
+              icon="💎"
+              value={(rarityStats.rare || 0) + (rarityStats.epic || 0) + (rarityStats.legendary || 0)}
+              label="Rare+"
+              color={theme.colors.tierRare}
+              style={styles.statPill}
+            />
           </View>
-
-          <View style={styles.statRow}>
-            <View style={styles.statCard}>
-              <ThemedText style={styles.statNumber}>
-                {Object.keys(biomeStats).length}
-              </ThemedText>
-              <ThemedText style={styles.statLabel}>Biomes Explored</ThemedText>
-            </View>
-            <View style={styles.statCard}>
-              <ThemedText style={styles.statNumber}>
-                {(rarityStats.rare || 0) + (rarityStats.epic || 0) + (rarityStats.legendary || 0)}
-              </ThemedText>
-              <ThemedText style={styles.statLabel}>Rare+ Bugs</ThemedText>
-            </View>
-          </View>
-        </View>
+        </FadeInView>
 
         {/* Collection Button */}
-        <View style={styles.collectionButtonContainer}>
-          <TouchableOpacity 
-            style={styles.collectionButton}
-            onPress={() => openCollection('all')}
-          >
-            <View style={styles.collectionButtonIcon}>
-              <PixelatedEmoji type="dex" size={28} color={theme.colors.text} />
+        <FadeInView delay={120} style={styles.collectionButtonContainer}>
+          <ScalePressable onPress={() => openCollection('all')} style={{ marginBottom: 10 }}>
+            <View style={[styles.collectionButton, { borderLeftColor: theme.colors.primary, borderLeftWidth: 4 }]}>
+              <View style={styles.collectionButtonIcon}>
+                <PixelatedEmoji type="dex" size={28} color={theme.colors.text} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <ThemedText style={styles.collectionButtonTitle}>View Collection</ThemedText>
+                <ThemedText style={styles.collectionButtonSubtitle}>
+                  {collection.bugs.length - collection.party.filter(Boolean).length} bugs in storage
+                </ThemedText>
+              </View>
+              <Text style={styles.collectionButtonArrow}>›</Text>
             </View>
-            <View>
-              <ThemedText style={styles.collectionButtonTitle}>View Collection</ThemedText>
-              <ThemedText style={styles.collectionButtonSubtitle}>
-                {collection.bugs.length - collection.party.filter(Boolean).length} bugs in storage
-              </ThemedText>
+          </ScalePressable>
+          <ScalePressable onPress={() => setShowLogs(true)}>
+            <View style={[styles.collectionButton, { borderLeftColor: theme.colors.warning, borderLeftWidth: 4 }]}>
+              <Text style={[styles.collectionButtonIcon, { fontSize: 22 }]}>🧪</Text>
+              <View style={{ flex: 1 }}>
+                <ThemedText style={styles.collectionButtonTitle}>Scan Logs</ThemedText>
+                <ThemedText style={styles.collectionButtonSubtitle}>
+                  Inspect recent identifications
+                </ThemedText>
+              </View>
+              <Text style={styles.collectionButtonArrow}>›</Text>
             </View>
-            <Text style={styles.collectionButtonArrow}>›</Text>
-          </TouchableOpacity>
-          <View style={{ height: 12 }} />
-          <TouchableOpacity 
-            style={styles.collectionButton}
-            onPress={() => setShowLogs(true)}
-          >
-            <Text style={styles.collectionButtonIcon}>🧪</Text>
-            <View>
-              <ThemedText style={styles.collectionButtonTitle}>Scan Logs</ThemedText>
-              <ThemedText style={styles.collectionButtonSubtitle}>
-                Inspect recent identifications
-              </ThemedText>
-            </View>
-            <Text style={styles.collectionButtonArrow}>›</Text>
-          </TouchableOpacity>
-        </View>
+          </ScalePressable>
+        </FadeInView>
 
         {/* Rarity Breakdown */}
         <View style={styles.rarityContainer}>
@@ -337,6 +342,44 @@ export default function PlayerScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Profile Picture Picker — Paper Dialog */}
+      <Portal>
+        <Dialog visible={showPfpPicker} onDismiss={() => setShowPfpPicker(false)} style={{ backgroundColor: theme.colors.card }}>
+          <Dialog.Title style={styles.pfpTitle}>Choose Avatar</Dialog.Title>
+          <Dialog.Content>
+            <View style={styles.pfpGrid}>
+              {PROFILE_PICTURES.map((option) => {
+                const isSelected = collection.profilePicture === option.key;
+                return (
+                  <TouchableOpacity
+                    key={option.key}
+                    style={[
+                      styles.pfpOption,
+                      { borderColor: isSelected ? theme.colors.primary : theme.colors.border },
+                      isSelected && { borderWidth: 3 },
+                    ]}
+                    onPress={() => {
+                      setProfilePicture(option.key);
+                      setShowPfpPicker(false);
+                    }}
+                  >
+                    {option.source ? (
+                      <Image source={option.source} style={styles.pfpOptionImage} />
+                    ) : (
+                      <PixelatedEmoji type="bug" size={36} color={theme.colors.text} />
+                    )}
+                    <ThemedText style={styles.pfpOptionLabel}>{option.label}</ThemedText>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <PaperButton onPress={() => setShowPfpPicker(false)}>Cancel</PaperButton>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </SafeAreaView>
   );
 }
@@ -366,9 +409,21 @@ const createStyles = (theme: any) => StyleSheet.create({
     backgroundColor: theme.colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 4,
     borderWidth: 3,
     borderColor: theme.colors.border,
+    overflow: 'hidden',
+  },
+  playerAvatarImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 8,
+  },
+  changeAvatarHint: {
+    fontSize: 10,
+    color: theme.colors.textMuted,
+    marginBottom: 8,
+    fontWeight: '600',
   },
   playerName: {
     fontSize: 22,
@@ -409,6 +464,14 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   statsContainer: {
     marginBottom: 20,
+  },
+  statPillRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+  },
+  statPill: {
+    flex: 1,
   },
   statRow: {
     flexDirection: 'row',
@@ -621,5 +684,68 @@ const createStyles = (theme: any) => StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     color: theme.colors.text,
+  },
+  pfpOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  pfpModal: {
+    borderRadius: 12,
+    padding: 20,
+    width: '100%',
+    maxWidth: 340,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+  },
+  pfpTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 16,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  pfpGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  pfpOption: {
+    width: 80,
+    height: 100,
+    borderRadius: 8,
+    backgroundColor: theme.colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+    padding: 4,
+  },
+  pfpOptionImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 6,
+  },
+  pfpOptionLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: 4,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  pfpCloseBtn: {
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  pfpCloseBtnText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 14,
   },
 });

@@ -36,6 +36,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -1150,7 +1151,7 @@ export default function HiveModeScreen() {
   // ═══════════════════════════════════════════
   if (!hiveState.isActive && !hiveState.runCompleted) {
     return (
-      <ThemedView style={styles.container}>
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Text style={styles.backButtonText}>←</Text>
@@ -1198,7 +1199,7 @@ export default function HiveModeScreen() {
 
         {renderBugSelector()}
         {renderPartyEditor()}
-      </ThemedView>
+      </SafeAreaView>
     );
   }
 
@@ -1206,7 +1207,7 @@ export default function HiveModeScreen() {
   //  BATTLE SCREEN
   // ═══════════════════════════════════════════
   return (
-    <ThemedView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <View style={styles.headerSpacer} />
         <ThemedText style={styles.headerTitle}>
@@ -1327,7 +1328,7 @@ export default function HiveModeScreen() {
       {renderSwitchSelector()}
       {renderNicknameModal()}
       {renderRunSummary()}
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 
@@ -1340,7 +1341,7 @@ const createStyles = (theme: any) =>
     header: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingTop: 8,
+      paddingTop: 12,
       paddingHorizontal: 16,
       paddingBottom: 14,
       backgroundColor: theme.colors.card,

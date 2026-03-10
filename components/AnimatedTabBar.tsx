@@ -6,21 +6,26 @@
  * - Bouncy scale animation on the active icon
  * - Haptic feedback on press (iOS)
  *
- * Uses only the built-in React Native Animated API (no reanimated dep).
+ * Uses react-native-reanimated for performant, native-thread animations.
  */
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import * as Haptics from 'expo-haptics';
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import {
-  Animated,
-  Dimensions,
-  Platform,
-  StyleSheet,
-  TouchableOpacity,
-  View,
+    Dimensions,
+    Platform,
+    StyleSheet,
+    TouchableOpacity,
+    View,
 } from 'react-native';
+import Animated, {
+    useAnimatedStyle,
+    useSharedValue,
+    withSequence,
+    withSpring,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -33,44 +38,30 @@ export function AnimatedTabBar({ state, descriptors, navigation }: Readonly<Bott
   const tabWidth = SCREEN_WIDTH / tabCount;
 
   // ── Sliding indicator ─────────────────────────────────────────────────
-  const indicatorX = useRef(new Animated.Value(state.index * tabWidth)).current;
+  const indicatorX = useSharedValue(state.index * tabWidth);
 
   useEffect(() => {
-    Animated.spring(indicatorX, {
-      toValue: state.index * tabWidth,
-      useNativeDriver: true,
+    indicatorX.value = withSpring(state.index * tabWidth, {
       damping: 18,
       stiffness: 200,
       mass: 0.8,
-    }).start();
+    });
   }, [state.index, tabWidth]);
 
-  // ── Per-tab scale animations ──────────────────────────────────────────
-  const scales = useRef(state.routes.map(() => new Animated.Value(1))).current;
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: indicatorX.value + 12 }],
+  }));
 
-  const animatePress = (index: number) => {
-    // Bounce down → up
-    Animated.sequence([
-      Animated.spring(scales[index], {
-        toValue: 0.8,
-        useNativeDriver: true,
-        damping: 15,
-        stiffness: 400,
-      }),
-      Animated.spring(scales[index], {
-        toValue: 1.15,
-        useNativeDriver: true,
-        damping: 10,
-        stiffness: 300,
-      }),
-      Animated.spring(scales[index], {
-        toValue: 1,
-        useNativeDriver: true,
-        damping: 12,
-        stiffness: 250,
-      }),
-    ]).start();
-  };
+  // ── Per-tab scale animations ──────────────────────────────────────────
+  const scales = state.routes.map(() => useSharedValue(1));
+
+  const animatePress = useCallback((index: number) => {
+    scales[index].value = withSequence(
+      withSpring(0.8, { damping: 15, stiffness: 400 }),
+      withSpring(1.15, { damping: 10, stiffness: 300 }),
+      withSpring(1, { damping: 12, stiffness: 250 }),
+    );
+  }, [scales]);
 
   // When the active tab changes externally, play the scale animation
   useEffect(() => {
@@ -100,8 +91,8 @@ export function AnimatedTabBar({ state, descriptors, navigation }: Readonly<Bott
             width: tabWidth - 24,
             backgroundColor: theme.colors.primary + '25',
             borderColor: theme.colors.primary + '50',
-            transform: [{ translateX: Animated.add(indicatorX, 12) }],
           },
+          indicatorStyle,
         ]}
       />
 
@@ -149,41 +140,74 @@ export function AnimatedTabBar({ state, descriptors, navigation }: Readonly<Bott
         };
 
         return (
-          <TouchableOpacity
+          <TabItem
             key={route.key}
-            accessibilityRole="button"
-            accessibilityState={isFocused ? { selected: true } : {}}
-            accessibilityLabel={options.tabBarAccessibilityLabel}
+            scale={scales[index]}
+            icon={icon}
+            label={label}
+            color={color}
+            isFocused={isFocused}
             onPress={onPress}
             onLongPress={onLongPress}
-            activeOpacity={0.7}
-            style={styles.tab}
-          >
-            <Animated.View
-              style={{
-                transform: [{ scale: scales[index] }],
-                alignItems: 'center',
-              }}
-            >
-              {icon}
-              <Animated.Text
-                style={[
-                  styles.label,
-                  {
-                    color,
-                    opacity: isFocused ? 1 : 0.7,
-                    fontWeight: isFocused ? '900' : '700',
-                  },
-                ]}
-                numberOfLines={1}
-              >
-                {label}
-              </Animated.Text>
-            </Animated.View>
-          </TouchableOpacity>
+            accessibilityLabel={options.tabBarAccessibilityLabel}
+          />
         );
       })}
     </View>
+  );
+}
+
+/** Individual tab — extracted so each can use its own useAnimatedStyle */
+function TabItem({
+  scale,
+  icon,
+  label,
+  color,
+  isFocused,
+  onPress,
+  onLongPress,
+  accessibilityLabel,
+}: {
+  scale: import('react-native-reanimated').SharedValue<number>;
+  icon: React.ReactNode;
+  label: string;
+  color: string;
+  isFocused: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
+  accessibilityLabel?: string;
+}) {
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityState={isFocused ? { selected: true } : {}}
+      accessibilityLabel={accessibilityLabel}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      activeOpacity={0.7}
+      style={styles.tab}
+    >
+      <Animated.View style={[{ alignItems: 'center' }, animatedStyle]}>
+        {icon}
+        <Animated.Text
+          style={[
+            styles.label,
+            {
+              color,
+              opacity: isFocused ? 1 : 0.7,
+              fontWeight: isFocused ? '900' : '700',
+            },
+          ]}
+          numberOfLines={1}
+        >
+          {label}
+        </Animated.Text>
+      </Animated.View>
+    </TouchableOpacity>
   );
 }
 

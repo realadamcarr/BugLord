@@ -1,6 +1,14 @@
 import { useTheme } from '@/contexts/ThemeContext';
-import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { StyleSheet, View } from 'react-native';
+import Animated, {
+    Easing,
+    useAnimatedStyle,
+    useSharedValue,
+    withRepeat,
+    withSequence,
+    withTiming,
+} from 'react-native-reanimated';
 import { ThemedText } from './ThemedText';
 
 interface XPProgressBarProps {
@@ -19,16 +27,74 @@ export const XPProgressBar: React.FC<XPProgressBarProps> = ({
   showTooltip = true,
 }) => {
   const { theme } = useTheme();
-  const progressAnim = useRef(new Animated.Value(0)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
-  
   const progressPercentage = Math.min((currentXP / maxXP) * 100, 100);
   const xpToNext = maxXP - currentXP;
 
-  const styles = StyleSheet.create({
-    container: {
-      marginVertical: 8,
-    },
+  const progress = useSharedValue(animated ? 0 : progressPercentage);
+  const glowOpacity = useSharedValue(0.4);
+
+  useEffect(() => {
+    if (animated) {
+      progress.value = withTiming(progressPercentage, {
+        duration: 850,
+        easing: Easing.out(Easing.cubic),
+      });
+
+      if (progressPercentage > 0) {
+        glowOpacity.value = withRepeat(
+          withSequence(
+            withTiming(1, { duration: 1400 }),
+            withTiming(0.3, { duration: 1400 }),
+          ),
+          -1,
+          false,
+        );
+      }
+    } else {
+      progress.value = progressPercentage;
+    }
+  }, [progressPercentage, animated]);
+
+  const fillStyle = useAnimatedStyle(() => ({
+    width: `${progress.value}%` as any,
+    shadowOpacity: glowOpacity.value,
+  }));
+
+  const styles = createStyles(theme);
+
+  return (
+    <View style={styles.container}>
+      {showTooltip && xpToNext > 0 && (
+        <View style={styles.tooltip}>
+          <ThemedText style={styles.tooltipText}>
+            {xpToNext} XP to Lv. {level + 1}!
+          </ThemedText>
+        </View>
+      )}
+
+      <View style={styles.xpBarContainer}>
+        <View style={styles.xpBarBackground}>
+          <Animated.View style={[styles.xpBarFill, fillStyle]} />
+        </View>
+
+        <View style={styles.xpTextContainer}>
+          <ThemedText style={styles.xpText}>
+            {currentXP}/{maxXP} XP
+          </ThemedText>
+          <View style={styles.levelBadge}>
+            <ThemedText style={styles.levelBadgeText}>
+              Lv. {level}
+            </ThemedText>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const createStyles = (theme: any) =>
+  StyleSheet.create({
+    container: { marginVertical: 8 },
     tooltip: {
       backgroundColor: theme.colors.card,
       paddingHorizontal: 12,
@@ -47,9 +113,7 @@ export const XPProgressBar: React.FC<XPProgressBarProps> = ({
       textTransform: 'uppercase',
       letterSpacing: 0.3,
     },
-    xpBarContainer: {
-      position: 'relative',
-    },
+    xpBarContainer: { position: 'relative' },
     xpBarBackground: {
       width: '100%',
       height: 14,
@@ -66,7 +130,7 @@ export const XPProgressBar: React.FC<XPProgressBarProps> = ({
       borderRadius: 2,
       shadowColor: theme.colors.xpFill,
       shadowOffset: { width: 0, height: 0 },
-      shadowRadius: 4,
+      shadowRadius: 6,
       elevation: 2,
     },
     xpTextContainer: {
@@ -96,74 +160,3 @@ export const XPProgressBar: React.FC<XPProgressBarProps> = ({
       letterSpacing: 0.3,
     },
   });
-
-  useEffect(() => {
-    if (animated) {
-      Animated.timing(progressAnim, {
-        toValue: progressPercentage,
-        duration: 800,
-        useNativeDriver: false,
-      }).start();
-
-      // Glow animation for active progress
-      if (progressPercentage > 0) {
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(glowAnim, {
-              toValue: 1,
-              duration: 1500,
-              useNativeDriver: false,
-            }),
-            Animated.timing(glowAnim, {
-              toValue: 0.3,
-              duration: 1500,
-              useNativeDriver: false,
-            }),
-          ])
-        ).start();
-      }
-    } else {
-      progressAnim.setValue(progressPercentage);
-    }
-  }, [progressPercentage, animated, progressAnim, glowAnim]);
-
-  return (
-    <View style={styles.container}>
-      {showTooltip && xpToNext > 0 && (
-        <View style={styles.tooltip}>
-          <ThemedText style={styles.tooltipText}>
-            {xpToNext} XP to Lv. {level + 1}! 
-          </ThemedText>
-        </View>
-      )}
-      
-      <View style={styles.xpBarContainer}>
-        <View style={styles.xpBarBackground}>
-          <Animated.View 
-            style={[
-              styles.xpBarFill,
-              {
-                width: progressAnim.interpolate({
-                  inputRange: [0, 100],
-                  outputRange: ['0%', '100%'],
-                }),
-                shadowOpacity: glowAnim,
-              }
-            ]} 
-          />
-        </View>
-        
-        <View style={styles.xpTextContainer}>
-          <ThemedText style={styles.xpText}>
-            {currentXP}/{maxXP} XP
-          </ThemedText>
-          <View style={styles.levelBadge}>
-            <ThemedText style={styles.levelBadgeText}>
-              Lv. {level}
-            </ThemedText>
-          </View>
-        </View>
-      </View>
-    </View>
-  );
-};

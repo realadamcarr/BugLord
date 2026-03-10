@@ -1,17 +1,23 @@
 # ============================================
+
 # .easignore — Exclude files from EAS Build uploads
+
 # ============================================
 
 # Dependencies (installed fresh on EAS)
+
 node_modules/
 
 # Git
+
 .git/
 .github/
 BugLord-backup.git/
 
-# Python / ML Training
+# Python / ML Training / Backend (runs on VPS, not in app)
+
 .venv/
+backend/
 training/
 runs/
 /models/
@@ -27,28 +33,41 @@ __pycache__/
 *.ckpt
 yolov8n.pt
 
+# Keep bundled on-device ML model and labels (used by OnDeviceClassifier)
+
+!assets/ml/model.tflite
+!assets/ml/labels.json
+!assets/ml/labels.txt
+
 # Pre-built APKs (not needed on EAS)
+
 *.apk
 
 # Android directory — let EAS auto-prebuild (CNG approach)
+
 # This ensures compatible AGP/Gradle versions every time
+
 android/
 
 # Expo caches
+
 .expo/
 dist/
 web-build/
 
 # IDE / OS
+
 .vscode/
 .idea/
 .DS_Store
 
 # Docs (not needed for build)
+
 *.md
 github-setup.txt
 
 # Scripts not needed on EAS
+
 *.bat
 *.sh
 scripts/
@@ -58,7 +77,9 @@ install-real-tflite.bat
 update-icon.bat
 
 # Tests
+
 __tests__/
 
 # Keystore (already on EAS server)
+
 *.jks

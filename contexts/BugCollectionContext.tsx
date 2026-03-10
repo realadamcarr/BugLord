@@ -27,6 +27,8 @@ function deriveBugCategory(bug: any): BugCategory | undefined {
 interface BugCollectionContextType {
   collection: BugCollection;
   addBugToCollection: (bug: Omit<Bug, 'id' | 'caughtAt'> & Partial<Pick<Bug, 'level' | 'xp' | 'maxXp'>>) => Promise<Bug>;
+  /** Add a traded bug to the local collection using its Firestore ID (so future trades work correctly). */
+  receiveTradedBug: (firestoreId: string, bugData: Omit<Bug, 'id' | 'caughtAt'>) => Promise<Bug>;
   addBugToParty: (bug: Bug, slot?: number) => boolean;
   removeBugFromParty: (slot: number) => void;
   swapPartySlots: (from: number, to: number) => void;
@@ -36,6 +38,7 @@ interface BugCollectionContextType {
   updateBugHp: (bugId: string, currentHp: number) => Promise<boolean>;
   releaseBug: (bugId: string) => void;
   gainXP: (amount: number) => void;
+  setProfilePicture: (key: string) => void;
   loading: boolean;
 }
 
@@ -58,6 +61,7 @@ const DEFAULT_COLLECTION: BugCollection = {
   totalXp: 0,
   level: 1,
   xp: 0,
+  profilePicture: 'default',
 };
 
 export const useBugCollection = (): BugCollectionContextType => {
@@ -211,6 +215,25 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     const xpReward = RARITY_CONFIG[newBug.rarity].xpRange[0];
     gainXP(xpReward);
 
+    return newBug;
+  };
+
+  const receiveTradedBug = async (
+    firestoreId: string,
+    bugData: Omit<Bug, 'id' | 'caughtAt'>,
+  ): Promise<Bug> => {
+    const hpForLevel = Math.floor((bugData.maxXp ?? 50) * (1 + ((bugData.level ?? 1) - 1) * 0.2));
+    const newBug: Bug = {
+      ...bugData,
+      id: firestoreId,
+      caughtAt: new Date(),
+      maxHp: bugData.maxHp ?? hpForLevel,
+      currentHp: bugData.currentHp ?? hpForLevel,
+    };
+    setCollection(prev => ({
+      ...prev,
+      bugs: [...prev.bugs, newBug],
+    }));
     return newBug;
   };
 
@@ -413,9 +436,14 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     });
   };
 
+  const setProfilePicture = (key: string) => {
+    setCollection(prev => ({ ...prev, profilePicture: key }));
+  };
+
   const contextValue: BugCollectionContextType = {
     collection,
     addBugToCollection,
+    receiveTradedBug,
     addBugToParty,
     removeBugFromParty,
     swapPartySlots,
@@ -425,6 +453,7 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     updateBugHp,
     releaseBug,
     gainXP,
+    setProfilePicture,
     loading,
   };
 

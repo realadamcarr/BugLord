@@ -2,8 +2,9 @@ import { ThemedText } from '@/components/ThemedText';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuthUser } from '@/hooks/useAuthUser';
-import { Trade } from '@/src/models/trades';
-import { syncLocalBugToFirestore } from '@/src/services/inventoryService';
+import { BugInstance } from '@/src/models/bugs';
+import { BugSnapshot, Trade } from '@/src/models/trades';
+import { getFirestoreBug, syncLocalBugToFirestore } from '@/src/services/inventoryService';
 import { getUserProfile, UserProfile } from '@/src/services/socialAuth';
 import {
     cancelTrade,
@@ -13,7 +14,7 @@ import {
     subscribeTrade,
     unsetTradeAcceptFlag,
 } from '@/src/services/tradeService';
-import { Bug } from '@/types/Bug';
+import { Bug, generateBugStats, SAMPLE_BUGS } from '@/types/Bug';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -35,6 +36,35 @@ const RARITY_COLORS: Record<string, string> = {
   legendary: '#F59E0B',
 };
 
+/** Convert a Firestore BugInstance into local Bug fields for the collection. */
+function bugInstanceToLocalBug(inst: BugInstance): Omit<Bug, 'id' | 'caughtAt'> {
+  const sample = SAMPLE_BUGS.find(
+    b => b.species === inst.speciesId || b.name === inst.speciesId,
+  );
+  const stats = generateBugStats(inst.rarity);
+  const level = inst.level ?? 1;
+  const hpForLevel = Math.floor(stats.maxXp * (1 + (level - 1) * 0.2));
+  return {
+    name: sample?.name ?? inst.speciesId,
+    species: inst.speciesId,
+    nickname: inst.nickname,
+    rarity: inst.rarity,
+    description: sample?.description ?? 'A traded bug from another collector.',
+    biome: sample?.biome ?? 'garden',
+    traits: sample?.traits ?? ['Traded'],
+    size: sample?.size ?? 'small',
+    xpValue: stats.maxXp,
+    level,
+    xp: 0,
+    maxXp: stats.maxXp,
+    attack: stats.attack,
+    defense: stats.defense,
+    speed: stats.speed,
+    maxHp: hpForLevel,
+    currentHp: hpForLevel,
+  };
+}
+
 export default function TradeSessionScreen() {
   const { theme } = useTheme();
   const { user } = useAuthUser();
@@ -47,43 +77,86 @@ export default function TradeSessionScreen() {
   const [actionLoading, setActionLoading] = useState(false);
   const [partnerProfile, setPartnerProfile] = useState<UserProfile | null>(null);
 
-  // Local bugs from BugCollectionContext (AsyncStorage)
-  const { collection: bugCollection } = useBugCollection();
+  // Bug snapshots read from the trade doc (no cross-user inventory read needed)
+  const fromSnapshot: BugSnapshot | null = trade?.fromBugSnapshot ?? null;
+  const toSnapshot: BugSnapshot | null = trade?.toBugSnapshot ?? null;
 
-  // Recipient bug picker state (only used when toBugId is empty and user is recipient)
+  // Completion flow state
+  const [completionHandled, setCompletionHandled] = useState(false);
+  const [completionSyncing, setCompletionSyncing] = useState(false);
+  const [receivedBug, setReceivedBug] = useState<Bug | null>(null);
+
+  // Local bugs
+  const { collection: bugCollection, releaseBug, receiveTradedBug } = useBugCollection();
+
+  // Recipient bug picker
   const [selectedBugId, setSelectedBugId] = useState<string | null>(null);
   const [settingBug, setSettingBug] = useState(false);
 
-  // ── Countdown timer ────────────────────────────────────────────
+  // Countdown timer
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const iv = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(iv);
   }, []);
 
-  // ── Subscribe to trade ─────────────────────────────────────────
+  // Subscribe to trade
   useEffect(() => {
     if (!tradeId) return;
     const unsub = subscribeTrade(
       tradeId,
-      (t) => {
-        setTrade(t);
-        setLoading(false);
-      },
+      (t) => { setTrade(t); setLoading(false); },
       () => setLoading(false),
     );
     return unsub;
   }, [tradeId]);
 
-  // ── Load partner profile ───────────────────────────────────────
+  // Load partner profile
   useEffect(() => {
     if (!trade || !user) return;
-    const partnerUid =
-      trade.fromUid === user.uid ? trade.toUid : trade.fromUid;
+    const partnerUid = trade.fromUid === user.uid ? trade.toUid : trade.fromUid;
     getUserProfile(partnerUid).then(setPartnerProfile);
   }, [trade?.fromUid, trade?.toUid, user?.uid]);
 
-  // ── All local bugs (collection + party), deduplicated ──────────
+  // (Bug details come from trade.fromBugSnapshot / trade.toBugSnapshot —
+  //  no cross-user Firestore reads needed.)
+
+  // Handle trade completion: sync local collection
+  useEffect(() => {
+    if (!trade || trade.status !== 'completed' || completionHandled || !user) return;
+    setCompletionHandled(true);
+    setCompletionSyncing(true);
+
+    const syncCompletion = async () => {
+      const isFrom = trade.fromUid === user.uid;
+      const myBugId = isFrom ? trade.fromBugId : trade.toBugId;
+      const receivedBugId = isFrom ? trade.toBugId : trade.fromBugId;
+
+      // Remove the bug I traded from my local collection
+      if (myBugId) releaseBug(myBugId);
+
+      // Fetch the received bug from MY Firestore inventory (Cloud Function moved it there)
+      // Retry up to 3× with 1 s delay to account for Firestore propagation
+      let receivedInstance: BugInstance | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        receivedInstance = await getFirestoreBug(user.uid, receivedBugId);
+        if (receivedInstance) break;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      if (receivedInstance && receivedBugId) {
+        const bugData = bugInstanceToLocalBug(receivedInstance);
+        const added = await receiveTradedBug(receivedBugId, bugData);
+        setReceivedBug(added);
+      }
+    };
+
+    syncCompletion()
+      .catch(err => console.warn('[TradeSession] Completion sync failed:', err))
+      .finally(() => setCompletionSyncing(false));
+  }, [trade?.status, completionHandled, user?.uid]);
+
+  // All local bugs (collection + party), deduplicated
   const allLocalBugs = useMemo(() => {
     const map = new Map<string, Bug>();
     for (const b of bugCollection.bugs) map.set(b.id, b);
@@ -93,7 +166,7 @@ export default function TradeSessionScreen() {
     return Array.from(map.values());
   }, [bugCollection.bugs, bugCollection.party]);
 
-  // ── Derived state ──────────────────────────────────────────────
+  // Derived state
   const isFrom = trade?.fromUid === user?.uid;
   const myAccepted = isFrom ? trade?.fromAccepted : trade?.toAccepted;
   const partnerAccepted = isFrom ? trade?.toAccepted : trade?.fromAccepted;
@@ -101,15 +174,13 @@ export default function TradeSessionScreen() {
     ? ['completed', 'declined', 'cancelled', 'expired'].includes(trade.status)
     : false;
 
-  // Bug lookup
   const myBugId = isFrom ? trade?.fromBugId : trade?.toBugId;
   const partnerBugId = isFrom ? trade?.toBugId : trade?.fromBugId;
-  const myBugData = allLocalBugs.find((b) => b.id === myBugId);
   const needsRecipientPick = !isFrom && !trade?.toBugId;
   const bothBugsSet = !!(trade?.fromBugId && trade?.toBugId);
 
-  // Available bugs for the recipient picker
-  const availableBugs = useMemo(() => allLocalBugs, [allLocalBugs]);
+  const mySnapshot = isFrom ? fromSnapshot : toSnapshot;
+  const partnerSnapshot = isFrom ? toSnapshot : fromSnapshot;
 
   const timeRemaining = useMemo(() => {
     if (!trade?.expiresAt) return '';
@@ -122,16 +193,14 @@ export default function TradeSessionScreen() {
 
   const isExpired = trade?.expiresAt ? trade.expiresAt.toMillis() < now : false;
 
-  // ── Handlers ───────────────────────────────────────────────────
+  // ── Handlers ───────────────────────────────────────────────────────
 
   const handleSetBug = useCallback(async () => {
     if (!tradeId || !user || !selectedBugId) return;
-    const bug = allLocalBugs.find((b) => b.id === selectedBugId);
+    const bug = allLocalBugs.find(b => b.id === selectedBugId);
     if (!bug) return;
-
     setSettingBug(true);
     try {
-      // Sync local bug to Firestore so the trade system can reference it
       await syncLocalBugToFirestore(user.uid, bug);
       await setToBugId(tradeId, user.uid, selectedBugId);
       setSelectedBugId(null);
@@ -152,7 +221,7 @@ export default function TradeSessionScreen() {
         await setTradeAcceptFlag(tradeId, user.uid);
       }
     } catch (err: unknown) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'Action failed');
+      Alert.alert('Trade Error', err instanceof Error ? err.message : 'Action failed. Please try again.');
     } finally {
       setActionLoading(false);
     }
@@ -180,10 +249,7 @@ export default function TradeSessionScreen() {
               }
               router.back();
             } catch (err: unknown) {
-              Alert.alert(
-                'Error',
-                err instanceof Error ? err.message : 'Failed',
-              );
+              Alert.alert('Error', err instanceof Error ? err.message : 'Failed');
             } finally {
               setActionLoading(false);
             }
@@ -195,7 +261,7 @@ export default function TradeSessionScreen() {
 
   const styles = createStyles(theme);
 
-  // ── Loading ────────────────────────────────────────────────────
+  // ── Loading ────────────────────────────────────────────────────────
   if (loading || !trade) {
     return (
       <SafeAreaView style={styles.container}>
@@ -209,10 +275,60 @@ export default function TradeSessionScreen() {
     );
   }
 
-  // ── Terminal state ─────────────────────────────────────────────
+  // ── Completion: finalising spinner ─────────────────────────────────
+  if (trade.status === 'completed' && completionSyncing) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <ThemedText style={styles.loadingText}>Finalising trade…</ThemedText>
+          <ThemedText style={[styles.subText, { color: theme.colors.textMuted }]}>
+            Updating your collection
+          </ThemedText>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ── Completion: success screen ─────────────────────────────────────
+  if (trade.status === 'completed' && !completionSyncing) {
+    const rarityColor = receivedBug ? (RARITY_COLORS[receivedBug.rarity] ?? '#9CA3AF') : '#22C55E';
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.center}>
+          <ThemedText style={styles.statusEmoji}>✅</ThemedText>
+          <ThemedText style={styles.statusTitle}>Trade Complete!</ThemedText>
+          {receivedBug && (
+            <View style={[styles.receivedCard, { backgroundColor: theme.colors.card, borderColor: rarityColor }]}>
+              <ThemedText style={[styles.receivedLabel, { color: theme.colors.textMuted }]}>
+                YOU RECEIVED
+              </ThemedText>
+              <View style={[styles.rarityDot, { backgroundColor: rarityColor, alignSelf: 'center', marginBottom: 8 }]} />
+              <ThemedText style={styles.receivedName}>
+                {receivedBug.nickname ?? receivedBug.name}
+              </ThemedText>
+              <ThemedText style={[styles.receivedMeta, { color: theme.colors.textMuted }]}>
+                Lv.{receivedBug.level} · {receivedBug.rarity}
+              </ThemedText>
+              <ThemedText style={[styles.receivedStats, { color: theme.colors.textMuted }]}>
+                ⚔ {receivedBug.attack}  🛡 {receivedBug.defense}  ⚡ {receivedBug.speed}
+              </ThemedText>
+            </View>
+          )}
+          <TouchableOpacity
+            style={[styles.backBtn, { borderColor: theme.colors.border }]}
+            onPress={() => router.back()}
+          >
+            <ThemedText style={styles.backBtnText}>Back to Social</ThemedText>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ── Terminal state (declined / cancelled / expired) ────────────────
   if (isTerminal) {
     const statusEmoji: Record<string, string> = {
-      completed: '✅',
       declined: '❌',
       cancelled: '🚫',
       expired: '⏰',
@@ -237,28 +353,33 @@ export default function TradeSessionScreen() {
     );
   }
 
-  // ── Bug detail card helper ─────────────────────────────────────
-  const renderBugDetail = (bug: Bug | undefined, label: string, emptyLabel: string) => {
-    const rarityColor = bug ? (RARITY_COLORS[bug.rarity] ?? '#9CA3AF') : '#9CA3AF';
+  // ── Bug detail card ────────────────────────────────────────────────
+  const renderBugCard = (snap: BugSnapshot | null, label: string, waiting = false) => {
+    const rarityColor = snap ? (RARITY_COLORS[snap.rarity] ?? '#9CA3AF') : '#9CA3AF';
+    const sample = snap
+      ? SAMPLE_BUGS.find(b => b.species === snap.speciesId || b.name === snap.speciesId)
+      : null;
+    const displayName = snap ? (snap.nickname ?? sample?.name ?? snap.speciesId) : null;
     return (
       <View style={styles.offerSide}>
         <ThemedText style={[styles.offerLabel, { color: theme.colors.textMuted }]}>
           {label}
         </ThemedText>
-        <View style={[styles.offerCard, { backgroundColor: theme.colors.card, borderColor: bug ? rarityColor : theme.colors.border }]}>
-          {bug ? (
+        <View style={[styles.offerCard, {
+          backgroundColor: theme.colors.card,
+          borderColor: snap ? rarityColor : theme.colors.border,
+        }]}>
+          {snap ? (
             <>
               <View style={[styles.rarityDot, { backgroundColor: rarityColor }]} />
-              <ThemedText style={styles.offerName} numberOfLines={1}>
-                {bug.nickname ?? bug.name}
-              </ThemedText>
+              <ThemedText style={styles.offerName} numberOfLines={1}>{displayName}</ThemedText>
               <ThemedText style={[styles.offerMeta, { color: theme.colors.textMuted }]}>
-                Lv.{bug.level} • {bug.rarity}
+                Lv.{snap.level} · {snap.rarity}
               </ThemedText>
             </>
           ) : (
             <ThemedText style={[styles.offerPending, { color: theme.colors.textMuted }]}>
-              {emptyLabel}
+              {waiting ? 'Waiting…' : 'Not set'}
             </ThemedText>
           )}
         </View>
@@ -266,9 +387,13 @@ export default function TradeSessionScreen() {
     );
   };
 
-  // ── RECIPIENT BUG PICKER (toBugId not set yet) ─────────────────
+  // ── RECIPIENT BUG PICKER ───────────────────────────────────────────
   if (needsRecipientPick) {
-    const pickerBugData = availableBugs.find((b) => b.id === selectedBugId);
+    const pickerBugData = allLocalBugs.find(b => b.id === selectedBugId);
+    const senderSample = fromSnapshot
+      ? SAMPLE_BUGS.find(b => b.species === fromSnapshot.speciesId || b.name === fromSnapshot.speciesId)
+      : null;
+
     return (
       <SafeAreaView style={styles.container}>
         {/* Timer */}
@@ -286,42 +411,55 @@ export default function TradeSessionScreen() {
             {partnerProfile?.displayName ?? 'Someone'} wants to trade!
           </ThemedText>
           <ThemedText style={[styles.subheading, { color: theme.colors.textMuted }]}>
-            Choose a bug from your collection to offer back
+            Pick a bug from your collection to offer back
           </ThemedText>
         </View>
 
-        {/* Show partner's offer */}
-        <View style={[styles.partnerOfferBanner, { backgroundColor: theme.colors.card, borderColor: theme.colors.primary }]}>
+        {/* Sender's offered bug */}
+        <View style={[styles.offerBanner, {
+          backgroundColor: theme.colors.card,
+          borderColor: fromSnapshot
+            ? (RARITY_COLORS[fromSnapshot.rarity] ?? theme.colors.primary)
+            : theme.colors.primary,
+        }]}>
           <ThemedText style={[styles.offerLabel, { color: theme.colors.textMuted }]}>
             THEIR OFFER
           </ThemedText>
-          {/* We can't show full details of partner's bug since we don't have their inventory —
-              but we do know the fromBugId. We'll show what we know */}
-          <ThemedText style={styles.offerName}>
-            🐛 Bug #{trade.fromBugId.slice(0, 8)}
-          </ThemedText>
+          {fromSnapshot ? (
+            <View style={styles.bannerRow}>
+              <View style={[styles.rarityDot, { backgroundColor: RARITY_COLORS[fromSnapshot.rarity] ?? '#9CA3AF' }]} />
+              <ThemedText style={styles.offerName}>
+                {fromSnapshot.nickname ?? senderSample?.name ?? fromSnapshot.speciesId}
+              </ThemedText>
+              <ThemedText style={[styles.offerMeta, { color: theme.colors.textMuted }]}>
+                Lv.{fromSnapshot.level} · {fromSnapshot.rarity}
+              </ThemedText>
+            </View>
+          ) : (
+            <ThemedText style={styles.offerName}>🐛 Bug #{trade.fromBugId.slice(0, 8)}</ThemedText>
+          )}
         </View>
 
-        {/* Selected summary */}
+        {/* Recipient's selected bug preview */}
         {pickerBugData && (
-          <View style={[styles.partnerOfferBanner, { backgroundColor: theme.colors.card, borderColor: '#22C55E' }]}>
+          <View style={[styles.offerBanner, { backgroundColor: theme.colors.card, borderColor: '#22C55E' }]}>
             <ThemedText style={[styles.offerLabel, { color: theme.colors.textMuted }]}>
               YOUR OFFER
             </ThemedText>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={styles.bannerRow}>
               <View style={[styles.rarityDot, { backgroundColor: RARITY_COLORS[pickerBugData.rarity] ?? '#9CA3AF' }]} />
               <ThemedText style={styles.offerName}>
                 {pickerBugData.nickname ?? pickerBugData.name}
               </ThemedText>
               <ThemedText style={[styles.offerMeta, { color: theme.colors.textMuted }]}>
-                Lv.{pickerBugData.level} • {pickerBugData.rarity}
+                Lv.{pickerBugData.level} · {pickerBugData.rarity}
               </ThemedText>
             </View>
           </View>
         )}
 
-        {/* Bug picker list */}
-        {availableBugs.length === 0 ? (
+        {/* Bug list */}
+        {allLocalBugs.length === 0 ? (
           <View style={styles.center}>
             <ThemedText style={[styles.emptyText, { color: theme.colors.textMuted }]}>
               No bugs available for trading
@@ -329,39 +467,32 @@ export default function TradeSessionScreen() {
           </View>
         ) : (
           <FlatList
-            data={availableBugs}
-            keyExtractor={(item) => item.id}
+            data={allLocalBugs}
+            keyExtractor={item => item.id}
             contentContainerStyle={styles.list}
             renderItem={({ item }) => {
               const isSelected = selectedBugId === item.id;
               const rarityColor = RARITY_COLORS[item.rarity] ?? '#9CA3AF';
               return (
                 <TouchableOpacity
-                  style={[
-                    styles.bugCard,
-                    {
-                      backgroundColor: theme.colors.card,
-                      borderColor: isSelected ? theme.colors.primary : theme.colors.border,
-                      borderWidth: isSelected ? 3 : 1,
-                    },
-                  ]}
+                  style={[styles.bugCard, {
+                    backgroundColor: theme.colors.card,
+                    borderColor: isSelected ? theme.colors.primary : theme.colors.border,
+                    borderWidth: isSelected ? 3 : 1,
+                  }]}
                   onPress={() => setSelectedBugId(isSelected ? null : item.id)}
                   activeOpacity={0.7}
                 >
                   <View style={styles.bugRow}>
                     <View style={[styles.rarityDot, { backgroundColor: rarityColor }]} />
                     <View style={styles.bugInfo}>
-                      <ThemedText style={styles.bugName}>
-                        {item.nickname ?? item.name}
-                      </ThemedText>
+                      <ThemedText style={styles.bugName}>{item.nickname ?? item.name}</ThemedText>
                       <ThemedText style={[styles.bugMeta, { color: theme.colors.textMuted }]}>
-                        Lv.{item.level} • {item.rarity}
+                        Lv.{item.level} · {item.rarity}
                       </ThemedText>
                     </View>
                     {isSelected && (
-                      <ThemedText style={[styles.checkmark, { color: theme.colors.primary }]}>
-                        ✓
-                      </ThemedText>
+                      <ThemedText style={[styles.checkmark, { color: theme.colors.primary }]}>✓</ThemedText>
                     )}
                   </View>
                 </TouchableOpacity>
@@ -370,10 +501,13 @@ export default function TradeSessionScreen() {
           />
         )}
 
-        {/* Footer with confirm + decline */}
+        {/* Footer */}
         <View style={styles.footer}>
           <TouchableOpacity
-            style={[styles.confirmBtn, { backgroundColor: theme.colors.primary, opacity: !selectedBugId || settingBug ? 0.5 : 1 }]}
+            style={[styles.confirmBtn, {
+              backgroundColor: theme.colors.primary,
+              opacity: !selectedBugId || settingBug ? 0.5 : 1,
+            }]}
             onPress={handleSetBug}
             disabled={!selectedBugId || settingBug}
           >
@@ -397,99 +531,80 @@ export default function TradeSessionScreen() {
     );
   }
 
-  // ── MAIN TRADE SESSION (both bugs set) ─────────────────────────
+  // ── MAIN TRADE SESSION ─────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 120 }}>
-        {/* ── Timer ──────────────────────────────────────────── */}
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 160 }}>
+        {/* Timer */}
         <View style={[styles.timerBar, { backgroundColor: theme.colors.card }]}>
           <ThemedText style={[styles.timerLabel, { color: theme.colors.textMuted }]}>
             Time Remaining
           </ThemedText>
-          <ThemedText
-            style={[styles.timerValue, { color: isExpired ? '#EF4444' : theme.colors.text }]}
-          >
+          <ThemedText style={[styles.timerValue, { color: isExpired ? '#EF4444' : theme.colors.text }]}>
             {timeRemaining}
           </ThemedText>
         </View>
 
-        {/* ── Trade header ──────────────────────────────────── */}
+        {/* Header */}
         <View style={[styles.card, { backgroundColor: theme.colors.card }]}>
           <ThemedText style={styles.cardTitle}>Trade Session</ThemedText>
-          <ThemedText style={[styles.partnerName, { color: theme.colors.textMuted }]}>
+          <ThemedText style={[styles.cardSub, { color: theme.colors.textMuted }]}>
             with {partnerProfile?.displayName ?? 'Loading…'}
           </ThemedText>
         </View>
 
-        {/* ── Offers ─────────────────────────────────────────── */}
+        {/* Offers side by side */}
         <View style={styles.offersRow}>
-          {renderBugDetail(
-            myBugData,
-            'Your Offer',
-            'Waiting…',
-          )}
+          {renderBugCard(mySnapshot, 'Your Offer')}
           <ThemedText style={[styles.swapIcon, { color: theme.colors.textMuted }]}>⇄</ThemedText>
-          {renderBugDetail(
-            undefined, // We can't load partner's bug data (blind trade)
-            'Their Offer',
-            partnerBugId ? `Bug #${partnerBugId.slice(0, 8)}` : 'Waiting…',
-          )}
+          {renderBugCard(partnerSnapshot, 'Their Offer', true)}
         </View>
 
-        {/* ── Accept status ──────────────────────────────────── */}
+        {/* Acceptance */}
         <View style={[styles.card, { backgroundColor: theme.colors.card }]}>
           <ThemedText style={styles.cardTitle}>Acceptance</ThemedText>
+          <ThemedText style={[styles.acceptHint, { color: theme.colors.textMuted }]}>
+            Both players must accept to complete the trade
+          </ThemedText>
           <View style={styles.acceptRow}>
             <View style={styles.acceptSide}>
               <ThemedText style={styles.acceptLabel}>You</ThemedText>
-              <View
-                style={[
-                  styles.acceptBadge,
-                  {
-                    backgroundColor: myAccepted ? '#22C55E20' : '#EF444420',
-                    borderColor: myAccepted ? '#22C55E' : '#EF4444',
-                  },
-                ]}
-              >
-                <ThemedText
-                  style={[styles.acceptText, { color: myAccepted ? '#22C55E' : '#EF4444' }]}
-                >
-                  {myAccepted ? '✓ Accepted' : '✗ Pending'}
+              <View style={[styles.acceptBadge, {
+                backgroundColor: myAccepted ? '#22C55E20' : '#EF444420',
+                borderColor: myAccepted ? '#22C55E' : '#EF4444',
+              }]}>
+                <ThemedText style={[styles.acceptText, { color: myAccepted ? '#22C55E' : '#EF4444' }]}>
+                  {myAccepted ? '✓ Ready' : '✗ Pending'}
                 </ThemedText>
               </View>
             </View>
             <View style={styles.acceptSide}>
               <ThemedText style={styles.acceptLabel}>Partner</ThemedText>
-              <View
-                style={[
-                  styles.acceptBadge,
-                  {
-                    backgroundColor: partnerAccepted ? '#22C55E20' : '#EF444420',
-                    borderColor: partnerAccepted ? '#22C55E' : '#EF4444',
-                  },
-                ]}
-              >
-                <ThemedText
-                  style={[styles.acceptText, { color: partnerAccepted ? '#22C55E' : '#EF4444' }]}
-                >
-                  {partnerAccepted ? '✓ Accepted' : '✗ Pending'}
+              <View style={[styles.acceptBadge, {
+                backgroundColor: partnerAccepted ? '#22C55E20' : '#EF444420',
+                borderColor: partnerAccepted ? '#22C55E' : '#EF4444',
+              }]}>
+                <ThemedText style={[styles.acceptText, { color: partnerAccepted ? '#22C55E' : '#EF4444' }]}>
+                  {partnerAccepted ? '✓ Ready' : '✗ Pending'}
                 </ThemedText>
               </View>
             </View>
           </View>
+          {myAccepted && !partnerAccepted && (
+            <ThemedText style={[styles.waitingText, { color: theme.colors.textMuted }]}>
+              Waiting for partner to accept…
+            </ThemedText>
+          )}
         </View>
       </ScrollView>
 
-      {/* ── Actions ─────────────────────────────────────────── */}
+      {/* Actions */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[
-            styles.confirmBtn,
-            {
-              backgroundColor: myAccepted ? '#EF4444' : '#22C55E',
-              opacity: actionLoading || isExpired || !bothBugsSet ? 0.5 : 1,
-            },
-          ]}
+          style={[styles.confirmBtn, {
+            backgroundColor: myAccepted ? '#EF4444' : '#22C55E',
+            opacity: actionLoading || isExpired || !bothBugsSet ? 0.5 : 1,
+          }]}
           onPress={handleToggleAccept}
           disabled={actionLoading || isExpired || !bothBugsSet}
         >
@@ -501,7 +616,6 @@ export default function TradeSessionScreen() {
             </ThemedText>
           )}
         </TouchableOpacity>
-
         <TouchableOpacity
           style={[styles.declineBtn, { borderColor: '#EF4444' }]}
           onPress={handleCancel}
@@ -521,14 +635,13 @@ function createStyles(theme: any) {
     container: { flex: 1, backgroundColor: theme.colors.background },
     center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
     loadingText: { marginTop: 12, fontSize: 15 },
+    subText: { marginTop: 6, fontSize: 13 },
     content: { flex: 1, padding: 16 },
 
-    // Header & subheading (for picker mode)
     pickerHeader: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 },
     heading: { fontSize: 20, fontWeight: '900', letterSpacing: 0.5 },
     subheading: { fontSize: 14, marginTop: 4 },
 
-    // Timer
     timerBar: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -544,7 +657,6 @@ function createStyles(theme: any) {
     timerLabel: { fontSize: 14, fontWeight: '600' },
     timerValue: { fontSize: 24, fontWeight: '900', fontFamily: 'SpaceMono', letterSpacing: 2 },
 
-    // Card
     card: {
       borderRadius: 14,
       padding: 16,
@@ -554,9 +666,8 @@ function createStyles(theme: any) {
       borderColor: theme.colors.border,
     },
     cardTitle: { fontSize: 17, fontWeight: '800', marginBottom: 4 },
-    partnerName: { fontSize: 14 },
+    cardSub: { fontSize: 14 },
 
-    // Offers row
     offersRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -581,16 +692,16 @@ function createStyles(theme: any) {
     rarityDot: { width: 12, height: 12, borderRadius: 6, marginBottom: 4 },
     swapIcon: { fontSize: 24, fontWeight: '900' },
 
-    // Partner offer banner (picker mode)
-    partnerOfferBanner: {
+    offerBanner: {
       marginHorizontal: 16,
       marginBottom: 8,
       borderRadius: 12,
       borderWidth: 2,
       padding: 12,
     },
+    bannerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 
-    // Accept status
+    acceptHint: { fontSize: 12, marginBottom: 12 },
     acceptRow: { flexDirection: 'row', gap: 12 },
     acceptSide: { flex: 1, alignItems: 'center' },
     acceptLabel: { fontSize: 13, fontWeight: '700', marginBottom: 6 },
@@ -602,8 +713,8 @@ function createStyles(theme: any) {
       alignItems: 'center',
     },
     acceptText: { fontSize: 13, fontWeight: '800' },
+    waitingText: { fontSize: 12, textAlign: 'center', marginTop: 12, fontStyle: 'italic' },
 
-    // Bug picker list
     list: { padding: 16, paddingBottom: 160 },
     bugCard: { borderRadius: 12, padding: 14, marginBottom: 10 },
     bugRow: { flexDirection: 'row', alignItems: 'center' },
@@ -613,7 +724,6 @@ function createStyles(theme: any) {
     checkmark: { fontSize: 22, fontWeight: '900' },
     emptyText: { fontSize: 15, fontStyle: 'italic', textAlign: 'center' },
 
-    // Footer
     footer: {
       position: 'absolute',
       bottom: 0,
@@ -626,29 +736,27 @@ function createStyles(theme: any) {
       borderTopColor: theme.colors.border,
       gap: 10,
     },
-    confirmBtn: {
-      paddingVertical: 16,
-      borderRadius: 14,
-      alignItems: 'center',
-    },
+    confirmBtn: { paddingVertical: 16, borderRadius: 14, alignItems: 'center' },
     confirmBtnText: { color: '#fff', fontWeight: '800', fontSize: 17 },
-    declineBtn: {
-      paddingVertical: 12,
-      borderRadius: 14,
-      borderWidth: 2,
-      alignItems: 'center',
-    },
+    declineBtn: { paddingVertical: 12, borderRadius: 14, borderWidth: 2, alignItems: 'center' },
     declineBtnText: { color: '#EF4444', fontWeight: '700', fontSize: 15 },
 
-    // Terminal
     statusEmoji: { fontSize: 56, marginBottom: 16 },
     statusTitle: { fontSize: 24, fontWeight: '900', marginBottom: 24 },
-    backBtn: {
-      paddingHorizontal: 24,
-      paddingVertical: 12,
-      borderRadius: 10,
-      borderWidth: 2,
-    },
+    backBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10, borderWidth: 2 },
     backBtnText: { fontWeight: '700', fontSize: 15 },
+
+    receivedCard: {
+      width: '100%',
+      borderWidth: 2,
+      borderRadius: 16,
+      padding: 20,
+      alignItems: 'center',
+      marginBottom: 24,
+    },
+    receivedLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8 },
+    receivedName: { fontSize: 22, fontWeight: '900', textAlign: 'center', marginBottom: 4 },
+    receivedMeta: { fontSize: 14, fontWeight: '600', marginBottom: 8 },
+    receivedStats: { fontSize: 13, fontWeight: '600' },
   });
 }

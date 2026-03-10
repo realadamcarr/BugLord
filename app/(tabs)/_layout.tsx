@@ -11,12 +11,16 @@ function renderTabBar(props: BottomTabBarProps) {
 
 type IconProps = Readonly<{ color: string; focused: boolean }>;
 
-function TrainIcon({ color, focused }: IconProps) {
-  return <IconSymbol size={focused ? 30 : 26} name="dumbbell" color={color} />;
+function WalkIcon({ color, focused }: IconProps) {
+  return <IconSymbol size={focused ? 30 : 26} name="figure.walk" color={color} />;
 }
 
 function CaptureIcon({ color, focused }: IconProps) {
   return <IconSymbol size={focused ? 34 : 30} name="camera" color={color} />;
+}
+
+function HiveIcon({ color, focused }: IconProps) {
+  return <IconSymbol size={focused ? 30 : 26} name="hexagon" color={color} />;
 }
 
 function PlayerIcon({ color, focused }: IconProps) {
@@ -35,10 +39,17 @@ export default function TabLayout() {
         headerShown: false,
       }}>
       <Tabs.Screen
-        name="train"
+        name="walk"
         options={{
-          title: 'Train',
-          tabBarIcon: TrainIcon,
+          title: 'Walk',
+          tabBarIcon: WalkIcon,
+        }}
+      />
+      <Tabs.Screen
+        name="hive"
+        options={{
+          title: 'Hive',
+          tabBarIcon: HiveIcon,
         }}
       />
       <Tabs.Screen

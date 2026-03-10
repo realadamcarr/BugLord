@@ -58,6 +58,21 @@ export async function addBugToInventory(
 }
 
 /**
+ * Fetch a single bug from a user's Firestore inventory.
+ * Returns null if the document doesn't exist or can't be read.
+ */
+export async function getFirestoreBug(uid: string, bugId: string): Promise<BugInstance | null> {
+  try {
+    const bugDocRef = doc(db, 'inventories', uid, 'bugs', bugId);
+    const snap = await getDoc(bugDocRef);
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...snap.data() } as BugInstance;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Sync a local Bug (from BugCollectionContext / AsyncStorage) to
  * Firestore so the trade system can reference it.
  *

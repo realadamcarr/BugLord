@@ -1,21 +1,22 @@
 import { BugCamera, ScanMode } from '@/components/BugCamera';
 import { BugInfoModal } from '@/components/BugInfoModal';
 import { CollectionScreen } from '@/components/CollectionScreen';
+import { CaptureSuccessOverlay } from '@/components/effects/CaptureSuccessOverlay';
 import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
 import { BUG_SPRITE } from '@/constants/bugSprites';
+import { getProfilePictureSource } from '@/constants/profilePictures';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { bugIdentificationService } from '@/services/BugIdentificationService';
 import { predictInsect } from '@/services/BackendPredictionService';
+import { bugIdentificationService } from '@/services/BugIdentificationService';
 import { datasetUploadService } from '@/services/DatasetUploadService';
 import { recordConfirmedLabel } from '@/services/LearningService';
-import { appendScanLog } from '@/services/ScanLogService';
 import { mlPreprocessingService } from '@/services/ml/MLPreprocessingService';
 import { modelUpdateService } from '@/services/ml/ModelUpdateService';
 import { onDeviceClassifier } from '@/services/ml/OnDeviceClassifier';
+import { appendScanLog } from '@/services/ScanLogService';
 import { runBugScanPipeline, ScanResult } from '@/src/features/scanner/scanPipeline';
 import { classifyBugImage, isClassifierReady, loadBugClassifier } from '@/src/ml/bugClassifier';
 import { GbifSpeciesSuggestion } from '@/src/services/gbifService';
@@ -23,8 +24,14 @@ import { BugPrediction, buildPrediction } from '@/src/types/bugPrediction';
 import { Bug, BugIdentificationResult, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
 import { labelToCategory } from '@/utils/bugCategory';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Animated, {
+    SharedValue,
+    useAnimatedStyle,
+    useSharedValue,
+    withSpring
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -47,11 +54,11 @@ const YOLO_SPECIES_MAP: Record<string, string> = {
 
 export default function CaptureScreen() {
   const { theme } = useTheme();
-  const { collection, addBugToCollection, addBugToParty, removeBugFromParty, switchParty, updateBugNickname, loading } = useBugCollection();
+  const { collection, addBugToCollection, addBugToParty, updateBugNickname, loading } = useBugCollection();
+  const profilePicSource = getProfilePictureSource(collection.profilePicture);
   const [showCamera, setShowCamera] = useState(false);
   const [showBugIdentification, setShowBugIdentification] = useState(false);
   const [showCollection, setShowCollection] = useState(false);
-  const [showPartyManagement, setShowPartyManagement] = useState(false);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
   const [isIdentifying, setIsIdentifying] = useState(false);
   const [identificationResult, setIdentificationResult] = useState<BugIdentificationResult | null>(null);
@@ -61,15 +68,16 @@ export default function CaptureScreen() {
   const [showRecentBugModal, setShowRecentBugModal] = useState(false);
   const [mlReady, setMlReady] = useState(false);
   const [modelVersion, setModelVersion] = useState<string | null>(null);
-  const [scanMode, setScanMode] = useState<ScanMode>('photo');
+  const [scanMode, setScanMode] = useState<ScanMode>('liveScan');
   const [lastPrediction, setLastPrediction] = useState<BugPrediction | null>(null);
   const [lastGbifSuggestions, setLastGbifSuggestions] = useState<GbifSpeciesSuggestion[]>([]);
+  const [captureOverlay, setCaptureOverlay] = useState<{ visible: boolean; bugName: string; rarity: string }>({ visible: false, bugName: '', rarity: '' });
 
   // Scan mode slider animation
-  const SCAN_MODES: ScanMode[] = ['photo', 'liveScan', 'gallery'];
+  const SCAN_MODES: ScanMode[] = ['liveScan', 'gallery'];
   const SCAN_LABELS: Record<ScanMode, string> = { photo: '📷 Photo', liveScan: '🎯 Live Scan', gallery: '🖼️ Gallery' };
-  const scanSliderAnim = useRef(new Animated.Value(0)).current;
-  const scanScaleAnims = useRef(SCAN_MODES.map(() => new Animated.Value(1))).current;
+  const scanSliderAnim = useSharedValue(0);
+  const scanScaleAnims = SCAN_MODES.map(() => useSharedValue(1));
   const [scanToggleWidth, setScanToggleWidth] = useState(0);
 
   const styles = createStyles(theme);
@@ -77,19 +85,9 @@ export default function CaptureScreen() {
   // Animate scan mode slider on mode change
   useEffect(() => {
     const index = SCAN_MODES.indexOf(scanMode);
-    Animated.spring(scanSliderAnim, {
-      toValue: index,
-      useNativeDriver: true,
-      tension: 68,
-      friction: 10,
-    }).start();
-    scanScaleAnims.forEach((anim, i) => {
-      Animated.spring(anim, {
-        toValue: i === index ? 1.08 : 1,
-        useNativeDriver: true,
-        tension: 300,
-        friction: 10,
-      }).start();
+    scanSliderAnim.value = withSpring(index, { damping: 15, stiffness: 200 });
+    scanScaleAnims.forEach((sv, i) => {
+      sv.value = withSpring(i === index ? 1.08 : 1, { damping: 15, stiffness: 300 });
     });
   }, [scanMode]);
 
@@ -361,6 +359,7 @@ export default function CaptureScreen() {
       // live scan overlay — avoids a second call on the cropped image that
       // may produce a worse prediction than the one the user already confirmed.
       let backendHandled = false;
+      let backendFailed = false;
       if (preConfirmedResult?.source === 'backend') {
         console.log('✅ Using backend-refined live scan result directly:', preConfirmedResult.label);
         mlCandidates = [{
@@ -400,6 +399,7 @@ export default function CaptureScreen() {
               label,
               confidence: backendResult.confidence,
               source: 'backend-eva02',
+              category: backendResult.spriteType !== 'unknown-bug' ? backendResult.spriteType as any : undefined,
             }];
             backendHandled = true;
         } else if (hasTopPredictions) {
@@ -416,6 +416,7 @@ export default function CaptureScreen() {
               label,
               confidence: best.confidence,
               source: 'backend-eva02',
+              category: best.mappedBuglordType ?? undefined,
             }];
             backendHandled = true;
             console.log('🌐 Using backend top prediction (main was below threshold):', mlCandidates[0]);
@@ -435,6 +436,7 @@ export default function CaptureScreen() {
                   label: candidateLabel,
                   confidence: t.confidence,
                   source: 'backend-eva02',
+                  category: t.mappedBuglordType ?? undefined,
                 });
               }
             });
@@ -445,6 +447,7 @@ export default function CaptureScreen() {
           }
         } catch (backendErr) {
           console.warn('⚠️ Backend prediction failed, falling back to local pipeline:', backendErr);
+          backendFailed = true;
         }
 
       if (backendHandled) {
@@ -531,6 +534,13 @@ export default function CaptureScreen() {
         if (mlCandidates.length === 0) mlCandidates = [{ label: 'Unknown Bug', confidence: 0, source: 'manual' }];
       }
 
+      // If the backend failed and every local pipeline also fell through to Unknown Bug
+      // (i.e. only stub-level results), surface a rescan prompt instead of silently
+      // showing a useless result.
+      if (backendFailed && mlCandidates.length === 1 && mlCandidates[0]?.source === 'manual') {
+        throw new Error('STUB_FALLBACK');
+      }
+
       // Store pipeline results for BugInfoModal
       setLastPrediction(prediction);
       setLastGbifSuggestions(pipelineGbif);
@@ -593,7 +603,7 @@ export default function CaptureScreen() {
         biome: matchedSample?.biome || 'garden',
         photo: originalPhoto,
         pixelArt: processedImage.pixelatedIcon,
-        category: top?.label ? labelToCategory(top.label) : undefined,
+        category: top?.category ?? (top?.label ? labelToCategory(top.label) : undefined),
         traits: matchedSample?.traits || (top ? ['AI Identified'] : ['Unknown']),
         size: matchedSample?.size || 'medium',
         xpValue: RARITY_CONFIG[matchedSample?.rarity || 'common'].xpRange[0],
@@ -626,11 +636,14 @@ export default function CaptureScreen() {
       setShowBugIdentification(false);
       setIdentifiedBug(null);
       setIdentificationResult(null);
+      const isStubFallback = error instanceof Error && error.message === 'STUB_FALLBACK';
       Alert.alert(
-        'Processing Error', 
-        'Could not process the image. Please try again.',
+        isStubFallback ? 'Scan Failed' : 'Processing Error',
+        isStubFallback
+          ? "Couldn't reach the identification server. Please rescan to try again."
+          : 'Could not process the image. Please try again.',
         [
-          { text: 'Retry', onPress: () => capturedPhoto && processAndClassify(capturedPhoto, capturedPhoto) },
+          { text: isStubFallback ? 'Rescan' : 'Retry', onPress: () => capturedPhoto && processAndClassify(capturedPhoto, capturedPhoto) },
           { text: 'Cancel', style: 'cancel' },
         ]
       );
@@ -678,11 +691,8 @@ export default function CaptureScreen() {
         ? `\nTop guess: ${Math.round((identificationResult.candidates[0].confidence || 0) * 100)}%` 
         : '';
       
-      Alert.alert(
-        'Bug Captured!',
-        `You caught a ${newBug.rarity} ${newBug.name}!${confidenceText}\n+${newBug.xpValue} XP${addToParty ? '\n\nAdded to your party!' : '\n\nAdded to your collection!'}`,
-        [{ text: 'Awesome!', style: 'default' }]
-      );
+      // Show animated capture overlay instead of plain Alert
+      setCaptureOverlay({ visible: true, bugName: newBug.name, rarity: newBug.rarity });
 
       // Queue labeled sample for upload to training dataset
       if (confirmedLabel && capturedPhoto) {
@@ -828,47 +838,6 @@ export default function CaptureScreen() {
     await processAndClassify(photoUri, photoUri, { label, confidence, source });
   };
 
-  const renderPartySlot = (bug: Bug | null, index: number) => (
-    <TouchableOpacity
-      key={index}
-      style={[styles.partySlot, !bug && styles.emptyPartySlot]}
-      onPress={() => {
-        if (bug) {
-          handleRecentBugTap(bug);
-        }
-      }}
-    >
-      {bug ? (
-        <View style={styles.bugInSlot}>
-          {bug.category && BUG_SPRITE[bug.category] ? (
-            <Image source={BUG_SPRITE[bug.category]} style={styles.bugPhoto} />
-          ) : bug.photo ? (
-            <Image source={{ uri: bug.photo }} style={styles.bugPhoto} />
-          ) : (
-            <PixelatedEmoji type="bug" size={32} color={theme.colors.text} />
-          )}
-          <Text style={styles.bugLevel}>Lv.{bug.level}</Text>
-          {/* Health Bar */}
-          {(() => {
-            const maxHp = bug.maxHp || 100;
-            const currentHp = bug.currentHp ?? maxHp;
-            const hpPercent = Math.max(0, Math.min(1, currentHp / maxHp));
-            const hpColor = hpPercent > 0.5 ? '#4CAF50' : hpPercent >= 0.25 ? '#FFC107' : '#F44336';
-            return (
-              <View style={styles.partyHpBarContainer}>
-                <View style={styles.partyHpBarTrack}>
-                  <View style={[styles.partyHpBarFill, { width: `${hpPercent * 100}%`, backgroundColor: hpColor }]} />
-                </View>
-              </View>
-            );
-          })()}
-        </View>
-      ) : (
-        <Text style={styles.emptySlotText}>+</Text>
-      )}
-    </TouchableOpacity>
-  );
-
   if (loading) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -882,17 +851,28 @@ export default function CaptureScreen() {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Header with XP Progress */}
         <View style={styles.header}>
-          <View style={styles.titleContainer}>
-            <PixelatedEmoji type="bug" size={24} color={theme.colors.text} />
-            <ThemedText style={styles.title}>BugLord</ThemedText>
+          <View style={styles.headerRow}>
+            <View style={{ flex: 1 }}>
+              <View style={styles.titleContainer}>
+                <PixelatedEmoji type="bug" size={24} color={theme.colors.text} />
+                <ThemedText style={styles.title}>BugLord</ThemedText>
+              </View>
+              <ThemedText style={styles.subtitle}>Level {collection.level} Explorer</ThemedText>
+              <XPProgressBar
+                currentXP={collection.xp}
+                maxXP={100}
+                level={collection.level}
+                animated={true}
+              />
+            </View>
+            <View style={styles.headerAvatar}>
+              {profilePicSource ? (
+                <Image source={profilePicSource} style={styles.headerAvatarImage} />
+              ) : (
+                <PixelatedEmoji type="bug" size={32} color={theme.colors.text} />
+              )}
+            </View>
           </View>
-          <ThemedText style={styles.subtitle}>Level {collection.level} Explorer</ThemedText>
-          <XPProgressBar
-            currentXP={collection.xp}
-            maxXP={100}
-            level={collection.level}
-            animated={true}
-          />
         </View>
 
         {/* Main Actions */}
@@ -916,41 +896,25 @@ export default function CaptureScreen() {
           >
             {/* Sliding highlight indicator */}
             {scanToggleWidth > 0 && (
-              <Animated.View
-                style={{
-                  position: 'absolute',
-                  top: 4,
-                  left: 4,
-                  bottom: 4,
-                  width: scanToggleWidth / 3,
-                  backgroundColor: theme.colors.primary,
-                  borderRadius: 8,
-                  transform: [{
-                    translateX: scanSliderAnim.interpolate({
-                      inputRange: [0, 1, 2],
-                      outputRange: [0, scanToggleWidth / 3, (scanToggleWidth / 3) * 2],
-                    }),
-                  }],
-                }}
+              <ScanSliderIndicator
+                sliderAnim={scanSliderAnim}
+                toggleWidth={scanToggleWidth}
+                primaryColor={theme.colors.primary}
               />
             )}
             {/* Scan mode options */}
             {SCAN_MODES.map((mode, index) => (
-              <Animated.View
+              <ScanModeTab
                 key={mode}
-                style={{ flex: 1, transform: [{ scale: scanScaleAnims[index] }] }}
-              >
-                <TouchableOpacity
-                  style={styles.scanModeOption}
-                  onPress={() => setScanMode(mode)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[
-                    styles.scanModeText,
-                    scanMode === mode && styles.scanModeTextActive,
-                  ]}>{SCAN_LABELS[mode]}</Text>
-                </TouchableOpacity>
-              </Animated.View>
+                scaleValue={scanScaleAnims[index]}
+                mode={mode}
+                label={SCAN_LABELS[mode]}
+                isActive={scanMode === mode}
+                onPress={() => setScanMode(mode)}
+                activeTextStyle={styles.scanModeTextActive}
+                textStyle={styles.scanModeText}
+                optionStyle={styles.scanModeOption}
+              />
             ))}
           </View>
 
@@ -960,13 +924,13 @@ export default function CaptureScreen() {
             onPress={() => scanMode === 'gallery' ? pickFromGalleryAndScan() : setShowCamera(true)}
           >
             <Text style={styles.cameraIcon}>
-              {scanMode === 'gallery' ? '🖼️' : scanMode === 'liveScan' ? '🎯' : '📸'}
+              {scanMode === 'gallery' ? '🖼️' : '🎯'}
             </Text>
             <ThemedText style={styles.cameraButtonText}>
-              {scanMode === 'gallery' ? 'Pick from Gallery' : scanMode === 'liveScan' ? 'Live Scan' : 'Capture Bug'}
+              {scanMode === 'gallery' ? 'Pick from Gallery' : 'Live Scan'}
             </ThemedText>
             <ThemedText style={styles.cameraButtonSubtext}>
-              {scanMode === 'gallery' ? 'Identify a bug from an existing photo' : scanMode === 'liveScan' ? 'Real-time AI detection' : 'Discover new species'}
+              {scanMode === 'gallery' ? 'Identify a bug from an existing photo' : 'Real-time AI detection'}
             </ThemedText>
           </TouchableOpacity>
 
@@ -988,7 +952,7 @@ export default function CaptureScreen() {
             </View>
             {modelVersion && (
               <View style={{
-                backgroundColor: theme.colors.cardBackground,
+                backgroundColor: theme.colors.card,
                 paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1,
                 borderColor: theme.colors.border,
               }}>
@@ -1010,24 +974,6 @@ export default function CaptureScreen() {
               <ThemedText style={styles.statLabel}>Party</ThemedText>
             </View>
           </View>
-        </View>
-
-        {/* Party Display */}
-        <View style={styles.partyContainer}>
-          <View style={styles.sectionTitleContainer}>
-            <PixelatedEmoji type="party" size={20} color={theme.colors.text} />
-            <ThemedText style={styles.sectionTitle}>Your Party</ThemedText>
-            <Text style={styles.partyBadge}>Loadout {collection.activePartyIndex + 1}</Text>
-          </View>
-          <View style={styles.partyGrid}>
-            {collection.party.map((bug, index) => renderPartySlot(bug, index))}
-          </View>
-          <TouchableOpacity 
-            style={styles.managePartyButton}
-            onPress={() => setShowPartyManagement(true)}
-          >
-            <ThemedText style={styles.managePartyButtonText}>Manage Party</ThemedText>
-          </TouchableOpacity>
         </View>
 
         {/* Collection Access */}
@@ -1147,166 +1093,6 @@ export default function CaptureScreen() {
         candidates={[]}
       />
 
-      {/* Party Management Modal */}
-      <Modal
-        visible={showPartyManagement}
-        animationType="slide"
-        presentationStyle="pageSheet"
-      >
-        <ThemedView style={styles.partyManagementContainer}>
-          <View style={styles.partyManagementHeader}>
-            <TouchableOpacity 
-              onPress={() => setShowPartyManagement(false)}
-              style={styles.closeButton}
-            >
-              <ThemedText style={styles.closeButtonText}>✕</ThemedText>
-            </TouchableOpacity>
-            <ThemedText style={styles.partyManagementTitle}>Manage Party</ThemedText>
-            <View style={{ width: 40 }} />
-          </View>
-
-          {/* Party Loadout Tabs */}
-          <View style={styles.partyTabsContainer}>
-            {['Party 1', 'Party 2', 'Party 3'].map((label, idx) => {
-              const isActive = collection.activePartyIndex === idx;
-              const bugCount = collection.parties[idx]?.filter(Boolean).length ?? 0;
-              return (
-                <TouchableOpacity
-                  key={idx}
-                  style={[
-                    styles.partyTab,
-                    isActive && styles.partyTabActive,
-                  ]}
-                  onPress={() => switchParty(idx)}
-                >
-                  <Text style={[
-                    styles.partyTabText,
-                    isActive && styles.partyTabTextActive,
-                  ]}>
-                    {label}
-                  </Text>
-                  <Text style={[
-                    styles.partyTabCount,
-                    isActive && styles.partyTabCountActive,
-                  ]}>
-                    {bugCount}/6
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <ScrollView style={styles.partyManagementScroll}>
-            {/* Current Party */}
-            <View style={styles.partyManagementSection}>
-              <ThemedText style={styles.partyManagementSectionTitle}>Current Party (Tap to Remove)</ThemedText>
-              <View style={styles.partyManagementGrid}>
-                {collection.party.map((bug, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    style={[
-                      styles.partyManagementSlot,
-                      !bug && styles.partyManagementEmptySlot
-                    ]}
-                    onPress={() => {
-                      if (bug) {
-                        removeBugFromParty(index);
-                      }
-                    }}
-                  >
-                    {bug ? (
-                      <>
-                        {bug.category && BUG_SPRITE[bug.category] ? (
-                          <Image source={BUG_SPRITE[bug.category]} style={styles.partyManagementBugPhoto} />
-                        ) : bug.photo ? (
-                          <Image source={{ uri: bug.photo }} style={styles.partyManagementBugPhoto} />
-                        ) : bug.pixelArt ? (
-                          <Image source={{ uri: bug.pixelArt }} style={styles.partyManagementBugPhoto} />
-                        ) : (
-                          <PixelatedEmoji type="bug" size={40} color={theme.colors.text} />
-                        )}
-                        <ThemedText style={styles.partyManagementBugName} numberOfLines={1}>
-                          {bug.nickname || bug.name}
-                        </ThemedText>
-                        <ThemedText style={styles.partyManagementBugLevel}>Lv.{bug.level}</ThemedText>
-                        <ThemedText style={styles.partyManagementBugHp}>
-                          HP {bug.currentHp ?? bug.maxHp ?? bug.maxXp}/{bug.maxHp ?? bug.maxXp}
-                        </ThemedText>
-                        <Text style={[
-                          styles.partyManagementRarityBadge,
-                          { backgroundColor: RARITY_CONFIG[bug.rarity].color }
-                        ]}>
-                          {bug.rarity}
-                        </Text>
-                      </>
-                    ) : (
-                      <ThemedText style={styles.partyManagementEmptyText}>Empty Slot</ThemedText>
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Available Bugs */}
-            <View style={styles.partyManagementSection}>
-              <ThemedText style={styles.partyManagementSectionTitle}>
-                Available Bugs (Tap to Add to Party)
-              </ThemedText>
-              <View style={styles.partyManagementGrid}>
-                {collection.bugs
-                  .filter(bug => !collection.party.some(partyBug => partyBug?.id === bug.id))
-                  .map((bug) => (
-                    <TouchableOpacity
-                      key={bug.id}
-                      style={styles.partyManagementSlot}
-                      onPress={() => {
-                        const hasSpace = collection.party.some(slot => slot === null);
-                        if (hasSpace) {
-                          addBugToParty(bug);
-                        } else {
-                          Alert.alert(
-                            'Party Full',
-                            'Your party is full! Remove a bug from your party first.',
-                            [{ text: 'OK' }]
-                          );
-                        }
-                      }}
-                    >
-                      {bug.category && BUG_SPRITE[bug.category] ? (
-                        <Image source={BUG_SPRITE[bug.category]} style={styles.partyManagementBugPhoto} />
-                      ) : bug.photo ? (
-                        <Image source={{ uri: bug.photo }} style={styles.partyManagementBugPhoto} />
-                      ) : bug.pixelArt ? (
-                        <Image source={{ uri: bug.pixelArt }} style={styles.partyManagementBugPhoto} />
-                      ) : (
-                        <PixelatedEmoji type="bug" size={40} color={theme.colors.text} />
-                      )}
-                      <ThemedText style={styles.partyManagementBugName} numberOfLines={1}>
-                        {bug.nickname || bug.name}
-                      </ThemedText>
-                      <ThemedText style={styles.partyManagementBugLevel}>Lv.{bug.level}</ThemedText>
-                      <ThemedText style={styles.partyManagementBugHp}>
-                        HP {bug.currentHp ?? bug.maxHp ?? bug.maxXp}/{bug.maxHp ?? bug.maxXp}
-                      </ThemedText>
-                      <Text style={[
-                        styles.partyManagementRarityBadge,
-                        { backgroundColor: RARITY_CONFIG[bug.rarity].color }
-                      ]}>
-                        {bug.rarity}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-              </View>
-              {collection.bugs.filter(bug => !collection.party.some(partyBug => partyBug?.id === bug.id)).length === 0 && (
-                <ThemedText style={styles.partyManagementEmptyMessage}>
-                  All bugs are in your party!
-                </ThemedText>
-              )}
-            </View>
-          </ScrollView>
-        </ThemedView>
-      </Modal>
-
       {/* Collection Modal */}
       <Modal
         visible={showCollection}
@@ -1317,7 +1103,79 @@ export default function CaptureScreen() {
           onClose={() => setShowCollection(false)}
         />
       </Modal>
+
+      {/* Animated capture success overlay */}
+      <CaptureSuccessOverlay
+        visible={captureOverlay.visible}
+        bugName={captureOverlay.bugName}
+        rarity={captureOverlay.rarity}
+        onFinish={() => setCaptureOverlay({ visible: false, bugName: '', rarity: '' })}
+      />
     </SafeAreaView>
+  );
+}
+
+/** Reanimated sub-component for the sliding scan-mode indicator */
+function ScanSliderIndicator({
+  sliderAnim,
+  toggleWidth,
+  primaryColor,
+}: {
+  sliderAnim: SharedValue<number>;
+  toggleWidth: number;
+  primaryColor: string;
+}) {
+  const style = useAnimatedStyle(() => ({
+    transform: [{ translateX: sliderAnim.value * (toggleWidth / 2) }],
+  }));
+  return (
+    <Animated.View
+      style={[
+        {
+          position: 'absolute',
+          top: 4,
+          left: 4,
+          bottom: 4,
+          width: toggleWidth / 2,
+          backgroundColor: primaryColor,
+          borderRadius: 8,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+/** Reanimated sub-component for each scan-mode tab button */
+function ScanModeTab({
+  scaleValue,
+  mode,
+  label,
+  isActive,
+  onPress,
+  activeTextStyle,
+  textStyle,
+  optionStyle,
+}: {
+  scaleValue: SharedValue<number>;
+  mode: string;
+  label: string;
+  isActive: boolean;
+  onPress: () => void;
+  activeTextStyle: any;
+  textStyle: any;
+  optionStyle: any;
+}) {
+  const animStyle = useAnimatedStyle(() => ({
+    flex: 1,
+    transform: [{ scale: scaleValue.value }],
+  }));
+  return (
+    <Animated.View key={mode} style={animStyle}>
+      <TouchableOpacity style={optionStyle} onPress={onPress} activeOpacity={0.7}>
+        <Text style={[textStyle, isActive && activeTextStyle]}>{label}</Text>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -1341,7 +1199,26 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   header: {
     marginBottom: 20,
+  },
+  headerRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+  },
+  headerAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: theme.colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 12,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+  },
+  headerAvatarImage: {
+    width: 52,
+    height: 52,
+    borderRadius: 6,
   },
   titleContainer: {
     flexDirection: 'row',

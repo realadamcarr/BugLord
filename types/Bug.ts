@@ -61,6 +61,7 @@ export interface BugCollection {
   totalXp: number;
   level: number;
   xp: number;
+  profilePicture: string; // Key into PROFILE_PICTURES, default 'default'
 }
 
 export type ConfirmationMethod = 'AI_PICK' | 'MANUAL' | 'UNKNOWN';
@@ -70,6 +71,7 @@ export interface IdentificationCandidate {
   confidence?: number;
   source: string; // e.g. 'iNaturalist', 'GoogleVision', 'Local'
   species?: string;
+  category?: import('../constants/bugSprites').BugCategory;
 }
 
 export interface BugIdentificationResult {

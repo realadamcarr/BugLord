@@ -78,7 +78,14 @@ export async function createTrade(
       fromUid,
       toUid,
       fromBugId,
+      fromBugSnapshot: {
+        speciesId: bugData.speciesId,
+        nickname: bugData.nickname ?? null,
+        level: bugData.level,
+        rarity: bugData.rarity,
+      },
       toBugId,
+      toBugSnapshot: null,
       status: 'proposed' satisfies TradeStatus,
       fromAccepted: false,
       toAccepted: false,
@@ -267,9 +274,15 @@ export async function setToBugId(
       throw new Error('This bug is already part of an active trade');
     }
 
-    // Update trade with the recipient's offered bug
+    // Update trade with the recipient's offered bug and a display snapshot
     tx.update(tradeRef, {
       toBugId: bugId,
+      toBugSnapshot: {
+        speciesId: bugData.speciesId,
+        nickname: bugData.nickname ?? null,
+        level: bugData.level,
+        rarity: bugData.rarity,
+      },
       updatedAt: serverTimestamp(),
     });
 
