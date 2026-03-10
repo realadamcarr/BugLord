@@ -1,5 +1,5 @@
 @echo off
-echo Building Note Quest APK...
+echo Building BugLord APK...
 echo.
 echo Step 1: Login to EAS
 eas login

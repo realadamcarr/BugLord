@@ -1,11 +1,11 @@
 {
   "expo": {
     "name": "BugLord",
-    "slug": "note-quest",
+    "slug": "buglord",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "note-quest",
+    "scheme": "buglord",
     "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/images/splash-icon.png",
@@ -29,7 +29,7 @@
       }
     ],
     "android": {
-      "package": "com.anonymous.buglord",
+      "package": "com.realadamcarr.buglord",
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
@@ -130,7 +130,6 @@
       "eas": {
         "projectId": "af4e786a-105a-4d73-8ba5-26832e7561ed"
       }
-    },
-    "owner": "stackzilla"
+    }
   }
 }

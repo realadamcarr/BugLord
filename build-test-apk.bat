@@ -1,5 +1,5 @@
 @echo off
-echo Building Note Quest Test APK...
+echo Building BugLord Test APK...
 echo.
 echo This will build a local development APK for testing
 echo.
