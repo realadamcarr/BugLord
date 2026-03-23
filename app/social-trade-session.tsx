@@ -14,7 +14,7 @@ import {
     subscribeTrade,
     unsetTradeAcceptFlag,
 } from '@/src/services/tradeService';
-import { Bug, generateBugStats, SAMPLE_BUGS } from '@/types/Bug';
+import { Bug, determineBiome, generateBugStats, SAMPLE_BUGS } from '@/types/Bug';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -50,7 +50,7 @@ function bugInstanceToLocalBug(inst: BugInstance): Omit<Bug, 'id' | 'caughtAt'> 
     nickname: inst.nickname,
     rarity: inst.rarity,
     description: sample?.description ?? 'A traded bug from another collector.',
-    biome: sample?.biome ?? 'garden',
+    biome: sample?.biome ?? determineBiome(inst.speciesId),
     traits: sample?.traits ?? ['Traded'],
     size: sample?.size ?? 'small',
     xpValue: stats.maxXp,

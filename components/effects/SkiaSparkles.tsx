@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
-import { ViewStyle } from 'react-native';
+import { Platform, ViewStyle } from 'react-native';
 
 let SkiaCanvas: any = null;
 let SkiaCircle: any = null;
@@ -47,7 +47,7 @@ export const SkiaSparkles: React.FC<SkiaSparklesProps> = ({
   colors = ['#FFD700', '#F0B429', '#6ABF5E', '#FFFFFF'],
   style,
 }) => {
-  if (!SkiaCanvas || !SkiaCircle || !reanimated) return null;
+  if (!SkiaCanvas || !SkiaCircle || !reanimated || Platform.OS === 'web') return null;
 
   const { useSharedValue, useDerivedValue, withRepeat, withTiming, Easing } = reanimated;
 

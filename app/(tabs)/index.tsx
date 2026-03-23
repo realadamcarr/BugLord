@@ -592,21 +592,24 @@ export default function CaptureScreen() {
       const top = result.candidates[0];
 
       // Look up the matching SAMPLE_BUG to get proper rarity/biome/description/traits
-      const { SAMPLE_BUGS: sampleBugs } = await import('@/types/Bug');
+      const { SAMPLE_BUGS: sampleBugs, determineRarity, determineBiome } = await import('@/types/Bug');
       const matchedSample = sampleBugs.find(b => b.name === top?.label);
 
+      const bugName = top?.label || 'Unknown bug';
+      const bugSpecies = top?.species || matchedSample?.species || 'Unknown';
+
       const bugData: Partial<Bug> = {
-        name: top?.label || 'Unknown bug',
-        species: top?.species || matchedSample?.species || 'Unknown',
+        name: bugName,
+        species: bugSpecies,
         description: matchedSample?.description || (top ? `Identified via ${result.provider}` : 'Unknown insect captured'),
-        rarity: matchedSample?.rarity || 'common',
-        biome: matchedSample?.biome || 'garden',
+        rarity: matchedSample?.rarity || determineRarity(bugName, bugSpecies),
+        biome: matchedSample?.biome || determineBiome(bugName, bugSpecies),
         photo: originalPhoto,
         pixelArt: processedImage.pixelatedIcon,
         category: top?.category ?? (top?.label ? labelToCategory(top.label) : undefined),
         traits: matchedSample?.traits || (top ? ['AI Identified'] : ['Unknown']),
         size: matchedSample?.size || 'medium',
-        xpValue: RARITY_CONFIG[matchedSample?.rarity || 'common'].xpRange[0],
+        xpValue: RARITY_CONFIG[matchedSample?.rarity || determineRarity(bugName, bugSpecies)].xpRange[0],
         level: 1,
         xp: 0,
         maxXp: 100,

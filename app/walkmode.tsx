@@ -359,7 +359,7 @@ export default function WalkModeScreen() {
               borderLeftColor: 'transparent',
               position: 'absolute',
               left: -halfSize,
-              transform: [{ rotate: `${rightRotation}deg` }],
+              transform: Platform.OS === 'web' ? `rotate(${rightRotation}deg)` as any : [{ rotate: `${rightRotation}deg` }],
             }} />
           </View>
 
@@ -383,7 +383,7 @@ export default function WalkModeScreen() {
                 borderLeftColor: fillColor,
                 position: 'absolute',
                 left: 0,
-                transform: [{ rotate: `${leftRotation}deg` }],
+                transform: Platform.OS === 'web' ? `rotate(${leftRotation}deg)` as any : [{ rotate: `${leftRotation}deg` }],
               }} />
             </View>
           )}

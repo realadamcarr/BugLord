@@ -7,6 +7,7 @@
  */
 
 import { BugCategory } from '@/constants/bugSprites';
+import { Platform } from 'react-native';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -91,7 +92,7 @@ export interface PredictionResult {
  * React Native's `fetch` / `XMLHttpRequest` handles the `uri` field
  * specially — it streams the file without loading it fully into JS memory.
  */
-function buildFormData(imageUri: string): FormData {
+async function buildFormData(imageUri: string): Promise<FormData> {
   const filename = imageUri.split('/').pop() ?? 'photo.jpg';
   const ext = filename.split('.').pop()?.toLowerCase() ?? 'jpg';
   const mimeTypes: Record<string, string> = {
@@ -101,11 +102,19 @@ function buildFormData(imageUri: string): FormData {
   const mime = mimeTypes[ext] ?? 'image/jpeg';
 
   const form = new FormData();
-  form.append('file', {
-    uri: imageUri,
-    name: filename,
-    type: mime,
-  } as unknown as Blob); // RN FormData accepts {uri, name, type}
+
+  if (Platform.OS === 'web') {
+    // On web, fetch the URI as a blob — the RN {uri,name,type} pattern doesn't work.
+    const response = await fetch(imageUri);
+    const blob = await response.blob();
+    form.append('file', blob, filename);
+  } else {
+    form.append('file', {
+      uri: imageUri,
+      name: filename,
+      type: mime,
+    } as unknown as Blob); // RN FormData accepts {uri, name, type}
+  }
 
   return form;
 }
@@ -150,7 +159,7 @@ async function fetchWithTimeout(
  */
 export async function predictInsect(imageUri: string): Promise<PredictionResult> {
   // ── 1. Build multipart payload ──────────────────────────────────────
-  const form = buildFormData(imageUri);
+  const form = await buildFormData(imageUri);
 
   // ── 2. POST to backend ─────────────────────────────────────────────
   let response: Response;

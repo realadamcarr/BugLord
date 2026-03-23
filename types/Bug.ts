@@ -186,8 +186,8 @@ export const SAMPLE_BUGS: {
     name: 'Ground Beetle',
     species: 'Carabidae family',
     rarity: 'common',
-    biome: 'garden',
-    description: 'A common ground beetle found in gardens and parks.',
+    biome: 'forest',
+    description: 'A common ground beetle found in forests, fields, and gardens.',
     traits: ['Ground dweller', 'Nocturnal', 'Beneficial'],
     size: 'small',
     colorProfile: { hueRange: [0, 360], brightnessRange: [0.05, 0.25], saturationRange: [0.0, 0.20] },
@@ -196,7 +196,7 @@ export const SAMPLE_BUGS: {
     name: 'Black Cricket',
     species: 'Gryllus assimilis',
     rarity: 'common',
-    biome: 'garden',
+    biome: 'meadow',
     description: 'Nocturnal insect known for its distinctive chirping.',
     traits: ['Nocturnal', 'Musical', 'Jumper'],
     size: 'small',
@@ -226,8 +226,8 @@ export const SAMPLE_BUGS: {
   {
     name: 'Fire Ant',
     species: 'Solenopsis invicta',
-    rarity: 'uncommon',
-    biome: 'garden',
+    rarity: 'common',
+    biome: 'meadow',
     description: 'Aggressive ant species with a painful venomous sting.',
     traits: ['Aggressive', 'Colony Builder', 'Venomous'],
     size: 'tiny',
@@ -267,7 +267,7 @@ export const SAMPLE_BUGS: {
   {
     name: 'Paper Wasp',
     species: 'Polistes dominula',
-    rarity: 'uncommon',
+    rarity: 'common',
     biome: 'urban',
     description: 'Slender wasp that builds distinctive paper nests under eaves.',
     traits: ['Nest Builder', 'Predator', 'Territorial'],
@@ -287,9 +287,9 @@ export const SAMPLE_BUGS: {
   {
     name: 'Golden Scarab',
     species: 'Chrysina resplendens',
-    rarity: 'epic',
+    rarity: 'legendary',
     biome: 'forest',
-    description: 'Stunning metallic gold beetle, prized by collectors worldwide.',
+    description: 'Stunning metallic gold beetle found only in Central American cloud forests. Prized by collectors worldwide.',
     traits: ['Metallic', 'Rare', 'Beautiful'],
     size: 'medium',
     colorProfile: { hueRange: [45, 65], brightnessRange: [0.55, 0.85], saturationRange: [0.60, 1.0] },
@@ -308,8 +308,8 @@ export const SAMPLE_BUGS: {
   {
     name: 'Praying Mantis',
     species: 'Mantis religiosa',
-    rarity: 'rare',
-    biome: 'garden',
+    rarity: 'uncommon',
+    biome: 'meadow',
     description: 'Fascinating ambush predator with distinctive prayer-like pose.',
     traits: ['Predator', 'Camouflaged', 'Patient'],
     size: 'large',
@@ -349,7 +349,7 @@ export const SAMPLE_BUGS: {
   {
     name: 'Blue Dasher Dragonfly',
     species: 'Pachydiplax longipennis',
-    rarity: 'uncommon',
+    rarity: 'common',
     biome: 'wetland',
     description: 'Agile dragonfly with striking blue body, patrols near water.',
     traits: ['Fast flyer', 'Predator', 'Aquatic youth'],
@@ -359,7 +359,7 @@ export const SAMPLE_BUGS: {
   {
     name: 'Azure Damselfly',
     species: 'Coenagrion puella',
-    rarity: 'uncommon',
+    rarity: 'common',
     biome: 'wetland',
     description: 'Delicate blue damselfly often seen near ponds and streams.',
     traits: ['Delicate', 'Day active', 'Aquatic youth'],
@@ -392,7 +392,7 @@ export const SAMPLE_BUGS: {
     name: 'Wolf Spider',
     species: 'Lycosidae family',
     rarity: 'common',
-    biome: 'garden',
+    biome: 'meadow',
     description: 'Robust ground-hunting spider with excellent eyesight, often brown and hairy.',
     traits: ['Fast', 'Ground Hunter', 'Nocturnal'],
     size: 'medium',
@@ -411,8 +411,8 @@ export const SAMPLE_BUGS: {
   {
     name: 'Jumping Spider',
     species: 'Salticidae family',
-    rarity: 'uncommon',
-    biome: 'garden',
+    rarity: 'common',
+    biome: 'urban',
     description: 'Tiny agile spider with large forward-facing eyes and impressive leaping ability.',
     traits: ['Jumper', 'Curious', 'Sharp-eyed'],
     size: 'tiny',
@@ -421,7 +421,7 @@ export const SAMPLE_BUGS: {
   {
     name: 'Black Widow',
     species: 'Latrodectus mactans',
-    rarity: 'rare',
+    rarity: 'uncommon',
     biome: 'urban',
     description: 'Infamous venomous spider with a glossy black body and red hourglass marking.',
     traits: ['Venomous', 'Nocturnal', 'Web Builder'],
@@ -441,7 +441,7 @@ export const SAMPLE_BUGS: {
   {
     name: 'Scorpion',
     species: 'Scorpiones order',
-    rarity: 'rare',
+    rarity: 'uncommon',
     biome: 'desert',
     description: 'Ancient predatory arachnid armed with venomous sting, glows under UV light.',
     traits: ['Venomous', 'Nocturnal', 'Ancient', 'UV Glow'],
@@ -451,7 +451,7 @@ export const SAMPLE_BUGS: {
   {
     name: 'Golden Silk Orb-Weaver',
     species: 'Trichonephila clavipes',
-    rarity: 'epic',
+    rarity: 'rare',
     biome: 'forest',
     description: 'Large spider famous for spinning webs of shimmering golden silk.',
     traits: ['Web Builder', 'Golden Silk', 'Large'],
@@ -471,8 +471,8 @@ export const SAMPLE_BUGS: {
   {
     name: 'Hawk Moth',
     species: 'Manduca sexta',
-    rarity: 'uncommon',
-    biome: 'garden',
+    rarity: 'common',
+    biome: 'meadow',
     description: 'Fast-flying moth that hovers like a hummingbird to feed on nectar.',
     traits: ['Fast flyer', 'Nocturnal', 'Hoverer'],
     size: 'medium',
@@ -503,7 +503,7 @@ export const SAMPLE_BUGS: {
   {
     name: 'Violet Ground Beetle',
     species: 'Carabus violaceus',
-    rarity: 'rare',
+    rarity: 'uncommon',
     biome: 'forest',
     description: 'Beautiful dark beetle with violet-purple metallic edges.',
     traits: ['Predator', 'Nocturnal', 'Iridescent'],
@@ -513,7 +513,7 @@ export const SAMPLE_BUGS: {
   {
     name: 'Emperor Dragonfly',
     species: 'Anax imperator',
-    rarity: 'epic',
+    rarity: 'rare',
     biome: 'wetland',
     description: 'One of the largest dragonflies, a powerful aerial hunter.',
     traits: ['Predator', 'Fast flyer', 'Territorial'],
@@ -542,3 +542,45 @@ export const SAMPLE_BUGS: {
     colorProfile: { hueRange: [50, 90], brightnessRange: [0.30, 0.55], saturationRange: [0.25, 0.55] },
   },
 ];
+
+// ─── Rarity / biome determination for species not in SAMPLE_BUGS ─────
+
+const RARE_KEYWORDS = /morpho|luna|atlas|hercules|jewel|golden|rhinoceros|goliath|titan|orchid\s*mantis|walking\s*leaf|walking\s*stick|giant\s*weta|queen\s*alexandra/i;
+const UNCOMMON_KEYWORDS = /mantis|tarantula|widow|scorpion|velvet\s*ant|stick\s*insect|leaf\s*insect|katydid|cicada|damselfly|swallowtail|silk\s*moth|clearwing|robber\s*fly|assassin|longhorn/i;
+const COMMON_KEYWORDS = /ant\b|fly\b|bee\b|wasp|beetle|cricket|grasshopper|mosquito|gnat|roach|cockroach|ladybug|ladybird|earwig|aphid|weevil|flea|mite|tick|pillbug|sowbug|house\s*fly|fruit\s*fly/i;
+
+const WETLAND_KEYWORDS = /dragonfly|damselfly|water|pond|stream|marsh|aquatic|mayfly|stonefly|caddisfly|mosquito|crane\s*fly|diving/i;
+const DESERT_KEYWORDS = /desert|scorpion|tarantula|sand|velvet\s*ant|sun\s*spider|camel\s*spider|tumblebug/i;
+const FOREST_KEYWORDS = /forest|wood|bark|longhorn|stag|jewel|atlas|luna|morpho|hercules|silk|oak|pine|log|canopy|leaf\s*insect|stick\s*insect|walking/i;
+const URBAN_KEYWORDS = /house|cockroach|roach|bed\s*bug|silverfish|clothes\s*moth|pantry|carpet|german|american\s*cockroach|widow|cellar/i;
+const MOUNTAIN_KEYWORDS = /mountain|alpine|high.?altitude|apollo|mountain\s*beetle/i;
+const MEADOW_KEYWORDS = /field|meadow|grass|bumble|honey|monarch|swallowtail|skipper|sulphur|cabbage|clover|wildflower/i;
+
+/**
+ * Determine rarity for a species not found in SAMPLE_BUGS.
+ * Uses keyword matching against the species/common name.
+ */
+export const determineRarity = (name: string, species?: string): BugRarity => {
+  const text = `${name} ${species ?? ''}`;
+  if (RARE_KEYWORDS.test(text)) return 'rare';
+  if (UNCOMMON_KEYWORDS.test(text)) return 'uncommon';
+  if (COMMON_KEYWORDS.test(text)) return 'common';
+  // Default: uncommon — unknown species are less likely to be everyday bugs
+  return 'uncommon';
+};
+
+/**
+ * Determine biome for a species not found in SAMPLE_BUGS.
+ * Uses keyword matching against the species/common name.
+ */
+export const determineBiome = (name: string, species?: string): BiomeType => {
+  const text = `${name} ${species ?? ''}`;
+  if (WETLAND_KEYWORDS.test(text)) return 'wetland';
+  if (DESERT_KEYWORDS.test(text)) return 'desert';
+  if (FOREST_KEYWORDS.test(text)) return 'forest';
+  if (URBAN_KEYWORDS.test(text)) return 'urban';
+  if (MOUNTAIN_KEYWORDS.test(text)) return 'mountain';
+  if (MEADOW_KEYWORDS.test(text)) return 'meadow';
+  // Default: meadow — most insects inhabit open/mixed habitats
+  return 'meadow';
+};

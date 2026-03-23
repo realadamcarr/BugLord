@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { StyleSheet, View, ViewStyle } from 'react-native';
+import { Platform, StyleSheet, View, ViewStyle } from 'react-native';
 
 // Attempt to import Lottie — fail gracefully if unavailable
 let LottieView: any = null;
@@ -30,7 +30,7 @@ export const LottieEffect = React.forwardRef<any, LottieEffectProps>(
     const internalRef = useRef<any>(null);
     const animRef = (ref as any) ?? internalRef;
 
-    if (!LottieView || !source) return null;
+    if (!LottieView || !source || Platform.OS === 'web') return null;
 
     try {
       return (

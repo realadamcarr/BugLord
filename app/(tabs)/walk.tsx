@@ -207,11 +207,11 @@ export default function WalkTabScreen() {
         <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
           <View style={{ position: 'absolute', width: size, height: size, borderRadius: halfSize, borderWidth: strokeWidth, borderColor: trackColor }} />
           <View style={{ position: 'absolute', width: halfSize, height: size, left: halfSize, overflow: 'hidden' }}>
-            <View style={{ width: size, height: size, borderRadius: halfSize, borderWidth: strokeWidth, borderTopColor: fillColor, borderRightColor: fillColor, borderBottomColor: 'transparent', borderLeftColor: 'transparent', position: 'absolute', left: -halfSize, transform: [{ rotate: `${rightRotation}deg` }] }} />
+            <View style={{ width: size, height: size, borderRadius: halfSize, borderWidth: strokeWidth, borderTopColor: fillColor, borderRightColor: fillColor, borderBottomColor: 'transparent', borderLeftColor: 'transparent', position: 'absolute', left: -halfSize, transform: Platform.OS === 'web' ? `rotate(${rightRotation}deg)` as any : [{ rotate: `${rightRotation}deg` }] }} />
           </View>
           {showLeftHalf && (
             <View style={{ position: 'absolute', width: halfSize, height: size, left: 0, overflow: 'hidden' }}>
-              <View style={{ width: size, height: size, borderRadius: halfSize, borderWidth: strokeWidth, borderTopColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: fillColor, borderLeftColor: fillColor, position: 'absolute', left: 0, transform: [{ rotate: `${leftRotation}deg` }] }} />
+              <View style={{ width: size, height: size, borderRadius: halfSize, borderWidth: strokeWidth, borderTopColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: fillColor, borderLeftColor: fillColor, position: 'absolute', left: 0, transform: Platform.OS === 'web' ? `rotate(${leftRotation}deg)` as any : [{ rotate: `${leftRotation}deg` }] }} />
             </View>
           )}
           <View style={styles.progressInner}>
