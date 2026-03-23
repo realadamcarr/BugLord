@@ -1,223 +1,316 @@
-# 🐛## ✨ Features
+# 🐛 BugLord
 
-### 📸 **Bug Photography & Identification**
+> **Combining Entomology and gamification to make learning about insects and their role in the ecosystem fun and engaging.**
 
-- Real-time camera with targeting reticle for bug capture
-- AI-powered bug identification (species, rarity, traits)
-- Photo storage and gallery integration
-- Smart species recognition with confidence scoring
+BugLord is a cross-platform mobile app built with **React Native + Expo**. Players use their phone camera to photograph real-world insects, which the app identifies using an on-device AI model. Discovered bugs are added to a personal collection, organized into a 6-bug party, and used to progress through an RPG-style leveling system — rewarding real-world exploration and ecological curiosity.
 
-### 🐛 **Bug Collection System**
+---
 
-- **Rarity System**: Common, Uncommon, Rare, Epic, Legendary bugs
-- **Biome Classification**: Forest, Garden, Wetland, Desert, Urban, Mountain, Meadow
-- **Detailed Bug Cards**: Name, species, description, traits, catch location
-- **Persistent Collection**: All discoveries saved with AsyncStorage
+## 📲 Live Demo
 
-### 🏆 **Party Management**
+A pre-built Android APK is available for immediate testing — no build environment required.
 
-- **Active Party**: Maximum 6 bugs in your active lineup
-- **Strategic Selection**: Choose your best bugs for your party
-- **Quick Swap**: Easy party management interface
-- **Visual Display**: See your party bugs on the main hub
+**Download APK:**
+[https://expo.dev/accounts/stackzilla/projects/note-quest/builds/c58d5694-2db5-4d17-af71-4c885d933b44](https://expo.dev/accounts/stackzilla/projects/note-quest/builds/c58d5694-2db5-4d17-af71-4c885d933b44)
 
-### 🎮 **RPG Progression System**
+> **To install:** Download the APK, transfer to your Android device, and enable *Install from Unknown Sources* in your device settings before installing.
 
-- **XP & Leveling**: Earn XP based on bug rarity (10-120 XP per catch)
-- **Explorer Levels**: Level up every 100 XP as a bug explorer
-- **Achievement System**: Track your collection milestones
-- **Visual Progress**: Beautiful XP bars and level displaysive bug collecting app built with React Native and Expo. Capture real-world insects with your camera, build your collection, and become the ultimate BugLord! Use AI-powered identification to discover species, manage your 6-bug party, and level up as you explore the insect kingdom.
+---
 
 ## ✨ Features
 
-### � **Smart Note Taking**
+### 📸 Bug Photography & AI Identification
+- Real-time camera with a targeting reticle for capturing insects
+- On-device TFLite model identifies species from your photo
+- Confidence scoring and species metadata returned per identification
+- Graceful fallback if identification confidence is below threshold
 
-- Create, edit, and complete notes with a beautiful interface
-- Mark notes as complete to earn XP
-- Persistent storage using AsyncStorage
+### 🐛 Bug Collection System
+- **Rarity Tiers:** Common → Uncommon → Rare → Epic → Legendary
+- **Biome Classification:** Forest, Garden, Wetland, Desert, Urban, Mountain, Meadow
+- **Detailed Bug Cards:** Species name, description, traits, catch location, and rarity badge
+- **Persistent Storage:** Full collection saved locally with AsyncStorage
 
-### 🎮 **RPG Gamification System**
+### 🏆 Party Management
+- Maintain an active party of up to **6 bugs**
+- Swap bugs in and out of your lineup strategically
+- Visual party display on the main hub screen
 
-- **XP & Leveling**: Earn 10 XP per completed note
-- **Character Progression**: Level up every 100 XP
-- **Cosmetic Unlocks**: Unlock hats, outfits, accessories, and backgrounds
-- **Visual Character**: Customizable sprite-based character display
+### 🎮 RPG Progression System
+- **XP per catch:** 10 XP (Common) up to 120 XP (Legendary)
+- **Explorer Levels:** Level up every 100 XP
+- **Achievement Milestones:** Track collection progress and exploration goals
+- **Visual Feedback:** XP bars, level-up celebrations, and progress indicators
 
-### 🎨 **Character Customization**
+### 🐝 Hive Mode
+- A cooperative/competitive mode centered around insect ecosystem roles
+- Item system tied to bug types and biomes
+- See `docs/features/HIVE_MODE_README.md` for full details
 
-- **Hats**: Baseball Cap, Crown, Wizard Hat, Party Hat
-- **Outfits**: Casual, Formal, Superhero, Ninja
-- **Accessories**: Sunglasses, Briefcase, Trophy
-- **Backgrounds**: Forest, City, Space
-- **Smart Sprite System**: Use custom sprites or emoji fallbacks
+---
 
-### 📱 **Modern UI/UX**
+## 🛠 Tech Stack
 
-- Beautiful tab-based navigation
-- Parallax scrolling effects
-- Level-up celebrations with confetti
-- Character preview in cosmetics showcase
-- Responsive design for all screen sizes
+| Layer | Technology |
+|---|---|
+| Mobile Framework | React Native + Expo (SDK ~52) |
+| Language | TypeScript |
+| Navigation | Expo Router (file-based) |
+| Styling | NativeWind (Tailwind for RN) |
+| Backend / Auth / DB | Firebase (Firestore, Auth, Functions) |
+| ML / Bug ID | TensorFlow Lite (converted from YOLO) |
+| Animations | React Native Reanimated |
+| Storage (local) | AsyncStorage |
+| Build System | EAS Build (Expo Application Services) |
+
+---
+
+## 📁 Project Structure
+
+```
+BugLord/
+├── app/                        # Screen files (Expo Router)
+│   ├── (tabs)/                 # Tab navigation screens
+│   │   ├── index.tsx           # Main hub / collection view
+│   │   ├── camera.tsx          # Bug capture screen
+│   │   ├── party.tsx           # Party management screen
+│   │   └── _layout.tsx         # Tab bar configuration
+│   └── _layout.tsx             # Root layout / providers
+│
+├── components/                 # Reusable UI components
+│   ├── BugCard.tsx             # Bug display card
+│   ├── PartySlot.tsx           # Party member slot
+│   ├── CameraReticle.tsx       # Camera targeting overlay
+│   └── ui/                     # Generic UI primitives
+│
+├── contexts/                   # React Context providers
+│   └── GameContext.tsx         # Global game state (XP, level, collection)
+│
+├── hooks/                      # Custom React hooks
+│   └── useBugIdentification.ts # ML inference hook
+│
+├── services/                   # External integrations
+│   ├── firebase.ts             # Firebase initialization
+│   ├── firestore.ts            # Firestore read/write helpers
+│   └── bugIdentification.ts   # TFLite model wrapper
+│
+├── models/                     # ML model file(s)
+│   └── bug_detector.tflite    # On-device insect detection model
+│
+├── training/                   # Python scripts for model training
+│   └── (YOLO training pipeline — see docs/ml/)
+│
+├── backend/                    # Firebase Cloud Functions
+│   └── functions/
+│
+├── assets/                     # Static assets
+│   ├── images/                 # App icons, splash screens
+│   └── bugs/                   # Bug artwork and thumbnails
+│
+├── constants/                  # App-wide constants
+│   └── Colors.ts               # Color palette
+│
+├── types/                      # TypeScript type definitions
+│   └── bug.ts                  # Bug, Rarity, Biome interfaces
+│
+├── utils/                      # Utility / helper functions
+│
+├── scripts/                    # Build and utility scripts
+│   ├── build-apk.sh
+│   ├── build-apk.bat
+│   └── download_model.ps1
+│
+├── docs/                       # Extended documentation
+│   ├── ml/                     # ML model guides
+│   ├── features/               # Feature-specific docs
+│   └── build/                  # APK and deployment guides
+│
+├── __tests__/                  # Unit and integration tests
+├── app.json                    # Expo app configuration
+├── eas.json                    # EAS Build profiles
+├── firebase.json               # Firebase project config
+├── firestore.rules             # Firestore security rules
+├── package.json
+└── tsconfig.json
+```
+
+---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- Node.js (v16 or higher)
-- npm or yarn
-- Expo CLI
-- Android Studio (for Android builds) or Xcode (for iOS builds)
+Ensure the following are installed before proceeding:
 
-### Installation
+- **Node.js** v18 or higher — [nodejs.org](https://nodejs.org)
+- **npm** v9+ (bundled with Node) or **yarn**
+- **Expo CLI** — `npm install -g expo-cli`
+- **EAS CLI** (for builds) — `npm install -g eas-cli`
+- **Android Studio** (for Android emulator) or **Xcode** (for iOS simulator)
+- A **Firebase project** (see Firebase Setup below)
 
-1. **Clone the repository**
+---
 
-   ```bash
-   git clone https://github.com/yourusername/buglord.git
-   cd buglord
-   ```
+### 1. Clone the Repository
 
-2. **Install dependencies**
-
-   ```bash
-   npm install
-   ```
-
-3. **Start the development server**
-
-   ```bash
-   npm start
-   ```
-
-4. **Run on device/simulator**
-
-   ```bash
-   # Android
-   npm run android
-   
-   # iOS
-   npm run ios
-   
-   # Web
-   npm run web
-   ```
-
-## 📱 Building APK
-
-To create an APK for testing:
-
-1. **Install EAS CLI**
-
-   ```bash
-   npm install -g eas-cli
-   ```
-
-2. **Login to Expo**
-
-   ```bash
-   eas login
-   ```
-
-3. **Build APK**
-
-   ```bash
-   eas build --platform android --profile preview
-   ```
-
-## 🎨 Custom Sprites
-
-The app supports custom character sprites! See [`SPRITE_GUIDE.md`](SPRITE_GUIDE.md) for detailed instructions on:
-
-- Adding your own sprite artwork
-- Recommended sprite specifications
-- File naming conventions
-- Enabling/disabling the sprite system
-
-## 🛠️ Project Structure
-
-```
-buglord/
-├── app/                    # Main app screens
-│   ├── (tabs)/            # Tab navigation screens
-│   │   ├── index.tsx      # Notes screen (main)
-│   │   ├── explore.tsx    # Character & stats screen
-│   │   └── _layout.tsx    # Tab layout configuration
-│   └── _layout.tsx        # Root layout
-├── components/            # Reusable components
-│   ├── Character.tsx      # Character display & logic
-│   ├── CosmeticsShowcase.tsx  # Cosmetics grid
-│   ├── SpriteAssets.ts    # Sprite loading system
-│   └── ui/               # UI components
-├── assets/               # Static assets
-│   ├── images/          # App icons & images
-│   └── sprites/         # Character sprite files
-├── constants/           # App constants & themes
-└── hooks/              # Custom React hooks
+```bash
+git clone https://github.com/realadamcarr/BugLord.git
+cd BugLord
 ```
 
-## 🎯 Key Components
+---
 
-### Character System
+### 2. Install Dependencies
 
-- **Character.tsx**: Main character display with cosmetics
-- **SpriteAssets.ts**: Sprite loading with emoji fallbacks
-- **CosmeticsShowcase.tsx**: Grid view of all cosmetics
+```bash
+npm install
+```
 
-### Game Logic
+---
 
-- **XP System**: 10 XP per completed note
-- **Leveling**: Level up every 100 XP
-- **Auto-equip**: Highest unlocked cosmetics are equipped
-- **Persistence**: All progress saved locally
+### 3. Firebase Setup
 
-## 🔧 Configuration
+BugLord uses Firebase for authentication, Firestore database, and Cloud Functions.
 
-### App Settings
+#### 3a. Create a Firebase Project
 
-- **app.json**: Expo configuration
-- **eas.json**: Build configuration
-- **tsconfig.json**: TypeScript settings
+1. Go to [console.firebase.google.com](https://console.firebase.google.com)
+2. Click **Add project** and follow the prompts
+3. Enable **Authentication** → Sign-in method → Email/Password (and any others you want)
+4. Enable **Cloud Firestore** in production or test mode
+5. Enable **Cloud Functions** if using the backend module
 
-### Customization
+#### 3b. Register Your App
 
-- **Colors.ts**: App color scheme
-- **Character.tsx**: Cosmetics & unlock levels
-- **SpriteAssets.ts**: Sprite file mappings
+- In the Firebase console, click **Add app** → iOS and/or Android
+- For Android: enter the package name from `app.json` (`com.stackzilla.buglord` or similar)
+- For iOS: enter the bundle ID from `app.json`
+- Download the config files:
+  - Android → `google-services.json` → place in `/android/app/`
+  - iOS → `GoogleService-Info.plist` → place in `/ios/BugLord/`
 
-## 📦 Dependencies
+#### 3c. Environment Variables
 
-### Core
+Create a `.env` file in the project root (never commit this file):
 
-- **Expo**: ~52.0.11
-- **React Native**: 0.76.3
-- **React**: 18.3.1
-- **TypeScript**: ^5.3.3
+```env
+EXPO_PUBLIC_FIREBASE_API_KEY=your_api_key
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+EXPO_PUBLIC_FIREBASE_APP_ID=your_app_id
+```
 
-### Features
+These values are found in your Firebase project settings under **General → Your apps → SDK setup**.
 
-- **@react-native-async-storage/async-storage**: Data persistence
-- **expo-router**: Navigation
-- **react-native-reanimated**: Animations
-- **expo-haptics**: Tactile feedback
+#### 3d. Deploy Firestore Rules
+
+```bash
+firebase deploy --only firestore:rules
+```
+
+---
+
+### 4. ML Model Setup
+
+The bug identification model must be present for the camera identification feature to work.
+
+```bash
+# Option A — PowerShell (Windows)
+./download_model.ps1
+
+# Option B — place manually
+# Copy your bug_detector.tflite file into the /models directory
+```
+
+See `docs/ml/ML_INTEGRATION_SUMMARY.md` for full details on the model and `docs/ml/YOLO_TO_TFLITE_CONVERSION.md` for how it was trained and converted.
+
+---
+
+### 5. Run the Development Server
+
+```bash
+npx expo start
+```
+
+This opens the Expo Developer Tools. From here:
+
+- Press **`a`** to launch on an Android emulator
+- Press **`i`** to launch on an iOS simulator
+- Scan the **QR code** with the Expo Go app on a physical device
+
+---
+
+## 📱 Building a Release APK / IPA
+
+BugLord uses **EAS Build** for generating release binaries.
+
+### Android APK (Preview Build)
+
+```bash
+# Login to your Expo account
+eas login
+
+# Build a preview APK (no signing required)
+eas build --platform android --profile preview
+```
+
+### iOS (Ad-hoc / TestFlight)
+
+```bash
+eas build --platform ios --profile preview
+```
+
+Build profiles are configured in `eas.json`. See `docs/build/APK_BUILD_GUIDE.md` for detailed instructions including local builds.
+
+---
+
+## 🔒 What's Excluded from the Repository
+
+The following are intentionally **not committed** to source control:
+
+| Excluded Item | Reason |
+|---|---|
+| `node_modules/` | Regenerated via `npm install` |
+| `.env` | Contains private API keys |
+| `google-services.json` | Firebase credentials — private |
+| `GoogleService-Info.plist` | Firebase credentials — private |
+| `dist/` | Build output — not source |
+| `*.tflite` (large models) | Binary assets managed separately |
+
+---
+
+## 🗺 Roadmap
+
+- [ ] iNaturalist API integration for extended species data
+- [ ] Social features — compare collections with friends
+- [ ] Augmented Reality bug overlay mode
+- [ ] Expanded Hive Mode multiplayer events
+- [ ] iOS App Store and Google Play release
+
+---
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Commit your changes: `git commit -m 'Add your feature'`
+4. Push to your branch: `git push origin feature/your-feature`
 5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
-## 🎉 Acknowledgments
-
-- Built with [Expo](https://expo.dev/)
-- Icons from [Expo Vector Icons](https://icons.expo.fyi/)
-- Inspired by RPG progression systems
 
 ---
 
-**Turn your productivity into an adventure! 🗡️✨**
+## 📄 License
+
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 👥 Team
+
+Built by the BugLord team as part of a software engineering capstone project.
+
+---
+
+*Turn the world around you into a living Pokédex. 🌿🐛*

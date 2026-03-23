@@ -19,8 +19,10 @@
           "fetch",
           "processing"
         ],
-        "NSMotionUsageDescription": "Allow BugLord to track your steps for Walk Mode"
-      }
+        "NSMotionUsageDescription": "Allow BugLord to track your steps for Walk Mode",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.realadamcarr.buglord"
     },
     "healthConnectPermissions": [
       {
@@ -46,7 +48,12 @@
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
-        "android.permission.health.READ_STEPS"
+        "android.permission.health.READ_STEPS",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.WAKE_LOCK"
       ],
       "navigationBar": {
         "visible": "immersive"
@@ -129,7 +136,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "af4e786a-105a-4d73-8ba5-26832e7561ed"
+        "projectId": "2082c807-fe86-4f1f-9c06-e17167de286a"
       }
     }
   }
