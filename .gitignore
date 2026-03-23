@@ -4,6 +4,18 @@
 node_modules/
 .venv/
 .env
+.env.local
+.env.*.local
+
+# --------------------
+# Build output
+# --------------------
+dist/
+
+# --------------------
+# AI assistant config
+# --------------------
+.claude/
 
 # --------------------
 # Expo / React Native
