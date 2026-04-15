@@ -17,8 +17,23 @@ import { Platform } from 'react-native';
 
 let _hcInitialized = false;
 
+/**
+ * Check if the react-native-health-connect native module is available.
+ * Returns false if the module isn't linked or throws on require().
+ */
+function isHealthConnectModuleAvailable(): boolean {
+  try {
+    const mod = require('react-native-health-connect');
+    // The module must have an initialize function to be usable
+    return typeof mod.initialize === 'function';
+  } catch {
+    return false;
+  }
+}
+
 async function initHealthConnect(): Promise<boolean> {
   if (_hcInitialized) return true;
+  if (!isHealthConnectModuleAvailable()) return false;
   try {
     const { initialize } = require('react-native-health-connect');
     const ok = await initialize();
@@ -30,11 +45,30 @@ async function initHealthConnect(): Promise<boolean> {
   }
 }
 
+async function hasAndroidStepsPermission(): Promise<boolean> {
+  try {
+    if (!(await initHealthConnect())) return false;
+    const mod = require('react-native-health-connect');
+    if (typeof mod.getGrantedPermissions !== 'function') return false;
+    const granted = await mod.getGrantedPermissions();
+    return Array.isArray(granted) && granted.some(
+      (p: any) => p.accessType === 'read' && p.recordType === 'Steps',
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function requestAndroidPermissions(): Promise<boolean> {
   try {
     if (!(await initHealthConnect())) return false;
-    const { requestPermission } = require('react-native-health-connect');
-    const granted = await requestPermission([
+    // Check if already granted — avoids calling requestPermission which
+    // can crash natively if the Activity's result launcher hasn't been
+    // registered yet (lateinit property requestPermission).
+    if (await hasAndroidStepsPermission()) return true;
+    const mod = require('react-native-health-connect');
+    if (typeof mod.requestPermission !== 'function') return false;
+    const granted = await mod.requestPermission([
       { accessType: 'read', recordType: 'Steps' },
     ]);
     return granted.length > 0;
@@ -47,8 +81,9 @@ async function requestAndroidPermissions(): Promise<boolean> {
 async function queryAndroidSteps(from: Date, to: Date): Promise<number> {
   try {
     if (!(await initHealthConnect())) return 0;
-    const { readRecords } = require('react-native-health-connect');
-    const result = await readRecords('Steps', {
+    const mod = require('react-native-health-connect');
+    if (typeof mod.readRecords !== 'function') return 0;
+    const result = await mod.readRecords('Steps', {
       timeRangeFilter: {
         operator: 'between',
         startTime: from.toISOString(),
@@ -107,6 +142,35 @@ async function queryIOSSteps(from: Date, to: Date): Promise<number> {
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
+
+/**
+ * Check whether the native health platform is available and can provide steps.
+ * Returns a status string: 'available', 'unavailable', or 'not_installed'.
+ * On Android, Health Connect must be installed (built-in on Android 14+).
+ */
+export async function getNativeStepStatus(): Promise<'available' | 'unavailable' | 'not_installed'> {
+  if (Platform.OS === 'android') {
+    if (!isHealthConnectModuleAvailable()) return 'unavailable';
+    try {
+      // Try initializing — this is safer than getSdkStatus which can
+      // crash natively on devices without Health Connect installed.
+      const ok = await initHealthConnect();
+      return ok ? 'available' : 'not_installed';
+    } catch {
+      return 'not_installed';
+    }
+  }
+  if (Platform.OS === 'ios') {
+    try {
+      const Healthkit = require('@kingstinct/react-native-healthkit');
+      const avail = await Healthkit.isHealthDataAvailable();
+      return avail ? 'available' : 'unavailable';
+    } catch {
+      return 'unavailable';
+    }
+  }
+  return 'unavailable';
+}
 
 /**
  * Request read-only step permissions from the native health platform.

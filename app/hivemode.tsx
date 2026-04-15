@@ -12,14 +12,13 @@
 
 import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
 import { getItemDefinition } from '@/constants/Items';
 import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useInventory } from '@/contexts/InventoryContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { HiveBattleService } from '@/services/HiveBattleService';
-import { Bug } from '@/types/Bug';
+import { Bug, getStatsForLevel } from '@/types/Bug';
 import { BattleBug, BattleTurn, generateHiveRounds, HiveRound, HiveRunState } from '@/types/HiveMode';
 import { router } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
@@ -42,7 +41,7 @@ const { width: screenWidth } = Dimensions.get('window');
 
 /** Helper: get currentHp with fallback to maxHp */
 const getBugHp = (bug: Bug): { currentHp: number; maxHp: number } => {
-  const maxHp = bug.maxHp || bug.maxXp;
+  const maxHp = bug.maxHp || 30;
   const currentHp = bug.currentHp ?? maxHp;
   return { currentHp, maxHp };
 };
@@ -173,7 +172,9 @@ export default function HiveModeScreen() {
       level: selectedBug.level,
       maxHp,
       currentHp, // Use actual HP — no full heal
-      attack: Math.floor(10 + selectedBug.level * 2),
+      attack: selectedBug.attack ?? Math.floor(10 + selectedBug.level * 2),
+      defense: selectedBug.defense ?? Math.floor(5 + selectedBug.level * 1.5),
+      speed: selectedBug.speed ?? Math.floor(5 + selectedBug.level * 1.5),
       sprite:
         (selectedBug.category ? `category:${selectedBug.category}` : undefined) ||
         selectedBug.pixelArt ||
@@ -326,10 +327,70 @@ export default function HiveModeScreen() {
     gainXP(xpGained);
 
     // Grant XP to the active fighting bug so it can level up
+    let levelUpMsg = '';
     if (hiveState.playerBug) {
+      const collectionBug = collection.bugs.find(b => b.id === hiveState.playerBug!.id);
+      const oldLevel = hiveState.playerBug.level;
+
       addXpToBug(hiveState.playerBug.id, xpGained);
-      // Persist current HP after the round
-      updateBugHp(hiveState.playerBug.id, hiveState.playerBug.currentHp);
+
+      // Check if XP gain causes a level-up
+      if (collectionBug) {
+        let newXp = collectionBug.xp + xpGained;
+        let newLevel = collectionBug.level;
+        let currentMaxXp = collectionBug.maxXp;
+        while (newXp >= currentMaxXp) {
+          newXp -= currentMaxXp;
+          newLevel += 1;
+          currentMaxXp = Math.floor(currentMaxXp * 1.2);
+        }
+
+        if (newLevel > oldLevel) {
+          const grown = getStatsForLevel(
+            {
+              attack: collectionBug.attack ?? 5,
+              defense: collectionBug.defense ?? 4,
+              speed: collectionBug.speed ?? 4,
+              maxHp: collectionBug.maxHp ?? 30,
+            },
+            newLevel,
+            collectionBug.rarity,
+          );
+          const hpGain = Math.max(0, grown.maxHp - hiveState.playerBug.maxHp);
+          const newCurrentHp = Math.min(hiveState.playerBug.currentHp + hpGain, grown.maxHp);
+
+          // Persist HP including level-up gain
+          updateBugHp(hiveState.playerBug.id, newCurrentHp);
+
+          // Update local battle bug with new level and stats
+          setHiveState(prev => ({
+            ...prev,
+            playerBug: prev.playerBug
+              ? {
+                  ...prev.playerBug,
+                  level: newLevel,
+                  attack: grown.attack,
+                  defense: grown.defense,
+                  speed: grown.speed,
+                  maxHp: grown.maxHp,
+                  currentHp: newCurrentHp,
+                }
+              : null,
+          }));
+
+          setPartyBugHp(prev => ({
+            ...prev,
+            [hiveState.playerBug!.id]: { current: newCurrentHp, max: grown.maxHp },
+          }));
+
+          levelUpMsg = `\n⬆️ Level Up! Lv.${oldLevel} → Lv.${newLevel}!`;
+        } else {
+          // No level up — persist current HP normally
+          updateBugHp(hiveState.playerBug.id, hiveState.playerBug.currentHp);
+        }
+      } else {
+        updateBugHp(hiveState.playerBug.id, hiveState.playerBug.currentHp);
+      }
     }
 
     // Roll for item drop
@@ -354,7 +415,7 @@ export default function HiveModeScreen() {
       roundsWon: newRoundsWon,
     }));
 
-    setBattleMessage(`Victory! ${defeatedEnemy.name} defeated! +${xpGained} XP${dropMsg}`);
+    setBattleMessage(`Victory! ${defeatedEnemy.name} defeated! +${xpGained} XP${dropMsg}${levelUpMsg}`);
 
     if (hiveState.currentRound >= hiveState.maxRounds) {
       setTimeout(() => handleRunCompletion(true), 2500);
@@ -491,7 +552,9 @@ export default function HiveModeScreen() {
       level: newBug.level,
       maxHp,
       currentHp,
-      attack: Math.floor(10 + newBug.level * 2),
+      attack: newBug.attack ?? Math.floor(10 + newBug.level * 2),
+      defense: newBug.defense ?? Math.floor(5 + newBug.level * 1.5),
+      speed: newBug.speed ?? Math.floor(5 + newBug.level * 1.5),
       sprite:
         (newBug.category ? `category:${newBug.category}` : undefined) ||
         newBug.pixelArt ||

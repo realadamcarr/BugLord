@@ -27,10 +27,10 @@ import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Animated, {
-    SharedValue,
-    useAnimatedStyle,
-    useSharedValue,
-    withSpring
+  SharedValue,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -360,6 +360,7 @@ export default function CaptureScreen() {
       // may produce a worse prediction than the one the user already confirmed.
       let backendHandled = false;
       let backendFailed = false;
+      let backendSaysNoInsect = false;
       if (preConfirmedResult?.source === 'backend') {
         console.log('✅ Using backend-refined live scan result directly:', preConfirmedResult.label);
         mlCandidates = [{
@@ -386,8 +387,11 @@ export default function CaptureScreen() {
         // below will correctly be false and we fall through to local
         // pipelines.  We also explicitly check the message as a safety net.
         const noInsectDetected = backendResult.message?.includes('No insect detected');
-        const hasMainPrediction = backendResult.confidence > 0 && !noInsectDetected;
-        const hasTopPredictions = !noInsectDetected && backendResult.topPredictions && backendResult.topPredictions.length > 0;
+        const MIN_CONFIDENCE = 0.15; // Below this the backend is just guessing
+        if (noInsectDetected || backendResult.confidence < MIN_CONFIDENCE) backendSaysNoInsect = true;
+        const hasMainPrediction = backendResult.confidence >= MIN_CONFIDENCE && !noInsectDetected;
+        const hasTopPredictions = !noInsectDetected && backendResult.topPredictions && backendResult.topPredictions.length > 0
+          && backendResult.topPredictions.some(t => t.confidence >= MIN_CONFIDENCE);
 
         if (hasMainPrediction) {
             // Prefer common name from iNaturalist, then display label, then species name.
@@ -534,10 +538,14 @@ export default function CaptureScreen() {
         if (mlCandidates.length === 0) mlCandidates = [{ label: 'Unknown Bug', confidence: 0, source: 'manual' }];
       }
 
-      // If the backend failed and every local pipeline also fell through to Unknown Bug
-      // (i.e. only stub-level results), surface a rescan prompt instead of silently
-      // showing a useless result.
-      if (backendFailed && mlCandidates.length === 1 && mlCandidates[0]?.source === 'manual') {
+      // Reject results when every candidate came from a stub/fallback source
+      // (i.e. no real model or API produced a confident identification).
+      // Real sources: 'backend-eva02', 'offline-model', 'iNaturalist', 'tflite'
+      // Also reject when the backend explicitly said "No insect detected" —
+      // the 6-class offline model can't distinguish "not a bug" so trust the backend.
+      const REAL_SOURCES = new Set(['backend-eva02', 'offline-model', 'iNaturalist', 'tflite']);
+      const hasRealResult = mlCandidates.some(c => REAL_SOURCES.has(c.source));
+      if (!hasRealResult || backendSaysNoInsect) {
         throw new Error('STUB_FALLBACK');
       }
 
@@ -592,27 +600,35 @@ export default function CaptureScreen() {
       const top = result.candidates[0];
 
       // Look up the matching SAMPLE_BUG to get proper rarity/biome/description/traits
-      const { SAMPLE_BUGS: sampleBugs, determineRarity, determineBiome } = await import('@/types/Bug');
+      const { SAMPLE_BUGS: sampleBugs, determineRarity, determineBiome, generateBugStats } = await import('@/types/Bug');
       const matchedSample = sampleBugs.find(b => b.name === top?.label);
 
       const bugName = top?.label || 'Unknown bug';
       const bugSpecies = top?.species || matchedSample?.species || 'Unknown';
 
+      const bugRarity = matchedSample?.rarity || determineRarity(bugName, bugSpecies);
+      const stats = generateBugStats(bugRarity);
+
       const bugData: Partial<Bug> = {
         name: bugName,
         species: bugSpecies,
         description: matchedSample?.description || (top ? `Identified via ${result.provider}` : 'Unknown insect captured'),
-        rarity: matchedSample?.rarity || determineRarity(bugName, bugSpecies),
+        rarity: bugRarity,
         biome: matchedSample?.biome || determineBiome(bugName, bugSpecies),
         photo: originalPhoto,
         pixelArt: processedImage.pixelatedIcon,
         category: top?.category ?? (top?.label ? labelToCategory(top.label) : undefined),
         traits: matchedSample?.traits || (top ? ['AI Identified'] : ['Unknown']),
         size: matchedSample?.size || 'medium',
-        xpValue: RARITY_CONFIG[matchedSample?.rarity || determineRarity(bugName, bugSpecies)].xpRange[0],
+        xpValue: RARITY_CONFIG[bugRarity].xpRange[0],
         level: 1,
         xp: 0,
         maxXp: 100,
+        maxHp: stats.maxHp,
+        currentHp: stats.maxHp,
+        attack: stats.attack,
+        defense: stats.defense,
+        speed: stats.speed,
         caughtAt: new Date(),
         predictedCandidates: result.candidates,
         provider: result.provider,
@@ -641,9 +657,9 @@ export default function CaptureScreen() {
       setIdentificationResult(null);
       const isStubFallback = error instanceof Error && error.message === 'STUB_FALLBACK';
       Alert.alert(
-        isStubFallback ? 'Scan Failed' : 'Processing Error',
+        isStubFallback ? 'No Bug Detected' : 'Processing Error',
         isStubFallback
-          ? "Couldn't reach the identification server. Please rescan to try again."
+          ? "Couldn't identify a bug in this photo. Make sure a bug is clearly visible and try again."
           : 'Could not process the image. Please try again.',
         [
           { text: isStubFallback ? 'Rescan' : 'Retry', onPress: () => capturedPhoto && processAndClassify(capturedPhoto, capturedPhoto) },
@@ -771,7 +787,8 @@ export default function CaptureScreen() {
     try {
       const backendResult = await predictInsect(photoUri);
       const noInsect = backendResult.message?.includes('No insect detected');
-      if (backendResult.confidence > 0 && !noInsect) {
+      const MIN_BACKEND_CONFIDENCE = 0.15; // Reject very low-confidence guesses (walls, non-bugs)
+      if (backendResult.confidence >= MIN_BACKEND_CONFIDENCE && !noInsect) {
         const label = backendResult.commonName
           || backendResult.displayLabel
           || backendResult.speciesName
@@ -784,14 +801,21 @@ export default function CaptureScreen() {
       // Check top predictions as fallback
       if (!noInsect && backendResult.topPredictions?.length) {
         const best = backendResult.topPredictions.find(t => t.mappedBuglordType) || backendResult.topPredictions[0];
-        const label = (best as any).commonName
-          || (best.mappedBuglordType
-            ? best.mappedBuglordType.charAt(0).toUpperCase() + best.mappedBuglordType.slice(1)
-            : best.speciesName);
-        if (label) {
-          console.log(`✅ Backend live scan (top prediction): "${label}" (${Math.round(best.confidence * 100)}%)`);
-          return { label, confidence: best.confidence, source: 'backend' };
+        if (best.confidence >= MIN_BACKEND_CONFIDENCE) {
+          const label = (best as any).commonName
+            || (best.mappedBuglordType
+              ? best.mappedBuglordType.charAt(0).toUpperCase() + best.mappedBuglordType.slice(1)
+              : best.speciesName);
+          if (label) {
+            console.log(`✅ Backend live scan (top prediction): "${label}" (${Math.round(best.confidence * 100)}%)`);
+            return { label, confidence: best.confidence, source: 'backend' };
+          }
         }
+      }
+      // Backend responded but no confident prediction — treat as "no bug"
+      if (noInsect || backendResult.confidence < MIN_BACKEND_CONFIDENCE) {
+        console.log('🚫 Backend: no confident bug detection, skipping local fallback');
+        return null;
       }
     } catch (err) {
       console.warn('⚠️ Backend live scan failed, falling back to local model:', err);
@@ -1056,7 +1080,7 @@ export default function CaptureScreen() {
         >
           <View style={styles.modalOverlay}>
             <View style={styles.loadingModal}>
-              <ThemedText style={styles.modalTitle}>🤖 AI Analyzing...</ThemedText>
+              <ThemedText style={styles.modalTitle}>🔍 Identifying Bug...</ThemedText>
               {capturedPhoto && (
                 <Image source={{ uri: capturedPhoto }} style={styles.capturedPhotoPreview} />
               )}
@@ -1066,7 +1090,7 @@ export default function CaptureScreen() {
                 style={styles.loadingIndicator}
               />
               <ThemedText style={styles.modalText}>
-                Using advanced AI to identify your bug...
+                Scanning and identifying your bug...
               </ThemedText>
             </View>
           </View>

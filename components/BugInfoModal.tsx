@@ -2,6 +2,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { BugFactsResult, fetchBugFacts } from '@/services/BugFactsService';
 import { GbifSpeciesSuggestion, getSpeciesSuggestionsForBugType } from '@/src/services/gbifService';
 import { BugPrediction } from '@/src/types/bugPrediction';
 import { Bug, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
@@ -18,6 +19,7 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -60,6 +62,8 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   const [manualFamily, setManualFamily] = useState('');
   const [gbifSuggestions, setGbifSuggestions] = useState<GbifSpeciesSuggestion[]>([]);
   const [gbifLoading, setGbifLoading] = useState(false);
+  const [detailedFacts, setDetailedFacts] = useState<BugFactsResult | null>(null);
+  const [factsLoading, setFactsLoading] = useState(false);
 
   const styles = createStyles(theme);
 
@@ -98,6 +102,27 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
       });
     return () => { cancelled = true; };
   }, [visible, bug, scanGbifSuggestions]);
+
+  // Fetch detailed facts (Wikipedia + fallback) when modal opens
+  useEffect(() => {
+    if (!visible || !bug) {
+      setDetailedFacts(null);
+      return;
+    }
+    let cancelled = false;
+    setFactsLoading(true);
+    fetchBugFacts(bug)
+      .then((result) => {
+        if (!cancelled) setDetailedFacts(result);
+      })
+      .catch(() => {
+        // silently fall back to inline facts
+      })
+      .finally(() => {
+        if (!cancelled) setFactsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [visible, bug]);
 
   if (!bug) return null;
 
@@ -237,7 +262,7 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {/* Header */}
           <View style={styles.header}>
@@ -647,12 +672,19 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
           {/* Facts */}
           <View style={styles.section}>
             <ThemedText style={styles.sectionTitle}>📚 Bug Facts</ThemedText>
-            {bugFacts.map((fact, index) => (
+            {factsLoading ? (
+              <ThemedText style={styles.factText}>Loading facts...</ThemedText>
+            ) : (detailedFacts?.facts ?? bugFacts).map((fact, index) => (
               <View key={index} style={styles.factItem}>
                 <Text style={styles.factBullet}>•</Text>
                 <ThemedText style={styles.factText}>{fact}</ThemedText>
               </View>
             ))}
+            {detailedFacts?.source === 'wikipedia' && (
+              <ThemedText style={[styles.factText, { fontSize: 10, opacity: 0.5, marginTop: 4 }]}>
+                Source: Wikipedia
+              </ThemedText>
+            )}
           </View>
 
           {/* Nickname Input */}
@@ -733,27 +765,11 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
               </>
             ) : (
               <>
-                {onRescan && (
-                  <TouchableOpacity
-                    style={[styles.actionButton, styles.rescanButton]}
-                    onPress={onRescan}
-                  >
-                    <ThemedText style={styles.rescanButtonText}>🔄 Rescan Bug</ThemedText>
-                  </TouchableOpacity>
-                )}
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.secondaryButton]}
-                  onPress={handleAddToCollection}
-                >
-                  <ThemedText style={styles.secondaryButtonText}>Add to Collection</ThemedText>
-                </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.actionButton, styles.primaryButton]}
-                  onPress={handleAddToParty}
+                  onPress={handleAddToCollection}
                 >
-                  <ThemedText style={styles.primaryButtonText}>
-                    {hasPartySpace ? 'Add to Party' : 'Replace Party Member'}
-                  </ThemedText>
+                  <ThemedText style={styles.primaryButtonText}>Add to Collection</ThemedText>
                 </TouchableOpacity>
               </>
             )
@@ -774,7 +790,7 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
             </>
           )}
         </View>
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 };

@@ -23,6 +23,9 @@ import {
     unregisterBackgroundStepTracking,
 } from './BackgroundStepTracking';
 import {
+    queryNativeStepHistory
+} from './NativeStepHistory';
+import {
     dismissWalkModeNotification,
     requestNotificationPermission,
     showWalkModeNotification,
@@ -351,6 +354,12 @@ class WalkModeService {
           this.handleStepUpdate(result.steps);
         }
       });
+
+      // NOTE: Do NOT call requestNativeStepPermissions() here.
+      // On Android, react-native-health-connect's requestPermission crashes
+      // natively (lateinit property not initialized) if the Activity's
+      // result launcher hasn't been registered yet. The permission request
+      // is triggered from the walkmode UI instead (user-initiated action).
 
       // Register background fetch task so steps are tracked even when app is killed
       await registerBackgroundStepTracking();

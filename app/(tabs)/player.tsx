@@ -303,7 +303,7 @@ export default function PlayerScreen() {
         animationType="slide"
         presentationStyle="pageSheet"
       >
-        <View style={styles.modalContainer}>
+        <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <TouchableOpacity
               style={styles.modalCloseButton}
@@ -340,7 +340,7 @@ export default function PlayerScreen() {
               ))
             )}
           </ScrollView>
-        </View>
+        </SafeAreaView>
       </Modal>
 
       {/* Profile Picture Picker — Paper Dialog */}

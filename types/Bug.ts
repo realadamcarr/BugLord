@@ -121,12 +121,12 @@ export const BIOME_CONFIG = {
 };
 
 // Base battle-stat ranges per rarity (min, max). Higher rarity → stronger.
-const BATTLE_STAT_RANGES: Record<BugRarity, { attack: [number, number]; defense: [number, number]; speed: [number, number] }> = {
-  common:    { attack: [5, 10],  defense: [4, 9],   speed: [4, 9]  },
-  uncommon:  { attack: [8, 14],  defense: [7, 13],  speed: [7, 13] },
-  rare:      { attack: [12, 20], defense: [10, 18], speed: [10, 18] },
-  epic:      { attack: [18, 28], defense: [15, 25], speed: [15, 25] },
-  legendary: { attack: [25, 40], defense: [22, 35], speed: [22, 35] },
+export const BATTLE_STAT_RANGES: Record<BugRarity, { hp: [number, number]; attack: [number, number]; defense: [number, number]; speed: [number, number] }> = {
+  common:    { hp: [25, 40],   attack: [4, 8],    defense: [3, 7],    speed: [3, 7]   },
+  uncommon:  { hp: [38, 55],   attack: [8, 14],   defense: [6, 12],   speed: [6, 12]  },
+  rare:      { hp: [50, 75],   attack: [14, 22],  defense: [11, 19],  speed: [11, 19] },
+  epic:      { hp: [70, 100],  attack: [22, 32],  defense: [18, 28],  speed: [18, 28] },
+  legendary: { hp: [95, 140],  attack: [30, 45],  defense: [25, 38],  speed: [25, 38] },
 };
 
 const randBetween = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
@@ -135,6 +135,7 @@ const randBetween = (min: number, max: number) => Math.floor(Math.random() * (ma
 export const generateBugStats = (rarity: BugRarity): {
   xp: number; maxXp: number; level: number;
   attack: number; defense: number; speed: number;
+  maxHp: number;
 } => {
   const config = RARITY_CONFIG[rarity];
   const baseXp = Math.floor(Math.random() * (config.xpRange[1] - config.xpRange[0]) + config.xpRange[0]);
@@ -146,6 +147,35 @@ export const generateBugStats = (rarity: BugRarity): {
     attack: randBetween(bs.attack[0], bs.attack[1]),
     defense: randBetween(bs.defense[0], bs.defense[1]),
     speed: randBetween(bs.speed[0], bs.speed[1]),
+    maxHp: randBetween(bs.hp[0], bs.hp[1]),
+  };
+};
+
+/**
+ * Compute stats for a bug at a given level.
+ * Each level adds a small percentage of the base stat.
+ * Growth rate scales with rarity so legendary bugs gain more per level.
+ */
+const RARITY_GROWTH: Record<BugRarity, number> = {
+  common: 0.06,
+  uncommon: 0.08,
+  rare: 0.10,
+  epic: 0.12,
+  legendary: 0.14,
+};
+
+export const getStatsForLevel = (
+  base: { attack: number; defense: number; speed: number; maxHp: number },
+  level: number,
+  rarity: BugRarity,
+): { attack: number; defense: number; speed: number; maxHp: number } => {
+  const g = RARITY_GROWTH[rarity];
+  const mult = 1 + (level - 1) * g;
+  return {
+    attack: Math.floor(base.attack * mult),
+    defense: Math.floor(base.defense * mult),
+    speed: Math.floor(base.speed * mult),
+    maxHp: Math.floor(base.maxHp * mult),
   };
 };
 

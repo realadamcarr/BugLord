@@ -15,7 +15,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { requestNativeStepPermissions } from '@/services/NativeStepHistory';
+import { getNativeStepStatus } from '@/services/NativeStepHistory';
 import { useWalkMode } from '@/services/useWalkMode';
 import { Bug, RARITY_CONFIG } from '@/types/Bug';
 import { router } from 'expo-router';
@@ -54,24 +54,28 @@ export default function WalkModeScreen() {
   const [selectedBug, setSelectedBug] = useState<Bug | null>(null);
   const [showBugSelector, setShowBugSelector] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<'checking' | 'granted' | 'denied' | 'na'>('checking');
+  const [healthConnectStatus, setHealthConnectStatus] = useState<'checking' | 'available' | 'unavailable' | 'not_installed'>('checking');
 
-  // Check physical activity permission on screen open
+  // Check physical activity permission and Health Connect status on screen open
   useEffect(() => {
     async function checkPermission() {
       if (Platform.OS === 'web') {
         setPermissionStatus('na');
+        setHealthConnectStatus('unavailable');
         return;
       }
       try {
         const { status } = await Pedometer.getPermissionsAsync();
         setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
-        // Also request native health permissions (Health Connect / HealthKit)
-        // so step recovery works when the app was killed.
-        if (status === 'granted') {
-          requestNativeStepPermissions().catch(() => {});
-        }
       } catch {
         setPermissionStatus('na');
+      }
+      // Check Health Connect / HealthKit availability
+      try {
+        const hcStatus = await getNativeStepStatus();
+        setHealthConnectStatus(hcStatus);
+      } catch {
+        setHealthConnectStatus('unavailable');
       }
     }
     checkPermission();
@@ -84,8 +88,6 @@ export default function WalkModeScreen() {
       const { status, canAskAgain } = await Pedometer.requestPermissionsAsync();
       if (status === 'granted') {
         setPermissionStatus('granted');
-        // Also request native health permissions for step recovery
-        requestNativeStepPermissions().catch(() => {});
       } else if (!canAskAgain) {
         Alert.alert(
           'Permission Required',
@@ -115,6 +117,11 @@ export default function WalkModeScreen() {
           try {
             const { status } = await Pedometer.getPermissionsAsync();
             setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
+          } catch {}
+          // Re-check Health Connect status
+          try {
+            const hcStatus = await getNativeStepStatus();
+            setHealthConnectStatus(hcStatus);
           } catch {}
         }
         // Recover steps taken while app was closed
@@ -448,6 +455,47 @@ export default function WalkModeScreen() {
           </TouchableOpacity>
         )}
 
+        {/* Health Connect Status Banner */}
+        {Platform.OS === 'android' && healthConnectStatus === 'not_installed' && (
+          <TouchableOpacity
+            style={styles.healthConnectBanner}
+            onPress={() => {
+              Alert.alert(
+                'Health Connect Required',
+                'Install Google Health Connect from the Play Store to track steps when the app is closed.\n\nHealth Connect is built-in on Android 14+. On older versions, install it from the Play Store.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Open Play Store',
+                    onPress: () =>
+                      Linking.openURL('market://details?id=com.google.android.apps.healthdata').catch(() =>
+                        Linking.openURL('https://play.google.com/store/apps/details?id=com.google.android.apps.healthdata').catch(() => {}),
+                      ),
+                  },
+                ],
+              );
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.permissionBannerIcon}>📱</Text>
+            <View style={styles.permissionBannerTextContainer}>
+              <Text style={styles.permissionBannerTitle}>Health Connect Not Found</Text>
+              <Text style={styles.permissionBannerSubtitle}>
+                Tap to install — required for background step tracking
+              </Text>
+            </View>
+            <Text style={styles.permissionBannerArrow}>→</Text>
+          </TouchableOpacity>
+        )}
+        {Platform.OS === 'android' && healthConnectStatus === 'available' && walkModeActive && (
+          <View style={styles.healthConnectConnected}>
+            <Text style={styles.healthConnectConnectedIcon}>✓</Text>
+            <Text style={styles.healthConnectConnectedText}>
+              Health Connect active — steps tracked when app is closed
+            </Text>
+          </View>
+        )}
+
         {/* Progress Section */}
         <View style={styles.progressSection}>
           <ThemedText style={styles.stepsToGoTitle}>
@@ -693,6 +741,42 @@ const createStyles = (theme: any) => StyleSheet.create({
     fontSize: 20,
     fontWeight: '900',
     marginLeft: 8,
+  },
+  healthConnectBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#5E3B7B',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 10,
+    borderWidth: 3,
+    borderColor: '#7B4FA0',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  healthConnectConnected: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1B5E20',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 10,
+    borderWidth: 3,
+    borderColor: '#2E7D32',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  healthConnectConnectedIcon: {
+    color: '#A5D6A7',
+    fontSize: 16,
+    fontWeight: '900',
+    marginRight: 10,
+  },
+  healthConnectConnectedText: {
+    color: '#C8E6C9',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
   },
   progressSection: {
     alignItems: 'center',

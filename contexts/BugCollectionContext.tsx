@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { BugCategory } from '../constants/bugSprites';
-import { Bug, BugCollection, generateBugStats, RARITY_CONFIG } from '../types/Bug';
+import { Bug, BugCollection, generateBugStats, getStatsForLevel, RARITY_CONFIG } from '../types/Bug';
 import { labelToCategory } from '../utils/bugCategory';
 
 /**
@@ -191,7 +191,12 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
     const level = bugData.level ?? 1;
     const xp = bugData.xp ?? 0;
     const maxXp = bugData.maxXp ?? stats.maxXp;
-    const hpForLevel = Math.floor(stats.maxXp * (1 + (level - 1) * 0.2));
+    const baseHp = bugData.maxHp ?? stats.maxHp;
+    const baseAtk = bugData.attack ?? stats.attack;
+    const baseDef = bugData.defense ?? stats.defense;
+    const baseSpd = bugData.speed ?? stats.speed;
+    // Scale stats to current level using rarity growth curve
+    const scaled = getStatsForLevel({ attack: baseAtk, defense: baseDef, speed: baseSpd, maxHp: baseHp }, level, bugData.rarity);
     const newBug: Bug = {
       ...bugData,
       id: generateBugId(),
@@ -199,11 +204,11 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
       level,
       xp,
       maxXp,
-      maxHp: bugData.maxHp ?? hpForLevel,
-      currentHp: bugData.currentHp ?? hpForLevel,
-      attack: bugData.attack ?? stats.attack,
-      defense: bugData.defense ?? stats.defense,
-      speed: bugData.speed ?? stats.speed,
+      maxHp: scaled.maxHp,
+      currentHp: bugData.currentHp ?? scaled.maxHp,
+      attack: scaled.attack,
+      defense: scaled.defense,
+      speed: scaled.speed,
     };
 
     setCollection(prev => ({
@@ -337,7 +342,23 @@ export const BugCollectionProvider: React.FC<BugCollectionProviderProps> = ({ ch
             const newMaxXp = Math.floor(currentBug.maxXp * 1.2);
             currentBug = { ...currentBug, maxXp: newMaxXp };
           }
-          return { ...currentBug, xp: newXp, level: newLevel };
+          // Apply stat growth for the new level
+          const grown = getStatsForLevel(
+            { attack: bug.attack ?? 5, defense: bug.defense ?? 4, speed: bug.speed ?? 4, maxHp: bug.maxHp ?? 30 },
+            newLevel,
+            bug.rarity,
+          );
+          const hpGain = grown.maxHp - (bug.maxHp ?? 30);
+          return {
+            ...currentBug,
+            xp: newXp,
+            level: newLevel,
+            attack: grown.attack,
+            defense: grown.defense,
+            speed: grown.speed,
+            maxHp: grown.maxHp,
+            currentHp: Math.min((bug.currentHp ?? grown.maxHp) + Math.max(0, hpGain), grown.maxHp),
+          };
         };
 
         // Update bug in bugs array

@@ -15,6 +15,8 @@ export interface BattleBug {
   maxHp: number;
   currentHp: number;
   attack: number;
+  defense: number;
+  speed: number;
   sprite?: string;
   isEnemy: boolean;
 }
@@ -63,36 +65,48 @@ export const ENEMY_BUG_TEMPLATES: Record<EnemyBugType, {
   name: string;
   baseHp: number;
   baseAttack: number;
+  baseDefense: number;
+  baseSpeed: number;
   sprite: string;
 }> = {
   ant: {
     name: 'Wild Ant',
     baseHp: 30,
     baseAttack: 5,
+    baseDefense: 4,
+    baseSpeed: 6,
     sprite: '🐜',
   },
   bee: {
     name: 'Wild Bee',
     baseHp: 25,
     baseAttack: 7,
+    baseDefense: 3,
+    baseSpeed: 8,
     sprite: '🐝',
   },
   wasp: {
     name: 'Wild Wasp',
     baseHp: 28,
     baseAttack: 8,
+    baseDefense: 4,
+    baseSpeed: 7,
     sprite: '🐝', // Using bee emoji as fallback
   },
   fly: {
     name: 'Wild Fly',
     baseHp: 20,
     baseAttack: 4,
+    baseDefense: 2,
+    baseSpeed: 10,
     sprite: '🪰',
   },
   centipede: {
     name: 'Boss Centipede',
     baseHp: 80,
     baseAttack: 15,
+    baseDefense: 12,
+    baseSpeed: 5,
     sprite: '🐛',
   },
 };
@@ -102,6 +116,8 @@ export const calculateBugStats = (template: typeof ENEMY_BUG_TEMPLATES[EnemyBugT
   return {
     maxHp: Math.floor(template.baseHp * (1 + (level - 1) * 0.15)),
     attack: Math.floor(template.baseAttack * (1 + (level - 1) * 0.1)),
+    defense: Math.floor(template.baseDefense * (1 + (level - 1) * 0.1)),
+    speed: Math.floor(template.baseSpeed * (1 + (level - 1) * 0.08)),
   };
 };
 

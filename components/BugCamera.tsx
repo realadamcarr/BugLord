@@ -2,14 +2,14 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
 import React, { useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Platform,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -164,11 +164,10 @@ export const BugCamera: React.FC<BugCameraProps> = ({
         // null means the ML model is still loading — offer actionable choices
         setLiveScanState('idle');
         Alert.alert(
-          'ML Model Loading',
-          'The on-device model is still loading. What would you like to do?',
+          'No bug detected',
+          "Couldn't identify a bug in this photo. Make sure a bug is clearly visible and try again.",
           [
             { text: 'Try Again', onPress: () => { /* user taps scan button again */ } },
-            { text: 'Switch to Photo', onPress: () => { /* parent handles mode */ } },
             { text: 'Close', style: 'cancel', onPress: onClose },
           ]
         );

@@ -9,7 +9,7 @@
  * - Item drops from defeated enemies
  */
 
-import { Bug } from '@/types/Bug';
+import { Bug, generateBugStats, getStatsForLevel } from '@/types/Bug';
 import {
     BattleBug,
     BattleTurn,
@@ -57,6 +57,8 @@ export class HiveBattleService {
       maxHp: stats.maxHp,
       currentHp: stats.maxHp,
       attack: stats.attack,
+      defense: stats.defense,
+      speed: stats.speed,
       sprite: template.sprite,
       isEnemy: true,
     };
@@ -67,12 +69,14 @@ export class HiveBattleService {
     damage: number;
     enemyHpRemaining: number;
   } {
-    // Simple damage calculation with variance
-    const variance = 0.85 + Math.random() * 0.3; // 85% - 115% damage
-    const damage = Math.max(1, Math.floor(playerBug.attack * variance));
+    // Damage = attack * variance, reduced by enemy defense
+    const variance = 0.85 + Math.random() * 0.3; // 85% - 115%
+    const raw = Math.floor(playerBug.attack * variance);
+    const reduction = Math.floor(enemyBug.defense * 0.4);
+    const damage = Math.max(1, raw - reduction);
     const enemyHpRemaining = Math.max(0, enemyBug.currentHp - damage);
     
-    console.log(`[Battle] ${playerBug.name} attacks ${enemyBug.name} for ${damage} damage`);
+    console.log(`[Battle] ${playerBug.name} attacks ${enemyBug.name} for ${damage} damage (raw ${raw}, def reduction ${reduction})`);
     
     return { damage, enemyHpRemaining };
   }
@@ -82,12 +86,14 @@ export class HiveBattleService {
     damage: number;
     playerHpRemaining: number;
   } {
-    // Simple damage calculation with variance
-    const variance = 0.85 + Math.random() * 0.3; // 85% - 115% damage
-    const damage = Math.max(1, Math.floor(enemyBug.attack * variance));
+    // Damage = attack * variance, reduced by player defense
+    const variance = 0.85 + Math.random() * 0.3; // 85% - 115%
+    const raw = Math.floor(enemyBug.attack * variance);
+    const reduction = Math.floor(playerBug.defense * 0.4);
+    const damage = Math.max(1, raw - reduction);
     const playerHpRemaining = Math.max(0, playerBug.currentHp - damage);
     
-    console.log(`[Battle] ${enemyBug.name} attacks ${playerBug.name} for ${damage} damage`);
+    console.log(`[Battle] ${enemyBug.name} attacks ${playerBug.name} for ${damage} damage (raw ${raw}, def reduction ${reduction})`);
     
     return { damage, playerHpRemaining };
   }
@@ -139,10 +145,13 @@ export class HiveBattleService {
     else if (enemyBug.level >= 10) rarity = 'rare';
     else if (enemyBug.level >= 6) rarity = 'uncommon';
 
-    // Scale stats with level so caught bugs feel appropriately strong
-    const baseAttack = Math.floor(5 + enemyBug.level * 1.5 + Math.random() * 3);
-    const baseDefense = Math.floor(3 + enemyBug.level * 1.2 + Math.random() * 3);
-    const baseSpeed = Math.floor(4 + enemyBug.level * 1 + Math.random() * 3);
+    // Generate base stats from rarity, then scale to enemy level
+    const base = generateBugStats(rarity);
+    const scaled = getStatsForLevel(
+      { attack: base.attack, defense: base.defense, speed: base.speed, maxHp: base.maxHp },
+      enemyBug.level,
+      rarity,
+    );
 
     return {
       id: `caught-${enemyBug.id}`,
@@ -153,12 +162,12 @@ export class HiveBattleService {
       biome: 'forest',
       level: enemyBug.level,
       xp: 0,
-      maxXp: enemyBug.maxHp,
-      maxHp: enemyBug.maxHp,
-      currentHp: enemyBug.maxHp, // Caught bugs start at full HP
-      attack: baseAttack,
-      defense: baseDefense,
-      speed: baseSpeed,
+      maxXp: base.maxXp,
+      maxHp: scaled.maxHp,
+      currentHp: scaled.maxHp,
+      attack: scaled.attack,
+      defense: scaled.defense,
+      speed: scaled.speed,
       xpValue: enemyBug.level * 10,
       traits: [`Caught at Level ${enemyBug.level}`],
       size: 'medium' as const,
