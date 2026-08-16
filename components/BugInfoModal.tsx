@@ -1,9 +1,14 @@
 import { ThemedText } from '@/components/ThemedText';
+import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { BugFactsResult, fetchBugFacts } from '@/services/BugFactsService';
+import { GbifSpeciesSuggestion, getSpeciesSuggestionsForBugType } from '@/src/services/gbifService';
+import { BugPrediction } from '@/src/types/bugPrediction';
 import { Bug, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+    Alert,
     Dimensions,
     Image,
     Modal,
@@ -14,16 +19,25 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
+
+/** Stable empty array – avoids creating a new [] reference on every render. */
+const EMPTY_GBIF: GbifSpeciesSuggestion[] = [];
 
 interface BugInfoModalProps {
   visible: boolean;
   bug: Bug | null;
   onClose: () => void;
   onConfirm: (options: { nickname?: string; addToParty?: boolean; replaceBugId?: string; confirmedLabel?: string; confirmationMethod?: ConfirmationMethod; }) => void;
+  onRescan?: () => void;
   isNewCatch?: boolean;
   candidates?: IdentificationCandidate[];
+  /** Honest offline-model prediction from scanPipeline. */
+  prediction?: BugPrediction | null;
+  /** GBIF enrichment results from scanPipeline. */
+  scanGbifSuggestions?: GbifSpeciesSuggestion[];
 }
 
 export const BugInfoModal: React.FC<BugInfoModalProps> = ({
@@ -31,11 +45,14 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   bug,
   onClose,
   onConfirm,
+  onRescan,
   isNewCatch = false,
-  candidates = []
+  candidates = [],
+  prediction = null,
+  scanGbifSuggestions = EMPTY_GBIF,
 }) => {
   const { theme } = useTheme();
-  const { collection } = useBugCollection();
+  const { collection, releaseBug } = useBugCollection();
   const [nickname, setNickname] = useState('');
   const [showPartySwap, setShowPartySwap] = useState(false);
   const [selectedSwapBug, setSelectedSwapBug] = useState<string | null>(null);
@@ -43,10 +60,92 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   const [manualMode, setManualMode] = useState(false);
   const [manualOrder, setManualOrder] = useState('');
   const [manualFamily, setManualFamily] = useState('');
+  const [gbifSuggestions, setGbifSuggestions] = useState<GbifSpeciesSuggestion[]>([]);
+  const [gbifLoading, setGbifLoading] = useState(false);
+  const [detailedFacts, setDetailedFacts] = useState<BugFactsResult | null>(null);
+  const [factsLoading, setFactsLoading] = useState(false);
 
   const styles = createStyles(theme);
 
+  // Initialize nickname from bug when modal opens or bug changes
+  useEffect(() => {
+    if (bug && !isNewCatch) {
+      setNickname(bug.nickname || '');
+    } else {
+      setNickname('');
+    }
+  }, [bug, isNewCatch, visible]);
+
+  // Fetch GBIF real-world species suggestions when modal opens
+  // Only runs as fallback when scanPipeline didn't provide suggestions.
+  useEffect(() => {
+    if (!visible || !bug) {
+      setGbifSuggestions(prev => (prev.length === 0 ? prev : []));
+      return;
+    }
+    // Use pipeline-provided suggestions when available
+    if (scanGbifSuggestions.length > 0) {
+      setGbifSuggestions(scanGbifSuggestions);
+      return;
+    }
+    const bugType = bug.category || bug.name;
+    if (!bugType) return;
+
+    let cancelled = false;
+    setGbifLoading(true);
+    getSpeciesSuggestionsForBugType(bugType)
+      .then((results) => {
+        if (!cancelled) setGbifSuggestions(results);
+      })
+      .finally(() => {
+        if (!cancelled) setGbifLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [visible, bug, scanGbifSuggestions]);
+
+  // Fetch detailed facts (Wikipedia + fallback) when modal opens
+  useEffect(() => {
+    if (!visible || !bug) {
+      setDetailedFacts(null);
+      return;
+    }
+    let cancelled = false;
+    setFactsLoading(true);
+    fetchBugFacts(bug)
+      .then((result) => {
+        if (!cancelled) setDetailedFacts(result);
+      })
+      .catch(() => {
+        // silently fall back to inline facts
+      })
+      .finally(() => {
+        if (!cancelled) setFactsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [visible, bug]);
+
   if (!bug) return null;
+
+  const handleRelease = () => {
+    Alert.alert(
+      'Release Bug',
+      'Are you sure you want to release this bug? It will be lost forever.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Release',
+          style: 'destructive',
+          onPress: () => {
+            releaseBug(bug.id);
+            onClose();
+          },
+        },
+      ]
+    );
+  };
 
   const hasPartySpace = collection.party.some(slot => slot === null);
   const partyBugs = collection.party.filter(Boolean) as Bug[];
@@ -116,6 +215,17 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
     return facts;
   };
 
+  const getRarityPercentage = (rarity: string): number => {
+    const rarityValues = {
+      'common': 20,
+      'uncommon': 40,
+      'rare': 60,
+      'epic': 80,
+      'legendary': 100
+    };
+    return rarityValues[rarity as keyof typeof rarityValues] || 20;
+  };
+
   const handleConfirm = () => {
     let confirmedLabel: string | undefined = selectedLabel || undefined;
     let confirmationMethod: ConfirmationMethod | undefined = 'AI_PICK';
@@ -152,7 +262,7 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {/* Header */}
           <View style={styles.header}>
@@ -166,7 +276,9 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
 
           {/* Bug Image */}
           <View style={styles.imageContainer}>
-            {bug.photo ? (
+            {bug.category && BUG_SPRITE[bug.category] ? (
+              <Image source={BUG_SPRITE[bug.category]} style={styles.bugPhoto} />
+            ) : bug.photo ? (
               <Image source={{ uri: bug.photo }} style={styles.bugPhoto} />
             ) : bug.pixelArt ? (
               <Image source={{ uri: bug.pixelArt }} style={styles.bugIcon} />
@@ -187,30 +299,260 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
             <ThemedText style={styles.bugDescription}>{bug.description}</ThemedText>
           </View>
 
-          {/* Candidates Selection */}
-          {isNewCatch && candidates.length > 0 && !showPartySwap && (
+          {/* Bug Stats Chart */}
+          <View style={styles.section}>
+            <ThemedText style={styles.sectionTitle}>📊 Stats</ThemedText>
+            
+            {/* Level */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>Level</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View 
+                    style={[
+                      styles.statBarFill, 
+                      { 
+                        width: `${Math.min(100, ((bug.level || 1) / 20) * 100)}%`,
+                        backgroundColor: theme.colors.primary
+                      }
+                    ]} 
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.level || 1}</ThemedText>
+              </View>
+            </View>
+
+            {/* XP Progress */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>XP Progress</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View 
+                    style={[
+                      styles.statBarFill, 
+                      { 
+                        width: `${bug.maxXp && bug.maxXp > 0 ? ((bug.xp || 0) / bug.maxXp) * 100 : 0}%`,
+                        backgroundColor: theme.colors.xpFill
+                      }
+                    ]} 
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.xp || 0}/{bug.maxXp || 100}</ThemedText>
+              </View>
+            </View>
+
+            {/* HP (if available) */}
+            {bug.maxHp && bug.maxHp > 0 && (
+              <View style={styles.statRow}>
+                <ThemedText style={styles.statLabel}>Health</ThemedText>
+                <View style={styles.statBarContainer}>
+                  <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                    <View 
+                      style={[
+                        styles.statBarFill, 
+                        { 
+                          width: `${((bug.currentHp || bug.maxHp) / bug.maxHp) * 100}%`,
+                          backgroundColor: theme.colors.error
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <ThemedText style={styles.statValue}>{bug.currentHp || bug.maxHp}/{bug.maxHp}</ThemedText>
+                </View>
+              </View>
+            )}
+
+            {/* Rarity */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>Rarity</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View 
+                    style={[
+                      styles.statBarFill, 
+                      { 
+                        width: `${getRarityPercentage(bug.rarity || 'common')}%`,
+                        backgroundColor: RARITY_CONFIG[bug.rarity || 'common']?.color || '#666'
+                      }
+                    ]} 
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{(bug.rarity || 'common').toUpperCase()}</ThemedText>
+              </View>
+            </View>
+
+            {/* XP Value */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>XP Value</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View 
+                    style={[
+                      styles.statBarFill, 
+                      { 
+                        width: `${Math.min(100, ((bug.xpValue || 10) / 120) * 100)}%`,
+                        backgroundColor: theme.colors.warning
+                      }
+                    ]} 
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.xpValue || 10} XP</ThemedText>
+              </View>
+            </View>
+          </View>
+
+          {/* Battle Stats */}
+          <View style={styles.section}>
+            <ThemedText style={styles.sectionTitle}>⚔️ Battle Stats</ThemedText>
+
+            {/* Attack */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>Attack</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View
+                    style={[
+                      styles.statBarFill,
+                      {
+                        width: `${Math.min(100, ((bug.attack || 0) / 40) * 100)}%`,
+                        backgroundColor: '#E74C3C',
+                      },
+                    ]}
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.attack || 0}</ThemedText>
+              </View>
+            </View>
+
+            {/* Defense */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>Defense</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View
+                    style={[
+                      styles.statBarFill,
+                      {
+                        width: `${Math.min(100, ((bug.defense || 0) / 35) * 100)}%`,
+                        backgroundColor: '#3498DB',
+                      },
+                    ]}
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.defense || 0}</ThemedText>
+              </View>
+            </View>
+
+            {/* Speed */}
+            <View style={styles.statRow}>
+              <ThemedText style={styles.statLabel}>Speed</ThemedText>
+              <View style={styles.statBarContainer}>
+                <View style={[styles.statBar, { backgroundColor: theme.colors.border }]}>
+                  <View
+                    style={[
+                      styles.statBarFill,
+                      {
+                        width: `${Math.min(100, ((bug.speed || 0) / 35) * 100)}%`,
+                        backgroundColor: '#2ECC71',
+                      },
+                    ]}
+                  />
+                </View>
+                <ThemedText style={styles.statValue}>{bug.speed || 0}</ThemedText>
+              </View>
+            </View>
+          </View>
+
+          {/* ── Section A: Local BugLord Scan ── */}
+          {isNewCatch && !showPartySwap && (
             <View style={styles.section}>
-              <ThemedText style={styles.sectionTitle}>🤖 AI Suggestions</ThemedText>
-              {candidates.map((c) => (
+              {prediction ? (
+                <>
+                  {/* Confidence badge */}
+                  <View style={{
+                    backgroundColor: prediction.accepted ? '#1B5E20' : '#BF360C',
+                    borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10,
+                    marginBottom: 8, alignSelf: 'flex-start',
+                  }}>
+                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
+                      {prediction.accepted
+                        ? `Confidence: ${(prediction.confidence * 100).toFixed(0)}%`
+                        : '⚠️ Low Confidence'}
+                    </Text>
+                  </View>
+
+                  {prediction.accepted ? (
+                    <>
+                      <ThemedText style={styles.sectionTitle}>Local BugLord Scan</ThemedText>
+                      <ThemedText style={{ fontSize: 13, marginBottom: 6 }}>
+                        Detected: <Text style={{ fontWeight: '900' }}>{prediction.broadClass}</Text>
+                      </ThemedText>
+                      <ThemedText style={{ fontSize: 12, marginBottom: 6, color: theme.colors.textSecondary }}>
+                        Confidence: {(prediction.confidence * 100).toFixed(0)}%
+                      </ThemedText>
+                    </>
+                  ) : (
+                    <>
+                      <ThemedText style={styles.sectionTitle}>Local BugLord Scan</ThemedText>
+                      <ThemedText style={{ fontSize: 13, marginBottom: 4 }}>
+                        Couldn't confidently identify this bug.
+                      </ThemedText>
+                      <ThemedText style={{ fontSize: 12, marginBottom: 6, color: theme.colors.textSecondary }}>
+                        Try a closer photo, better lighting, or a simpler background.
+                      </ThemedText>
+                    </>
+                  )}
+
+                  {/* Score breakdown (debug) */}
+                  {prediction.scores.slice(0, 5).map((s, i) => (
+                    <View key={`${s.label}-${i}`} style={styles.candidateRow}>
+                      <ThemedText style={styles.candidateLabel}>{s.label}</ThemedText>
+                      <Text style={styles.candidateConfidence}>
+                        {(s.confidence * 100).toFixed(0)}%
+                      </Text>
+                    </View>
+                  ))}
+                </>
+              ) : candidates.length > 0 ? (
+                <>
+                  {/* Legacy path: show old-style candidates when prediction is not provided */}
+                  {(() => {
+                    const sources = candidates.map(c => c.source).filter(Boolean);
+                    const hasTflite = sources.some(s => /tflite/i.test(s ?? ''));
+                    const engine = hasTflite ? '🧠 On-Device TFLite Model' : '🤖 AI';
+                    return (
+                      <View style={{ backgroundColor: hasTflite ? '#1B5E20' : '#4A148C', borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10, marginBottom: 8, alignSelf: 'flex-start' }}>
+                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Identified by: {engine}</Text>
+                      </View>
+                    );
+                  })()}
+                  <ThemedText style={styles.sectionTitle}>🤖 AI Suggestions</ThemedText>
+                  {candidates.map((c, i) => (
+                    <TouchableOpacity
+                      key={`${c.label}-${i}`}
+                      style={[styles.candidateRow, selectedLabel === c.label && styles.selectedCandidate]}
+                      onPress={() => { setSelectedLabel(c.label); setManualMode(false); }}
+                    >
+                      <ThemedText style={styles.candidateLabel}>{c.label}</ThemedText>
+                      <Text style={styles.candidateConfidence}>
+                        {typeof c.confidence === 'number' ? `${Math.round(c.confidence * 100)}%` : ''}
+                      </Text>
+                      <Text style={styles.candidateSource}>{c.source}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </>
+              ) : null}
+
+              {/* "None of these" / manual override */}
+              {(prediction || candidates.length > 0) && (
                 <TouchableOpacity
-                  key={c.label}
-                  style={[styles.candidateRow, selectedLabel === c.label && styles.selectedCandidate]}
-                  onPress={() => { setSelectedLabel(c.label); setManualMode(false); }}
+                  style={[styles.candidateRow, manualMode && styles.selectedCandidate, { marginTop: 4 }]}
+                  onPress={() => { setManualMode(true); setSelectedLabel(null); }}
                 >
-                  <ThemedText style={styles.candidateLabel}>{c.label}</ThemedText>
-                  <Text style={styles.candidateConfidence}>
-                    {typeof c.confidence === 'number' ? `${Math.round(c.confidence * 100)}%` : ''}
-                  </Text>
-                  <Text style={styles.candidateSource}>{c.source}</Text>
+                  <ThemedText style={styles.candidateLabel}>None of these</ThemedText>
+                  <Text style={styles.candidateSource}>Manual</Text>
                 </TouchableOpacity>
-              ))}
-              <TouchableOpacity
-                style={[styles.candidateRow, manualMode && styles.selectedCandidate]}
-                onPress={() => { setManualMode(true); setSelectedLabel(null); }}
-              >
-                <ThemedText style={styles.candidateLabel}>None of these</ThemedText>
-                <Text style={styles.candidateSource}>Manual</Text>
-              </TouchableOpacity>
+              )}
             </View>
           )}
 
@@ -242,15 +584,107 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
             <ThemedText style={styles.personalityText}>{bugPersonality}</ThemedText>
           </View>
 
+          {/* ── Section B: GBIF Enrichment (only when prediction accepted) ── */}
+          {isNewCatch && (prediction?.accepted || gbifSuggestions.length > 0 || gbifLoading) && (
+            <View style={styles.section}>
+              <View style={{ backgroundColor: '#0D47A1', borderRadius: 8, paddingVertical: 4, paddingHorizontal: 10, marginBottom: 8, alignSelf: 'flex-start' }}>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>🌍 GBIF — Enrichment Only</Text>
+              </View>
+              <ThemedText style={styles.sectionTitle}>🌍 Possible Real-World Species</ThemedText>
+              <ThemedText style={{ fontSize: 11, color: theme.colors.textSecondary, marginBottom: 8 }}>
+                These species from the GBIF database match the broad class "{prediction?.broadClass ?? bug?.category ?? '?'}". 
+                GBIF did NOT identify your photo — it only provides taxonomy context.
+              </ThemedText>
+              {gbifLoading ? (
+                <ThemedText style={styles.gbifFallback}>Loading suggestions…</ThemedText>
+              ) : gbifSuggestions.length > 0 ? (
+                gbifSuggestions.map((s) => (
+                  <View key={s.speciesKey} style={styles.gbifRow}>
+                    <View style={[styles.gbifIcon]}>
+                      <Text style={{ fontSize: 18 }}>🐛</Text>
+                    </View>
+                    <View style={styles.gbifInfo}>
+                      <ThemedText style={styles.gbifCanonical} numberOfLines={1}>
+                        {s.canonicalName ?? s.scientificName}
+                      </ThemedText>
+                      <ThemedText style={styles.gbifScientific} numberOfLines={1}>
+                        {s.scientificName}
+                      </ThemedText>
+                      {(s.family || s.order) && (
+                        <ThemedText style={styles.gbifTaxonomy} numberOfLines={1}>
+                          {[s.order, s.family].filter(Boolean).join(' · ')}
+                        </ThemedText>
+                      )}
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <ThemedText style={styles.gbifFallback}>No GBIF matches found.</ThemedText>
+              )}
+            </View>
+          )}
+
+          {/* ── Section C: Fallback messaging ── */}
+          {isNewCatch && prediction && !prediction.accepted && gbifSuggestions.length === 0 && (
+            <View style={styles.section}>
+              <ThemedText style={styles.sectionTitle}>💡 What Happened?</ThemedText>
+              <ThemedText style={{ fontSize: 13, lineHeight: 20, color: theme.colors.textSecondary }}>
+                {prediction.confidence === 0
+                  ? 'The offline classifier is not loaded. Build with EAS dev-client (not Expo Go) to enable on-device TFLite inference.'
+                  : 'The model wasn\'t confident enough to classify this insect. Try a closer, well-lit photo of the bug. You can still add it to your collection via manual entry.'}
+              </ThemedText>
+            </View>
+          )}
+
+          {/* GBIF fallback for non-new-catch views */}
+          {!isNewCatch && (
+            <View style={styles.section}>
+              <ThemedText style={styles.sectionTitle}>🌍 Possible Real-World Matches</ThemedText>
+              {gbifLoading ? (
+                <ThemedText style={styles.gbifFallback}>Loading suggestions…</ThemedText>
+              ) : gbifSuggestions.length > 0 ? (
+                gbifSuggestions.map((s) => (
+                  <View key={s.speciesKey} style={styles.gbifRow}>
+                    <View style={[styles.gbifIcon]}>
+                      <Text style={{ fontSize: 18 }}>🐛</Text>
+                    </View>
+                    <View style={styles.gbifInfo}>
+                      <ThemedText style={styles.gbifCanonical} numberOfLines={1}>
+                        {s.canonicalName ?? s.scientificName}
+                      </ThemedText>
+                      <ThemedText style={styles.gbifScientific} numberOfLines={1}>
+                        {s.scientificName}
+                      </ThemedText>
+                      {(s.family || s.order) && (
+                        <ThemedText style={styles.gbifTaxonomy} numberOfLines={1}>
+                          {[s.order, s.family].filter(Boolean).join(' · ')}
+                        </ThemedText>
+                      )}
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <ThemedText style={styles.gbifFallback}>No GBIF matches found.</ThemedText>
+              )}
+            </View>
+          )}
+
           {/* Facts */}
           <View style={styles.section}>
             <ThemedText style={styles.sectionTitle}>📚 Bug Facts</ThemedText>
-            {bugFacts.map((fact, index) => (
+            {factsLoading ? (
+              <ThemedText style={styles.factText}>Loading facts...</ThemedText>
+            ) : (detailedFacts?.facts ?? bugFacts).map((fact, index) => (
               <View key={index} style={styles.factItem}>
                 <Text style={styles.factBullet}>•</Text>
                 <ThemedText style={styles.factText}>{fact}</ThemedText>
               </View>
             ))}
+            {detailedFacts?.source === 'wikipedia' && (
+              <ThemedText style={[styles.factText, { fontSize: 10, opacity: 0.5, marginTop: 4 }]}>
+                Source: Wikipedia
+              </ThemedText>
+            )}
           </View>
 
           {/* Nickname Input */}
@@ -285,7 +719,9 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
                     ]}
                     onPress={() => setSelectedSwapBug(partyBug.id)}
                   >
-                    {partyBug.photo ? (
+                    {partyBug.category && BUG_SPRITE[partyBug.category] ? (
+                      <Image source={BUG_SPRITE[partyBug.category]} style={styles.partyBugIcon} />
+                    ) : partyBug.photo ? (
                       <Image source={{ uri: partyBug.photo }} style={styles.partyBugIcon} />
                     ) : partyBug.pixelArt ? (
                       <Image source={{ uri: partyBug.pixelArt }} style={styles.partyBugIcon} />
@@ -330,31 +766,31 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
             ) : (
               <>
                 <TouchableOpacity
-                  style={[styles.actionButton, styles.secondaryButton]}
+                  style={[styles.actionButton, styles.primaryButton]}
                   onPress={handleAddToCollection}
                 >
-                  <ThemedText style={styles.secondaryButtonText}>Add to Collection</ThemedText>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.primaryButton]}
-                  onPress={handleAddToParty}
-                >
-                  <ThemedText style={styles.primaryButtonText}>
-                    {hasPartySpace ? 'Add to Party' : 'Replace Party Member'}
-                  </ThemedText>
+                  <ThemedText style={styles.primaryButtonText}>Add to Collection</ThemedText>
                 </TouchableOpacity>
               </>
             )
           ) : (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.primaryButton, { flex: 1 }]}
-              onPress={handleConfirm}
-            >
-              <ThemedText style={styles.primaryButtonText}>Save Changes</ThemedText>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.secondaryButton]}
+                onPress={handleRelease}
+              >
+                <ThemedText style={[styles.secondaryButtonText, { color: theme.colors.error }]}>Release</ThemedText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.primaryButton]}
+                onPress={handleConfirm}
+              >
+                <ThemedText style={styles.primaryButtonText}>Save Changes</ThemedText>
+              </TouchableOpacity>
+            </>
           )}
         </View>
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 };
@@ -365,132 +801,166 @@ const createStyles = (theme: any) => StyleSheet.create({
     backgroundColor: theme.colors.background,
   },
   scrollContent: {
-    padding: 20,
-    paddingBottom: 100, // Space for action buttons
+    padding: 16,
+    paddingBottom: 100,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
     position: 'relative',
+    paddingBottom: 12,
+    borderBottomWidth: 3,
+    borderBottomColor: theme.colors.border,
   },
   closeButton: {
     position: 'absolute',
     left: 0,
     zIndex: 1,
-    padding: 8,
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: theme.colors.card,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   closeButtonText: {
-    fontSize: 24,
+    fontSize: 18,
     color: theme.colors.text,
+    fontWeight: '900',
   },
   modalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '900',
     textAlign: 'center',
     flex: 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   imageContainer: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
     position: 'relative',
   },
   bugIcon: {
     width: 120,
     height: 120,
-    borderRadius: 12,
+    borderRadius: 8,
+    borderWidth: 3,
+    borderColor: theme.colors.border,
   },
   bugPhoto: {
     width: 200,
     height: 200,
-    borderRadius: 12,
+    borderRadius: 8,
+    borderWidth: 3,
+    borderColor: theme.colors.border,
   },
   placeholderIcon: {
     width: 120,
     height: 120,
-    borderRadius: 12,
+    borderRadius: 8,
     backgroundColor: theme.colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 3,
+    borderColor: theme.colors.border,
   },
   placeholderEmoji: {
-    fontSize: 60,
+    fontSize: 52,
   },
   rarityBadge: {
     position: 'absolute',
     top: -8,
     right: screenWidth / 2 - 60,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    color: 'white',
-    fontSize: 12,
-    fontWeight: 'bold',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 4,
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   infoSection: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
   },
   bugName: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 4,
+    fontSize: 24,
+    fontWeight: '900',
+    marginBottom: 2,
+    letterSpacing: 0.3,
   },
   bugSpecies: {
-    fontSize: 18,
+    fontSize: 14,
     fontStyle: 'italic',
-    opacity: 0.8,
-    marginBottom: 12,
+    color: theme.colors.textSecondary,
+    marginBottom: 10,
   },
   bugDescription: {
-    fontSize: 16,
+    fontSize: 13,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 20,
+    color: theme.colors.textSecondary,
   },
   section: {
-    marginBottom: 24,
+    marginBottom: 20,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 14,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 12,
+    fontSize: 14,
+    fontWeight: '900',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   personalityText: {
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 13,
+    lineHeight: 20,
     fontStyle: 'italic',
-    padding: 16,
+    padding: 12,
     backgroundColor: theme.colors.surface,
-    borderRadius: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
   factItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   factBullet: {
-    color: theme.colors.primary,
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: theme.colors.warning,
+    fontSize: 14,
+    fontWeight: '900',
     marginRight: 8,
-    marginTop: 2,
+    marginTop: 1,
   },
   factText: {
-    fontSize: 16,
+    fontSize: 13,
     flex: 1,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   nicknameInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
+    borderWidth: 2,
+    borderRadius: 6,
+    padding: 12,
+    fontSize: 14,
+    fontWeight: '700',
     backgroundColor: theme.colors.surface,
   },
   swapDescription: {
-    fontSize: 16,
-    marginBottom: 16,
-    opacity: 0.8,
+    fontSize: 13,
+    marginBottom: 12,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
   },
   partyGrid: {
     flexDirection: 'row',
@@ -499,29 +969,33 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   partyBugCard: {
     width: '48%',
-    padding: 12,
-    borderRadius: 12,
+    padding: 10,
+    borderRadius: 8,
     backgroundColor: theme.colors.surface,
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
     borderWidth: 2,
-    borderColor: 'transparent',
+    borderColor: theme.colors.border,
   },
   selectedPartyBug: {
     borderColor: theme.colors.primary,
-    backgroundColor: theme.colors.primary + '20',
+    backgroundColor: `${theme.colors.primary}18`,
   },
   partyBugIcon: {
-    width: 48,
-    height: 48,
-    marginBottom: 8,
+    width: 46,
+    height: 46,
+    marginBottom: 6,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   partyBugEmoji: {
-    fontSize: 32,
-    marginBottom: 8,
+    fontSize: 28,
+    marginBottom: 6,
   },
   partyBugName: {
-    fontSize: 14,
+    fontSize: 12,
+    fontWeight: '800',
     textAlign: 'center',
   },
   actionButtons: {
@@ -530,66 +1004,176 @@ const createStyles = (theme: any) => StyleSheet.create({
     left: 0,
     right: 0,
     flexDirection: 'row',
-    padding: 20,
+    flexWrap: 'wrap',
+    padding: 16,
     backgroundColor: theme.colors.background,
-    borderTopWidth: 1,
+    borderTopWidth: 3,
     borderTopColor: theme.colors.border,
-    gap: 12,
+    gap: 10,
   },
   actionButton: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
+    flexGrow: 1,
+    flexBasis: '45%',
+    paddingVertical: 14,
+    borderRadius: 8,
     alignItems: 'center',
+    borderWidth: 3,
   },
   primaryButton: {
     backgroundColor: theme.colors.primary,
+    borderColor: `${theme.colors.primary}80`,
   },
   secondaryButton: {
     backgroundColor: 'transparent',
-    borderWidth: 1,
     borderColor: theme.colors.border,
   },
   disabledButton: {
     opacity: 0.5,
   },
   primaryButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   secondaryButtonText: {
     color: theme.colors.text,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  rescanButton: {
+    backgroundColor: theme.colors.surface,
+    borderColor: theme.colors.warning,
+    flexBasis: '100%',
+  },
+  rescanButtonText: {
+    color: theme.colors.warning,
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   candidateRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: theme.colors.surface,
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 8,
+    borderRadius: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 6,
     borderWidth: 2,
-    borderColor: 'transparent',
+    borderColor: theme.colors.border,
   },
   selectedCandidate: {
     borderColor: theme.colors.primary,
-    backgroundColor: theme.colors.primary + '20',
+    backgroundColor: `${theme.colors.primary}18`,
   },
   candidateLabel: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '800',
   },
   candidateConfidence: {
-    fontSize: 12,
-    marginRight: 8,
-    opacity: 0.8,
+    fontSize: 11,
+    marginRight: 6,
+    fontWeight: '700',
+    color: theme.colors.warning,
   },
   candidateSource: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: theme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  statRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  statLabel: {
     fontSize: 12,
-    opacity: 0.7,
+    fontWeight: '800',
+    flex: 1,
+    marginRight: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  statBarContainer: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statBar: {
+    flex: 1,
+    height: 10,
+    borderRadius: 4,
+    marginRight: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  statBarFill: {
+    height: '100%',
+    borderRadius: 3,
+    minWidth: 2,
+  },
+  statValue: {
+    fontSize: 10,
+    fontWeight: '800',
+    minWidth: 56,
+    textAlign: 'right',
+    textTransform: 'uppercase',
+    letterSpacing: 0.2,
+  },
+  // GBIF suggestion styles
+  gbifRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginBottom: 8,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 6,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  gbifIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 6,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+  },
+  gbifInfo: {
+    flex: 1,
+  },
+  gbifCanonical: {
+    fontSize: 13,
+    fontWeight: '800' as const,
+  },
+  gbifScientific: {
+    fontSize: 11,
+    fontStyle: 'italic' as const,
+    color: theme.colors.textSecondary,
+  },
+  gbifTaxonomy: {
+    fontSize: 10,
+    color: theme.colors.textSecondary,
+    marginTop: 2,
+  },
+  gbifFallback: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    fontStyle: 'italic' as const,
+    textAlign: 'center' as const,
+    paddingVertical: 12,
   },
 });

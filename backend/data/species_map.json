@@ -1,0 +1,40 @@
+{
+  "bee": [
+    "honeybee", "honey bee", "bumblebee", "bumble bee", "bee",
+    "wasp", "yellowjacket", "hornet",
+    "apis mellifera", "bombus", "xylocopa", "megachile",
+    "vespula", "vespa", "polistes"
+  ],
+  "butterfly": [
+    "butterfly", "monarch", "swallowtail", "cabbage butterfly",
+    "ringlet", "lycaenid", "sulphur butterfly", "admiral",
+    "moth", "silkworm",
+    "danaus plexippus", "papilio", "pieris", "vanessa",
+    "nymphalidae", "lepidoptera", "saturniidae", "sphingidae"
+  ],
+  "beetle": [
+    "beetle", "ladybug", "ladybird", "weevil",
+    "long-horned beetle", "leaf beetle", "ground beetle",
+    "dung beetle", "rhinoceros beetle", "tiger beetle",
+    "cockroach",
+    "coccinella", "coleoptera", "scarabaeidae", "cerambycidae",
+    "curculionidae", "chrysomelidae", "carabidae"
+  ],
+  "fly": [
+    "fly", "housefly", "damselfly", "dragonfly",
+    "crane fly", "robber fly", "mosquito", "midge", "gnat",
+    "musca domestica", "diptera", "tipulidae", "asilidae",
+    "culicidae", "chironomidae", "syrphidae"
+  ],
+  "spider": [
+    "spider", "tarantula", "black widow", "garden spider",
+    "wolf spider", "barn spider", "tick", "scorpion", "harvestman",
+    "latrodectus", "araneae", "arachnida", "theraphosidae",
+    "argiope", "nephila", "salticidae", "ixodidae"
+  ],
+  "ant": [
+    "ant", "carpenter ant", "fire ant", "termite",
+    "solenopsis", "formicidae", "camponotus", "lasius",
+    "formica", "atta", "pogonomyrmex", "isoptera"
+  ]
+}

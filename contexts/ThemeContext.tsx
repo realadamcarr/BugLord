@@ -45,31 +45,31 @@ const lightTheme: Theme = {
   mode: 'light',
   isDark: false,
   colors: {
-    background: '#f2f9f1',     // Very light nature green
-    surface: '#ddeedf',        // Light sage green
-    card: '#ddeedf',           // Light sage green
+    background: '#F5F0E8',     // Warm parchment
+    surface: '#EDE6D6',        // Light parchment card
+    card: '#EDE6D6',
     
-    text: '#2c3e2d',           // Dark forest text
-    textSecondary: '#5c715e',  // Deep forest green
-    textMuted: '#8a9c8d',      // Muted sage
+    text: '#2A1F14',           // Rich bark brown
+    textSecondary: '#5C4A32',  // Medium bark
+    textMuted: '#9B8B73',      // Faded wood
     
-    primary: '#5c715e',        // Deep forest green
-    primaryLight: 'rgba(92, 113, 94, 0.1)',
-    success: '#4a7c59',        // Success green
-    warning: '#b8860b',        // Natural gold
-    error: '#8b4513',          // Earth brown for errors
+    primary: '#3D6B35',        // Bold forest green
+    primaryLight: 'rgba(61, 107, 53, 0.12)',
+    success: '#4A8C3F',        // Vivid leaf green
+    warning: '#D4940A',        // Honey amber
+    error: '#B83A2A',          // Deep russet red
     
-    border: '#b6cdbd',         // Medium green border
-    separator: 'rgba(92, 113, 94, 0.1)',
-    shadow: '#5c715e',
+    border: '#C4B596',         // Warm tan border
+    separator: 'rgba(90, 74, 50, 0.1)',
+    shadow: '#5C4A32',
     
-    tierBasic: '#4a7c59',      // Forest success green
-    tierGood: '#5c715e',       // Deep forest
-    tierRare: '#b8860b',       // Natural gold
-    tierEpic: '#704214',       // Rich earth brown
+    tierBasic: '#4A8C3F',
+    tierGood: '#3D6B35',
+    tierRare: '#D4940A',
+    tierEpic: '#A0522D',
     
-    xpFill: '#5c715e',         // Deep forest green
-    xpBackground: '#b6cdbd',   // Medium sage
+    xpFill: '#D4940A',         // Honey amber XP
+    xpBackground: '#D5CAB8',   // Light tan
   },
 };
 
@@ -77,31 +77,31 @@ const darkTheme: Theme = {
   mode: 'dark',
   isDark: true,
   colors: {
-    background: '#1a2e1d',     // Dark forest background
-    surface: '#2d4a32',        // Dark forest card background  
-    card: '#2d4a32',           // Dark forest card background
+    background: '#141210',     // Near-black warm
+    surface: '#1E1B16',        // Dark bark
+    card: '#1E1B16',
     
-    text: '#e8f5e8',           // Very light green text
-    textSecondary: '#b6cdbd',  // Medium sage green
-    textMuted: '#6b8471',      // Dark muted sage
+    text: '#F0E8D8',           // Warm cream
+    textSecondary: '#B8A88C',  // Faded parchment
+    textMuted: '#786A54',      // Dim brown
     
-    primary: '#b6cdbd',        // Light sage accent
-    primaryLight: 'rgba(182, 205, 189, 0.15)',
-    success: '#7fb069',        // Brighter success green
-    warning: '#d4af37',        // Brighter natural gold
-    error: '#cd853f',          // Lighter earth brown
+    primary: '#6ABF5E',        // Bright leaf green
+    primaryLight: 'rgba(106, 191, 94, 0.15)',
+    success: '#6ABF5E',        // Vivid green
+    warning: '#F0B429',        // Bright amber
+    error: '#E05A44',          // Warm red
     
-    border: '#5c715e',         // Deep forest border
-    separator: 'rgba(182, 205, 189, 0.1)',
+    border: '#3A3327',         // Dark tan border
+    separator: 'rgba(184, 168, 140, 0.1)',
     shadow: '#000000',
     
-    tierBasic: '#7fb069',      // Bright forest green
-    tierGood: '#b6cdbd',       // Light sage
-    tierRare: '#d4af37',       // Bright gold
-    tierEpic: '#daa520',       // Rich gold
+    tierBasic: '#6ABF5E',
+    tierGood: '#5EA652',
+    tierRare: '#F0B429',
+    tierEpic: '#E0853D',
     
-    xpFill: '#b6cdbd',         // Light sage green
-    xpBackground: '#5c715e',   // Deep forest
+    xpFill: '#F0B429',         // Bright amber XP
+    xpBackground: '#2E2920',   // Very dark tan
   },
 };
 

@@ -12,24 +12,30 @@
 
 import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { getNativeStepStatus } from '@/services/NativeStepHistory';
 import { useWalkMode } from '@/services/useWalkMode';
 import { Bug, RARITY_CONFIG } from '@/types/Bug';
 import { router } from 'expo-router';
-import React, { useState } from 'react';
+import { Pedometer } from 'expo-sensors';
+import React, { useEffect, useState } from 'react';
 import {
     Alert,
+    AppState,
     Dimensions,
     Image,
+    Linking,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 const STEPS_PER_KM = 1312; // Average steps per kilometer
@@ -47,6 +53,103 @@ export default function WalkModeScreen() {
 
   const [selectedBug, setSelectedBug] = useState<Bug | null>(null);
   const [showBugSelector, setShowBugSelector] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<'checking' | 'granted' | 'denied' | 'na'>('checking');
+  const [healthConnectStatus, setHealthConnectStatus] = useState<'checking' | 'available' | 'unavailable' | 'not_installed'>('checking');
+
+  // Check physical activity permission and Health Connect status on screen open
+  useEffect(() => {
+    async function checkPermission() {
+      if (Platform.OS === 'web') {
+        setPermissionStatus('na');
+        setHealthConnectStatus('unavailable');
+        return;
+      }
+      try {
+        const { status } = await Pedometer.getPermissionsAsync();
+        setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
+      } catch {
+        setPermissionStatus('na');
+      }
+      // Check Health Connect / HealthKit availability
+      try {
+        const hcStatus = await getNativeStepStatus();
+        setHealthConnectStatus(hcStatus);
+      } catch {
+        setHealthConnectStatus('unavailable');
+      }
+    }
+    checkPermission();
+  }, []);
+
+  // Prompt for permission if denied
+  const handleRequestPermission = async () => {
+    if (Platform.OS === 'web') return;
+    try {
+      const { status, canAskAgain } = await Pedometer.requestPermissionsAsync();
+      if (status === 'granted') {
+        setPermissionStatus('granted');
+      } else if (!canAskAgain) {
+        Alert.alert(
+          'Permission Required',
+          'BugLord needs Physical Activity permission to count your steps.\n\nPlease enable it in Settings → Apps → BugLord → Permissions.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Permission Required',
+          'Walk Mode needs access to your physical activity data to track steps. Please grant the permission to continue.'
+        );
+      }
+    } catch {
+      // Some devices grant implicitly
+    }
+  };
+
+  // Re-check permission and recover missed steps when app returns to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (nextState: string) => {
+      if (nextState === 'active') {
+        // Re-check permission (user may have toggled in settings)
+        if (Platform.OS !== 'web') {
+          try {
+            const { status } = await Pedometer.getPermissionsAsync();
+            setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
+          } catch {}
+          // Re-check Health Connect status
+          try {
+            const hcStatus = await getNativeStepStatus();
+            setHealthConnectStatus(hcStatus);
+          } catch {}
+        }
+        // Recover steps taken while app was closed
+        if (walkModeActive) {
+          try {
+            const { walkModeService } = require('@/services/WalkModeService');
+            await walkModeService.recoverMissedSteps();
+          } catch {}
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [walkModeActive]);
+
+  // Restore selected bug from persisted walk mode state on mount
+  useEffect(() => {
+    if (walkModeActive && walkStats.activeBugId && !selectedBug) {
+      // Look up the bug in party first, then in the full collection
+      const allBugs = [
+        ...collection.party.filter((b): b is Bug => b !== null),
+        ...collection.bugs,
+      ];
+      const restoredBug = allBugs.find(bug => bug.id === walkStats.activeBugId);
+      if (restoredBug) {
+        setSelectedBug(restoredBug);
+      }
+    }
+  }, [walkModeActive, walkStats.activeBugId, collection]);
 
   const styles = createStyles(theme);
 
@@ -55,11 +158,15 @@ export default function WalkModeScreen() {
   const stepsToNextXp = STEPS_PER_KM - (currentSteps % STEPS_PER_KM);
   const progressPercentage = ((currentSteps % STEPS_PER_KM) / STEPS_PER_KM) * 100;
 
-  // Get available bugs (party + collection)
+  // Get available bugs (party + collection) - only those with HP > 0
   const availableBugs = [
     ...collection.party.filter(bug => bug !== null),
     ...collection.bugs.filter(bug => !collection.party.some(partyBug => partyBug?.id === bug.id))
-  ];
+  ].filter(bug => {
+    const maxHp = bug.maxHp || bug.maxXp;
+    const currentHp = bug.currentHp !== undefined ? bug.currentHp : maxHp;
+    return currentHp > 0;
+  });
 
   const handleBugSelection = (bug: Bug) => {
     setSelectedBug(bug);
@@ -72,12 +179,70 @@ export default function WalkModeScreen() {
       return;
     }
 
+    // Check if selected bug has HP
+    const maxHp = selectedBug.maxHp || selectedBug.maxXp;
+    const currentHp = selectedBug.currentHp !== undefined ? selectedBug.currentHp : maxHp;
+    if (currentHp <= 0) {
+      Alert.alert('Bug Fainted', `${selectedBug.nickname || selectedBug.name} has 0 HP and cannot train! Use a Revive item first.`);
+      return;
+    }
+
+    // Request physical activity / pedometer permission (required on Android 10+)
+    if (Platform.OS !== 'web') {
+      try {
+        const { status, canAskAgain } = await Pedometer.requestPermissionsAsync();
+        setPermissionStatus(status === 'granted' ? 'granted' : 'denied');
+        if (status !== 'granted') {
+          if (!canAskAgain) {
+            // User permanently denied — guide them to settings
+            Alert.alert(
+              'Permission Required',
+              'BugLord needs Physical Activity permission to count your steps.\n\nPlease enable it in Settings → Apps → BugLord → Permissions.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              ]
+            );
+          } else {
+            Alert.alert(
+              'Permission Required',
+              'Walk Mode needs access to your physical activity data to track steps. Please grant the permission to continue.'
+            );
+          }
+          return;
+        }
+      } catch (permErr) {
+        console.warn('Failed to request pedometer permissions:', permErr);
+        // Continue anyway — some devices grant it implicitly
+      }
+    }
+
     try {
-      await startWalkMode();
-      Alert.alert(
-        'Walk Mode Started!',
-        `${selectedBug.name} is now training!\n\n• Walk 1 kilometer to gain XP\n• You may find items while walking\n• Progress is tracked even when the app is closed`
-      );
+      await startWalkMode(selectedBug.id, selectedBug.nickname || selectedBug.name);
+
+      // On Android, prompt the user to disable battery optimization for reliable tracking
+      if (Platform.OS === 'android') {
+        Alert.alert(
+          'Walk Mode Started!',
+          `${selectedBug.name} is now training!\n\n• Walk 1 kilometer to gain XP\n• You may find items while walking\n\n⚡ IMPORTANT: To track steps when the app is closed, disable battery optimization for BugLord.\n\nGo to Settings → Apps → BugLord → Battery → Unrestricted`,
+          [
+            {
+              text: 'Open Battery Settings',
+              onPress: () => {
+                // Try Android-specific battery optimization intent first
+                Linking.openURL('android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS')
+                  .catch(() => Linking.openSettings().catch(() => {}));
+              },
+            },
+            { text: 'Got it', style: 'cancel' },
+          ],
+        );
+      } else {
+        Alert.alert(
+          'Walk Mode Started!',
+          `${selectedBug.name} is now training!\n\n• Walk 1 kilometer to gain XP\n• You may find items while walking\n• Progress is tracked even when the app is closed`
+        );
+      }
     } catch (error) {
       Alert.alert('Error', walkModeError || 'Failed to start Walk Mode');
     }
@@ -116,7 +281,9 @@ export default function WalkModeScreen() {
               style={styles.bugListItem}
               onPress={() => handleBugSelection(bug)}
             >
-              {bug.photo ? (
+              {bug.category && BUG_SPRITE[bug.category] ? (
+                <Image source={BUG_SPRITE[bug.category]} style={styles.bugListPhoto} />
+              ) : bug.photo ? (
                 <Image source={{ uri: bug.photo }} style={styles.bugListPhoto} />
               ) : bug.pixelArt ? (
                 <Image source={{ uri: bug.pixelArt }} style={styles.bugListPhoto} />
@@ -132,7 +299,7 @@ export default function WalkModeScreen() {
                   {bug.nickname || bug.name}
                 </ThemedText>
                 <ThemedText style={styles.bugListDetails}>
-                  Level {bug.level} • {bug.rarity} • {bug.xp}/{bug.maxXp} XP
+                  Level {bug.level} • HP: {bug.currentHp !== undefined ? bug.currentHp : (bug.maxHp || bug.maxXp)}/{bug.maxHp || bug.maxXp} • {bug.xp}/{bug.maxXp} XP
                 </ThemedText>
               </View>
               <View style={[
@@ -149,46 +316,92 @@ export default function WalkModeScreen() {
   );
 
   const renderCircularProgress = () => {
-    const circleSize = 200;
+    const size = 200;
     const strokeWidth = 8;
-    const radius = (circleSize - strokeWidth) / 2;
-    const circumference = 2 * Math.PI * radius;
-    
-    // Calculate progress within current milestone (0-100%)
+    const halfSize = size / 2;
+    const fillColor = theme.colors.primary;
+    const trackColor = theme.colors.border;
+
+    // Calculate progress within current milestone (0 to 1)
     const currentMilestoneSteps = currentSteps % STEPS_PER_KM;
-    const milestoneProgress = (currentMilestoneSteps / STEPS_PER_KM) * 100;
+    const progress = currentMilestoneSteps / STEPS_PER_KM;
+    const progressDeg = progress * 360;
+
+    // Two-semicircle clipping technique:
+    // Right clip reveals first 0-180° (0-50%), left clip reveals 180-360° (50-100%)
+    // Offset of -135° aligns the colored border segments with the clip boundary
+    const rightRotation = -135 + Math.min(progressDeg, 180);
+    const leftRotation = -135 + Math.max(0, progressDeg - 180);
+    const showLeftHalf = progressDeg > 180;
 
     return (
       <View style={styles.progressContainer}>
-        <View style={[styles.progressCircle, { width: circleSize, height: circleSize }]}>
-          {/* Empty track (gray circle) */}
-          <View style={[
-            styles.progressTrack,
-            {
-              width: circleSize,
-              height: circleSize,
-              borderRadius: circleSize / 2,
+        <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+          {/* Background track (full gray ring) */}
+          <View style={{
+            position: 'absolute',
+            width: size,
+            height: size,
+            borderRadius: halfSize,
+            borderWidth: strokeWidth,
+            borderColor: trackColor,
+          }} />
+
+          {/* Right half clip (fills first 0-50% of progress, top → right → bottom) */}
+          <View style={{
+            position: 'absolute',
+            width: halfSize,
+            height: size,
+            left: halfSize,
+            overflow: 'hidden',
+          }}>
+            <View style={{
+              width: size,
+              height: size,
+              borderRadius: halfSize,
               borderWidth: strokeWidth,
-            }
-          ]} />
-          
-          {/* Filled progress (blue arc) */}
-          <View style={[
-            styles.progressFill,
-            {
-              width: circleSize,
-              height: circleSize,
-              borderRadius: circleSize / 2,
-              borderWidth: strokeWidth,
-              transform: [{ rotate: `${-90 + (milestoneProgress / 100) * 360}deg` }],
-            }
-          ]} />
-          
+              borderTopColor: fillColor,
+              borderRightColor: fillColor,
+              borderBottomColor: 'transparent',
+              borderLeftColor: 'transparent',
+              position: 'absolute',
+              left: -halfSize,
+              transform: Platform.OS === 'web' ? `rotate(${rightRotation}deg)` as any : [{ rotate: `${rightRotation}deg` }],
+            }} />
+          </View>
+
+          {/* Left half clip (fills second 50-100% of progress, bottom → left → top) */}
+          {showLeftHalf && (
+            <View style={{
+              position: 'absolute',
+              width: halfSize,
+              height: size,
+              left: 0,
+              overflow: 'hidden',
+            }}>
+              <View style={{
+                width: size,
+                height: size,
+                borderRadius: halfSize,
+                borderWidth: strokeWidth,
+                borderTopColor: 'transparent',
+                borderRightColor: 'transparent',
+                borderBottomColor: fillColor,
+                borderLeftColor: fillColor,
+                position: 'absolute',
+                left: 0,
+                transform: Platform.OS === 'web' ? `rotate(${leftRotation}deg)` as any : [{ rotate: `${leftRotation}deg` }],
+              }} />
+            </View>
+          )}
+
           {/* Inner circle with bug */}
           <View style={styles.progressInner}>
             {selectedBug ? (
               <>
-                {selectedBug.photo ? (
+                {selectedBug.category && BUG_SPRITE[selectedBug.category] ? (
+                  <Image source={BUG_SPRITE[selectedBug.category]} style={styles.selectedBugPhoto} />
+                ) : selectedBug.photo ? (
                   <Image source={{ uri: selectedBug.photo }} style={styles.selectedBugPhoto} />
                 ) : selectedBug.pixelArt ? (
                   <Image source={{ uri: selectedBug.pixelArt }} style={styles.selectedBugPhoto} />
@@ -199,7 +412,7 @@ export default function WalkModeScreen() {
                 )}
                 {/* Progress percentage text */}
                 <View style={styles.progressTextContainer}>
-                  <Text style={styles.progressPercentage}>{Math.floor(milestoneProgress)}%</Text>
+                  <Text style={styles.progressPercentage}>{Math.floor(progress * 100)}%</Text>
                   <Text style={styles.progressSteps}>{currentMilestoneSteps}/{STEPS_PER_KM}</Text>
                 </View>
               </>
@@ -213,7 +426,7 @@ export default function WalkModeScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -224,6 +437,65 @@ export default function WalkModeScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContainer}>
+        {/* Permission Warning Banner */}
+        {permissionStatus === 'denied' && (
+          <TouchableOpacity
+            style={styles.permissionBanner}
+            onPress={handleRequestPermission}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.permissionBannerIcon}>⚠️</Text>
+            <View style={styles.permissionBannerTextContainer}>
+              <Text style={styles.permissionBannerTitle}>Step Tracking Disabled</Text>
+              <Text style={styles.permissionBannerSubtitle}>
+                Tap to enable physical activity permission
+              </Text>
+            </View>
+            <Text style={styles.permissionBannerArrow}>→</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Health Connect Status Banner */}
+        {Platform.OS === 'android' && healthConnectStatus === 'not_installed' && (
+          <TouchableOpacity
+            style={styles.healthConnectBanner}
+            onPress={() => {
+              Alert.alert(
+                'Health Connect Required',
+                'Install Google Health Connect from the Play Store to track steps when the app is closed.\n\nHealth Connect is built-in on Android 14+. On older versions, install it from the Play Store.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Open Play Store',
+                    onPress: () =>
+                      Linking.openURL('market://details?id=com.google.android.apps.healthdata').catch(() =>
+                        Linking.openURL('https://play.google.com/store/apps/details?id=com.google.android.apps.healthdata').catch(() => {}),
+                      ),
+                  },
+                ],
+              );
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.permissionBannerIcon}>📱</Text>
+            <View style={styles.permissionBannerTextContainer}>
+              <Text style={styles.permissionBannerTitle}>Health Connect Not Found</Text>
+              <Text style={styles.permissionBannerSubtitle}>
+                Tap to install — required for background step tracking
+              </Text>
+            </View>
+            <Text style={styles.permissionBannerArrow}>→</Text>
+          </TouchableOpacity>
+        )}
+        {Platform.OS === 'android' && healthConnectStatus === 'available' && walkModeActive && (
+          <View style={styles.healthConnectConnected}>
+            <Text style={styles.healthConnectConnectedIcon}>✓</Text>
+            <Text style={styles.healthConnectConnectedText}>
+              Health Connect active — steps tracked when app is closed
+            </Text>
+          </View>
+        )}
+
         {/* Progress Section */}
         <View style={styles.progressSection}>
           <ThemedText style={styles.stepsToGoTitle}>
@@ -274,7 +546,9 @@ export default function WalkModeScreen() {
           >
             {selectedBug ? (
               <View style={styles.selectedBugContainer}>
-                {selectedBug.photo ? (
+                {selectedBug.category && BUG_SPRITE[selectedBug.category] ? (
+                  <Image source={BUG_SPRITE[selectedBug.category]} style={styles.bugSelectorPhoto} />
+                ) : selectedBug.photo ? (
                   <Image source={{ uri: selectedBug.photo }} style={styles.bugSelectorPhoto} />
                 ) : selectedBug.pixelArt ? (
                   <Image source={{ uri: selectedBug.pixelArt }} style={styles.bugSelectorPhoto} />
@@ -381,88 +655,163 @@ export default function WalkModeScreen() {
       </ScrollView>
 
       {renderBugSelector()}
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 
 const createStyles = (theme: any) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1E3A8A', // Blue theme
+    backgroundColor: theme.colors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 60,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingTop: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    backgroundColor: theme.colors.card,
+    borderBottomWidth: 3,
+    borderBottomColor: theme.colors.border,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    width: 36,
+    height: 36,
+    borderRadius: 6,
+    backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   backButtonText: {
-    color: 'white',
-    fontSize: 20,
-    fontWeight: '600',
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: '900',
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 20,
-    fontWeight: '700',
-    color: 'white',
+    fontSize: 18,
+    fontWeight: '900',
+    color: theme.colors.text,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   headerSpacer: {
-    width: 40,
+    width: 36,
   },
   scrollContainer: {
     paddingBottom: 40,
   },
+  permissionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#7B5E00',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 10,
+    borderWidth: 3,
+    borderColor: '#A67C00',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  permissionBannerIcon: {
+    fontSize: 22,
+    marginRight: 10,
+  },
+  permissionBannerTextContainer: {
+    flex: 1,
+  },
+  permissionBannerTitle: {
+    color: '#FFF8DC',
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  permissionBannerSubtitle: {
+    color: '#FFE4A0',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  permissionBannerArrow: {
+    color: '#FFE4A0',
+    fontSize: 20,
+    fontWeight: '900',
+    marginLeft: 8,
+  },
+  healthConnectBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#5E3B7B',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 10,
+    borderWidth: 3,
+    borderColor: '#7B4FA0',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  healthConnectConnected: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1B5E20',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 10,
+    borderWidth: 3,
+    borderColor: '#2E7D32',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  healthConnectConnectedIcon: {
+    color: '#A5D6A7',
+    fontSize: 16,
+    fontWeight: '900',
+    marginRight: 10,
+  },
+  healthConnectConnectedText: {
+    color: '#C8E6C9',
+    fontSize: 12,
+    fontWeight: '700',
+    flex: 1,
+  },
   progressSection: {
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 30,
+    paddingVertical: 24,
+    backgroundColor: theme.colors.card,
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 10,
+    borderWidth: 3,
+    borderColor: theme.colors.border,
   },
   stepsToGoTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'white',
-    marginBottom: 8,
+    fontSize: 14,
+    fontWeight: '800',
+    color: theme.colors.textSecondary,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   stepsToGoNumber: {
-    fontSize: 32,
-    fontWeight: '800',
-    color: 'white',
-    marginBottom: 4,
+    fontSize: 28,
+    fontWeight: '900',
+    color: theme.colors.warning,
+    marginBottom: 2,
   },
   stepsToGoSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
-    marginBottom: 30,
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    marginBottom: 24,
+    fontWeight: '600',
   },
   progressContainer: {
     alignItems: 'center',
-    marginBottom: 30,
-  },
-  progressCircle: {
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  progressTrack: {
-    position: 'absolute',
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  progressFill: {
-    position: 'absolute',
-    borderColor: 'transparent',
-    borderTopColor: '#60A5FA',
-    borderRightColor: '#60A5FA',
+    marginBottom: 24,
   },
   progressInner: {
     position: 'absolute',
@@ -471,41 +820,48 @@ const createStyles = (theme: any) => StyleSheet.create({
     right: 8,
     bottom: 8,
     borderRadius: 100,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   selectedBugPhoto: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginBottom: 8,
+    width: 90,
+    height: 90,
+    borderRadius: 8,
+    marginBottom: 6,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   selectedBugEmoji: {
     width: 56,
     height: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   progressTextContainer: {
     alignItems: 'center',
-    marginTop: 4,
-  },
-  progressPercentage: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#60A5FA',
-  },
-  progressSteps: {
-    fontSize: 10,
-    color: 'rgba(255, 255, 255, 0.7)',
     marginTop: 2,
   },
+  progressPercentage: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: theme.colors.primary,
+  },
+  progressSteps: {
+    fontSize: 9,
+    color: theme.colors.textMuted,
+    marginTop: 1,
+    fontWeight: '700',
+  },
   selectBugText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
+    color: theme.colors.textMuted,
+    fontSize: 14,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   statsRow: {
     flexDirection: 'row',
@@ -514,54 +870,68 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   statItem: {
     alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+    minWidth: 90,
   },
   statNumber: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: 'white',
+    fontSize: 18,
+    fontWeight: '900',
+    color: theme.colors.primary,
   },
   statLabel: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.7)',
-    marginTop: 4,
+    fontSize: 10,
+    color: theme.colors.textMuted,
+    marginTop: 2,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   bugSection: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
+    paddingHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'white',
-    marginBottom: 0,
+    fontSize: 15,
+    fontWeight: '900',
+    color: theme.colors.text,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   sectionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
     gap: 8,
   },
   bugSelector: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 16,
     borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: theme.colors.border,
   },
   selectedBugContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   bugSelectorPhoto: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    marginRight: 16,
+    width: 52,
+    height: 52,
+    borderRadius: 6,
+    marginRight: 14,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   bugSelectorEmoji: {
     width: 36,
     height: 36,
-    marginRight: 16,
+    marginRight: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -569,92 +939,107 @@ const createStyles = (theme: any) => StyleSheet.create({
     flex: 1,
   },
   selectedBugName: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'white',
-    marginBottom: 4,
+    fontSize: 16,
+    fontWeight: '800',
+    color: theme.colors.text,
+    marginBottom: 3,
   },
   selectedBugDetails: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    fontWeight: '600',
   },
   selectBugPrompt: {
     alignItems: 'center',
-    paddingVertical: 20,
+    paddingVertical: 16,
   },
   selectBugIcon: {
     width: 40,
     height: 40,
-    marginBottom: 12,
+    marginBottom: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   selectBugPromptText: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 14,
+    color: theme.colors.textMuted,
     textAlign: 'center',
+    fontWeight: '700',
   },
   actionSection: {
-    paddingHorizontal: 20,
-    marginBottom: 30,
+    paddingHorizontal: 16,
+    marginBottom: 20,
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
-    borderRadius: 16,
+    padding: 18,
+    borderRadius: 8,
+    borderWidth: 3,
   },
   startButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: theme.colors.success,
+    borderColor: `${theme.colors.success}80`,
   },
   stopButton: {
-    backgroundColor: '#EF4444',
+    backgroundColor: theme.colors.error,
+    borderColor: `${theme.colors.error}80`,
   },
   actionButtonIcon: {
-    width: 26,
-    height: 26,
-    marginRight: 12,
+    width: 24,
+    height: 24,
+    marginRight: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   actionButtonText: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   startButtonText: {
-    color: 'white',
+    color: '#FFF',
   },
   stopButtonText: {
-    color: 'white',
+    color: '#FFF',
   },
   disabledButtonText: {
-    opacity: 0.5,
+    opacity: 0.4,
   },
   infoSection: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
+    backgroundColor: theme.colors.card,
+    marginHorizontal: 16,
+    borderRadius: 10,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   infoTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'white',
-    marginBottom: 0,
+    fontSize: 14,
+    fontWeight: '900',
+    color: theme.colors.text,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   infoItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   infoIconContainer: {
-    width: 30,
+    width: 28,
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 10,
   },
   infoText: {
     flex: 1,
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
-    lineHeight: 20,
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   // Modal Styles
   modalContainer: {
@@ -665,50 +1050,59 @@ const createStyles = (theme: any) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingTop: 60,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 3,
     borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.card,
   },
   modalTitle: {
     flex: 1,
-    fontSize: 20,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '900',
     textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   closeButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 34,
+    height: 34,
+    borderRadius: 6,
     backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   closeButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '900',
     color: theme.colors.text,
   },
   bugList: {
     flex: 1,
-    padding: 20,
+    padding: 16,
   },
   bugListItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   bugListPhoto: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginRight: 16,
+    width: 46,
+    height: 46,
+    borderRadius: 6,
+    marginRight: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.colors.background,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   bugListEmoji: {
     width: 24,
@@ -720,22 +1114,23 @@ const createStyles = (theme: any) => StyleSheet.create({
     flex: 1,
   },
   bugListName: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 3,
   },
   bugListDetails: {
-    fontSize: 12,
-    opacity: 0.7,
+    fontSize: 11,
+    fontWeight: '600',
+    color: theme.colors.textMuted,
   },
   rarityBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
   },
   rarityBadgeText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '800',
   },
 });

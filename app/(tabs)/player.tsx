@@ -1,21 +1,31 @@
 import { CollectionScreen } from '@/components/CollectionScreen';
 import PixelatedEmoji from '@/components/PixelatedEmoji';
 import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
 import { XPProgressBar } from '@/components/XPProgressBar';
+import { FadeInView } from '@/components/animated/FadeInView';
+import { ScalePressable } from '@/components/animated/ScalePressable';
+import { SkiaSparkles } from '@/components/effects/SkiaSparkles';
+import { SectionHeader } from '@/components/ui/SectionHeader';
+import { StatPill } from '@/components/ui/StatPill';
+import { getProfilePictureSource, PROFILE_PICTURES } from '@/constants/profilePictures';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { clearScanLogs, getScanLogs, ScanLogEntry } from '@/services/ScanLogService';
-import { BIOME_CONFIG, RARITY_CONFIG } from '@/types/Bug';
+import { BIOME_CONFIG, BugRarity, RARITY_CONFIG } from '@/types/Bug';
 import React, { useEffect, useState } from 'react';
-import { Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dimensions, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dialog, Button as PaperButton, Portal } from 'react-native-paper';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
 export default function PlayerScreen() {
   const { theme } = useTheme();
-  const { collection } = useBugCollection();
+  const { collection, setProfilePicture } = useBugCollection();
   const [showCollection, setShowCollection] = useState(false);
+  const [showPfpPicker, setShowPfpPicker] = useState(false);
+  const [collectionInitialRarity, setCollectionInitialRarity] = useState<BugRarity | 'all'>('all');
+  const [collectionInitialBiome, setCollectionInitialBiome] = useState<string>('all');
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<ScanLogEntry[]>([]);
 
@@ -26,6 +36,7 @@ export default function PlayerScreen() {
   }, [showLogs]);
 
   const styles = createStyles(theme);
+  const profilePicSource = getProfilePictureSource(collection.profilePicture);
 
   // Calculate player statistics
   const totalBugs = collection.bugs.length;
@@ -33,13 +44,17 @@ export default function PlayerScreen() {
   
   // Count bugs by rarity
   const rarityStats = collection.bugs.reduce((acc: any, bug) => {
-    acc[bug.rarity] = (acc[bug.rarity] || 0) + 1;
+    if (bug && bug.rarity) {
+      acc[bug.rarity] = (acc[bug.rarity] || 0) + 1;
+    }
     return acc;
   }, {});
 
   // Count bugs by biome
   const biomeStats = collection.bugs.reduce((acc: any, bug) => {
-    acc[bug.biome] = (acc[bug.biome] || 0) + 1;
+    if (bug && bug.biome) {
+      acc[bug.biome] = (acc[bug.biome] || 0) + 1;
+    }
     return acc;
   }, {});
 
@@ -60,14 +75,34 @@ export default function PlayerScreen() {
     </View>
   );
 
+  const openCollection = (rarity: BugRarity | 'all' = 'all', biome: string = 'all') => {
+    setCollectionInitialRarity(rarity);
+    setCollectionInitialBiome(biome);
+    setShowCollection(true);
+  };
+
   return (
-    <ThemedView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Player Header */}
         <View style={styles.header}>
-          <View style={styles.playerAvatar}>
-            <PixelatedEmoji type="bug" size={48} color={theme.colors.text} />
+          {/* Skia sparkle particles behind the avatar */}
+          <View style={{ position: 'absolute', top: 0, alignSelf: 'center' }}>
+            <SkiaSparkles
+              width={180}
+              height={120}
+              count={10}
+              colors={[theme.colors.primary, '#FFD700', '#F0B429', theme.colors.text + '60']}
+            />
           </View>
+          <TouchableOpacity style={styles.playerAvatar} onPress={() => setShowPfpPicker(true)}>
+            {profilePicSource ? (
+              <Image source={profilePicSource} style={styles.playerAvatarImage} />
+            ) : (
+              <PixelatedEmoji type="bug" size={48} color={theme.colors.text} />
+            )}
+          </TouchableOpacity>
+          <ThemedText style={styles.changeAvatarHint}>Tap to change</ThemedText>
           <ThemedText style={styles.playerName}>Bug Explorer</ThemedText>
           <ThemedText style={styles.playerLevel}>Level {collection.level}</ThemedText>
           
@@ -85,71 +120,53 @@ export default function PlayerScreen() {
         </View>
 
         {/* Quick Stats */}
-        <View style={styles.statsContainer}>
-          <View style={styles.sectionTitleContainer}>
-            <PixelatedEmoji type="stat" size={20} color={theme.colors.text} />
-            <ThemedText style={styles.sectionTitle}>Collection Stats</ThemedText>
+        <FadeInView delay={60} style={styles.statsContainer}>
+          <SectionHeader title="Collection Stats" icon="📊" />
+          <View style={styles.statPillRow}>
+            <StatPill icon="🐛" value={totalBugs} label="Total Bugs" style={styles.statPill} />
+            <StatPill icon="⚔️" value={`${partyCount}/6`} label="Party" color={theme.colors.warning} style={styles.statPill} />
           </View>
-          
-          <View style={styles.statRow}>
-            <View style={styles.statCard}>
-              <ThemedText style={styles.statNumber}>{totalBugs}</ThemedText>
-              <ThemedText style={styles.statLabel}>Total Bugs</ThemedText>
-            </View>
-            <View style={styles.statCard}>
-              <ThemedText style={styles.statNumber}>{partyCount}/6</ThemedText>
-              <ThemedText style={styles.statLabel}>Active Party</ThemedText>
-            </View>
+          <View style={styles.statPillRow}>
+            <StatPill icon="🗺️" value={Object.keys(biomeStats).length} label="Biomes" color={theme.colors.success} style={styles.statPill} />
+            <StatPill
+              icon="💎"
+              value={(rarityStats.rare || 0) + (rarityStats.epic || 0) + (rarityStats.legendary || 0)}
+              label="Rare+"
+              color={theme.colors.tierRare}
+              style={styles.statPill}
+            />
           </View>
-
-          <View style={styles.statRow}>
-            <View style={styles.statCard}>
-              <ThemedText style={styles.statNumber}>
-                {Object.keys(biomeStats).length}
-              </ThemedText>
-              <ThemedText style={styles.statLabel}>Biomes Explored</ThemedText>
-            </View>
-            <View style={styles.statCard}>
-              <ThemedText style={styles.statNumber}>
-                {rarityStats.rare || 0 + rarityStats.epic || 0 + rarityStats.legendary || 0}
-              </ThemedText>
-              <ThemedText style={styles.statLabel}>Rare+ Bugs</ThemedText>
-            </View>
-          </View>
-        </View>
+        </FadeInView>
 
         {/* Collection Button */}
-        <View style={styles.collectionButtonContainer}>
-          <TouchableOpacity 
-            style={styles.collectionButton}
-            onPress={() => setShowCollection(true)}
-          >
-            <View style={styles.collectionButtonIcon}>
-              <PixelatedEmoji type="dex" size={28} color={theme.colors.text} />
+        <FadeInView delay={120} style={styles.collectionButtonContainer}>
+          <ScalePressable onPress={() => openCollection('all')} style={{ marginBottom: 10 }}>
+            <View style={[styles.collectionButton, { borderLeftColor: theme.colors.primary, borderLeftWidth: 4 }]}>
+              <View style={styles.collectionButtonIcon}>
+                <PixelatedEmoji type="dex" size={28} color={theme.colors.text} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <ThemedText style={styles.collectionButtonTitle}>View Collection</ThemedText>
+                <ThemedText style={styles.collectionButtonSubtitle}>
+                  {collection.bugs.length - collection.party.filter(Boolean).length} bugs in storage
+                </ThemedText>
+              </View>
+              <Text style={styles.collectionButtonArrow}>›</Text>
             </View>
-            <View>
-              <ThemedText style={styles.collectionButtonTitle}>View Collection</ThemedText>
-              <ThemedText style={styles.collectionButtonSubtitle}>
-                {collection.bugs.length - collection.party.filter(Boolean).length} bugs in storage
-              </ThemedText>
+          </ScalePressable>
+          <ScalePressable onPress={() => setShowLogs(true)}>
+            <View style={[styles.collectionButton, { borderLeftColor: theme.colors.warning, borderLeftWidth: 4 }]}>
+              <Text style={[styles.collectionButtonIcon, { fontSize: 22 }]}>🧪</Text>
+              <View style={{ flex: 1 }}>
+                <ThemedText style={styles.collectionButtonTitle}>Scan Logs</ThemedText>
+                <ThemedText style={styles.collectionButtonSubtitle}>
+                  Inspect recent identifications
+                </ThemedText>
+              </View>
+              <Text style={styles.collectionButtonArrow}>›</Text>
             </View>
-            <Text style={styles.collectionButtonArrow}>›</Text>
-          </TouchableOpacity>
-          <View style={{ height: 12 }} />
-          <TouchableOpacity 
-            style={styles.collectionButton}
-            onPress={() => setShowLogs(true)}
-          >
-            <Text style={styles.collectionButtonIcon}>🧪</Text>
-            <View>
-              <ThemedText style={styles.collectionButtonTitle}>Scan Logs</ThemedText>
-              <ThemedText style={styles.collectionButtonSubtitle}>
-                Inspect recent identifications
-              </ThemedText>
-            </View>
-            <Text style={styles.collectionButtonArrow}>›</Text>
-          </TouchableOpacity>
-        </View>
+          </ScalePressable>
+        </FadeInView>
 
         {/* Rarity Breakdown */}
         <View style={styles.rarityContainer}>
@@ -159,7 +176,12 @@ export default function PlayerScreen() {
           </View>
           
           {Object.entries(RARITY_CONFIG).map(([rarity, config]) => (
-            <View key={rarity} style={styles.rarityRow}>
+            <TouchableOpacity
+              key={rarity}
+              style={styles.rarityRow}
+              activeOpacity={0.8}
+              onPress={() => openCollection(rarity as BugRarity)}
+            >
               <View 
                 style={[styles.rarityBadge, { backgroundColor: config.color }]}
               />
@@ -169,7 +191,7 @@ export default function PlayerScreen() {
               <ThemedText style={styles.rarityCount}>
                 {rarityStats[rarity] || 0}
               </ThemedText>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -182,7 +204,12 @@ export default function PlayerScreen() {
           
           <View style={styles.biomeGrid}>
             {Object.entries(BIOME_CONFIG).map(([biome, config]) => (
-              <View key={biome} style={styles.biomeCard}>
+              <TouchableOpacity
+                key={biome}
+                style={styles.biomeCard}
+                onPress={() => openCollection('all', biome)}
+                activeOpacity={0.7}
+              >
                 <Text style={styles.biomeEmoji}>{config.emoji}</Text>
                 <ThemedText style={styles.biomeName}>
                   {biome.charAt(0).toUpperCase() + biome.slice(1)}
@@ -190,7 +217,7 @@ export default function PlayerScreen() {
                 <ThemedText style={styles.biomeCount}>
                   {biomeStats[biome] || 0} bugs
                 </ThemedText>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         </View>
@@ -262,7 +289,11 @@ export default function PlayerScreen() {
               <Text style={styles.modalCloseText}>✕</Text>
             </TouchableOpacity>
           </View>
-          <CollectionScreen />
+          <CollectionScreen
+            onClose={() => setShowCollection(false)}
+            initialRarityFilter={collectionInitialRarity}
+            initialBiomeFilter={collectionInitialBiome as any}
+          />
         </View>
       </Modal>
 
@@ -272,7 +303,7 @@ export default function PlayerScreen() {
         animationType="slide"
         presentationStyle="pageSheet"
       >
-        <View style={styles.modalContainer}>
+        <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <TouchableOpacity
               style={styles.modalCloseButton}
@@ -281,8 +312,9 @@ export default function PlayerScreen() {
             >
               <Text style={styles.modalCloseText}>✕</Text>
             </TouchableOpacity>
+            <ThemedText style={{ fontSize: 18, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 1 }}>Scan Logs</ThemedText>
             <TouchableOpacity
-              style={[styles.modalCloseButton, { position: 'absolute', right: 12 }]}
+              style={styles.modalCloseButton}
               onPress={async () => { await clearScanLogs(); setLogs([]); }}
             >
               <Text style={styles.modalCloseText}>Clear</Text>
@@ -308,9 +340,47 @@ export default function PlayerScreen() {
               ))
             )}
           </ScrollView>
-        </View>
+        </SafeAreaView>
       </Modal>
-    </ThemedView>
+
+      {/* Profile Picture Picker — Paper Dialog */}
+      <Portal>
+        <Dialog visible={showPfpPicker} onDismiss={() => setShowPfpPicker(false)} style={{ backgroundColor: theme.colors.card }}>
+          <Dialog.Title style={styles.pfpTitle}>Choose Avatar</Dialog.Title>
+          <Dialog.Content>
+            <View style={styles.pfpGrid}>
+              {PROFILE_PICTURES.map((option) => {
+                const isSelected = collection.profilePicture === option.key;
+                return (
+                  <TouchableOpacity
+                    key={option.key}
+                    style={[
+                      styles.pfpOption,
+                      { borderColor: isSelected ? theme.colors.primary : theme.colors.border },
+                      isSelected && { borderWidth: 3 },
+                    ]}
+                    onPress={() => {
+                      setProfilePicture(option.key);
+                      setShowPfpPicker(false);
+                    }}
+                  >
+                    {option.source ? (
+                      <Image source={option.source} style={styles.pfpOptionImage} />
+                    ) : (
+                      <PixelatedEmoji type="bug" size={36} color={theme.colors.text} />
+                    )}
+                    <ThemedText style={styles.pfpOptionLabel}>{option.label}</ThemedText>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <PaperButton onPress={() => setShowPfpPicker(false)}>Cancel</PaperButton>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+    </SafeAreaView>
   );
 }
 
@@ -325,103 +395,148 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
+    backgroundColor: theme.colors.card,
+    borderRadius: 10,
+    padding: 20,
+    borderWidth: 3,
+    borderColor: theme.colors.border,
   },
   playerAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 72,
+    height: 72,
+    borderRadius: 8,
     backgroundColor: theme.colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 4,
+    borderWidth: 3,
+    borderColor: theme.colors.border,
+    overflow: 'hidden',
+  },
+  playerAvatarImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 8,
+  },
+  changeAvatarHint: {
+    fontSize: 10,
+    color: theme.colors.textMuted,
+    marginBottom: 8,
+    fontWeight: '600',
   },
   playerName: {
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 4,
+    fontSize: 22,
+    fontWeight: '900',
+    marginBottom: 2,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   playerLevel: {
-    fontSize: 18,
-    opacity: 0.8,
-    marginBottom: 16,
+    fontSize: 15,
+    fontWeight: '700',
+    color: theme.colors.warning,
+    marginBottom: 14,
   },
   xpContainer: {
     width: '100%',
     alignItems: 'center',
   },
   totalXpText: {
-    fontSize: 14,
-    opacity: 0.8,
-    marginTop: 8,
+    fontSize: 12,
+    fontWeight: '700',
+    color: theme.colors.textMuted,
+    marginTop: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 0,
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   sectionTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   statsContainer: {
-    marginBottom: 24,
+    marginBottom: 20,
+  },
+  statPillRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+  },
+  statPill: {
+    flex: 1,
   },
   statRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   statCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 14,
     alignItems: 'center',
     flex: 1,
-    marginHorizontal: 6,
+    marginHorizontal: 5,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   statNumber: {
-    fontSize: 24,
-    fontWeight: '800',
+    fontSize: 22,
+    fontWeight: '900',
     color: theme.colors.primary,
   },
   statLabel: {
-    fontSize: 12,
-    opacity: 0.8,
-    marginTop: 4,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 3,
     textAlign: 'center',
+    color: theme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   rarityContainer: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   rarityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.surface,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
+    backgroundColor: theme.colors.card,
+    borderRadius: 6,
+    padding: 10,
+    marginBottom: 6,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   rarityBadge: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    marginRight: 12,
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.2)',
   },
   rarityName: {
     flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   rarityCount: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: theme.colors.primary,
+    fontSize: 15,
+    fontWeight: '900',
+    color: theme.colors.warning,
   },
   biomeContainer: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   biomeGrid: {
     flexDirection: 'row',
@@ -430,105 +545,116 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   biomeCard: {
     width: (screenWidth - 48) / 3,
-    backgroundColor: theme.colors.surface,
-    borderRadius: 12,
-    padding: 12,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 10,
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   biomeEmoji: {
-    fontSize: 24,
-    marginBottom: 4,
+    fontSize: 22,
+    marginBottom: 3,
   },
   biomeName: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 2,
+    marginBottom: 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.2,
   },
   biomeCount: {
-    fontSize: 10,
-    opacity: 0.8,
+    fontSize: 9,
+    fontWeight: '600',
     textAlign: 'center',
+    color: theme.colors.textMuted,
   },
   achievementsContainer: {
     marginBottom: 24,
   },
   achievementCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   achievementCompleted: {
-    backgroundColor: theme.colors.primary + '20',
-    borderWidth: 1,
+    backgroundColor: `${theme.colors.primary}18`,
     borderColor: theme.colors.primary,
+    borderWidth: 2,
   },
   achievementIcon: {
-    width: 28,
-    height: 28,
-    marginRight: 16,
+    width: 26,
+    height: 26,
+    marginRight: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   achievementIconLocked: {
-    opacity: 0.3,
+    opacity: 0.25,
   },
   achievementContent: {
     flex: 1,
   },
   achievementTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 2,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   achievementDescription: {
-    fontSize: 14,
-    opacity: 0.8,
+    fontSize: 12,
+    color: theme.colors.textSecondary,
   },
   achievementTextLocked: {
-    opacity: 0.5,
+    opacity: 0.4,
   },
   checkmark: {
-    fontSize: 20,
+    fontSize: 18,
     color: theme.colors.success,
-    fontWeight: '700',
+    fontWeight: '900',
   },
   collectionButtonContainer: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   collectionButton: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: theme.colors.card,
+    borderRadius: 8,
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
+    borderWidth: 2,
     borderColor: theme.colors.border,
   },
   collectionButtonIcon: {
-    width: 32,
-    height: 32,
-    marginRight: 16,
+    width: 30,
+    height: 30,
+    marginRight: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   collectionButtonTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 2,
+    fontSize: 15,
+    fontWeight: '800',
+    marginBottom: 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   collectionButtonSubtitle: {
-    fontSize: 14,
-    opacity: 0.7,
+    fontSize: 12,
+    color: theme.colors.textMuted,
   },
   collectionButtonArrow: {
-    fontSize: 24,
-    color: theme.colors.text,
-    opacity: 0.5,
+    fontSize: 22,
+    color: theme.colors.primary,
+    fontWeight: '900',
   },
   modalContainer: {
     flex: 1,
@@ -536,35 +662,90 @@ const createStyles = (theme: any) => StyleSheet.create({
   },
   modalHeader: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    paddingTop: 20,
-    borderBottomWidth: 1,
+    padding: 14,
+    paddingTop: 18,
+    borderBottomWidth: 3,
     borderBottomColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
+    backgroundColor: theme.colors.card,
   },
   modalCloseButton: {
-    backgroundColor: theme.isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)',
-    borderRadius: 20,
-    width: 40,
-    height: 40,
+    backgroundColor: theme.colors.surface,
+    borderRadius: 6,
+    width: 38,
+    height: 38,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: theme.isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)',
-    shadowColor: theme.isDark ? '#ffffff' : '#000000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: theme.isDark ? 0.1 : 0.2,
-    shadowRadius: 4,
-    elevation: 3,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
   },
   modalCloseText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: theme.colors.text,
+  },
+  pfpOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  pfpModal: {
+    borderRadius: 12,
+    padding: 20,
+    width: '100%',
+    maxWidth: 340,
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+  },
+  pfpTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: theme.isDark ? '#ffffff' : '#000000',
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 16,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  pfpGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  pfpOption: {
+    width: 80,
+    height: 100,
+    borderRadius: 8,
+    backgroundColor: theme.colors.background,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: theme.colors.border,
+    padding: 4,
+  },
+  pfpOptionImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 6,
+  },
+  pfpOptionLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: 4,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  pfpCloseBtn: {
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  pfpCloseBtnText: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 14,
   },
 });

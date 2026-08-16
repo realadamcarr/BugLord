@@ -188,13 +188,30 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       };
     }
 
-    // Revive-specific: target must be fainted
-    if (itemDef.type === 'revive' && targetBug && targetBug.currentHp > 0) {
-      return {
-        success: false,
-        message: 'Cannot revive a bug that is not fainted',
-        quantityRemaining: currentQty,
-      };
+    // Revive-specific: target must be fainted (currentHp === 0)
+    if (itemDef.type === 'revive' && targetBug) {
+      const bugMaxHp = targetBug.maxHp || targetBug.maxXp;
+      const bugCurrentHp = targetBug.currentHp !== undefined ? targetBug.currentHp : bugMaxHp;
+      if (bugCurrentHp > 0) {
+        return {
+          success: false,
+          message: 'Cannot revive a bug that is not fainted',
+          quantityRemaining: currentQty,
+        };
+      }
+    }
+
+    // Heal-specific: target must NOT be fainted (currentHp > 0)
+    if (itemDef.type === 'heal' && targetBug) {
+      const bugMaxHp = targetBug.maxHp || targetBug.maxXp;
+      const bugCurrentHp = targetBug.currentHp !== undefined ? targetBug.currentHp : bugMaxHp;
+      if (bugCurrentHp <= 0) {
+        return {
+          success: false,
+          message: 'Cannot heal a fainted bug. Use a Revive item instead!',
+          quantityRemaining: currentQty,
+        };
+      }
     }
 
     // Trap: no additional validation needed (used in Hive Mode)

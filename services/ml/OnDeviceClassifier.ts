@@ -7,19 +7,29 @@
  */
 
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as jpeg from 'jpeg-js';
 import { Image } from 'react-native';
 import { BoundingBox, DetectionModelConfig, DetectionResult, MLCandidate, MLClassifierConfig } from './types';
 
 // Try to import react-native-fast-tflite, fallback gracefully
 let TFLite: any = null;
+let loadTensorflowModel: any = null;
 try {
-  TFLite = require('react-native-fast-tflite');
+  const tfliteModule = require('react-native-fast-tflite');
+  TFLite = tfliteModule;
+  loadTensorflowModel = tfliteModule.loadTensorflowModel;
   console.log('✅ react-native-fast-tflite loaded successfully');
+  console.log('🔧 TFLite object keys:', Object.keys(TFLite || {}));
+  console.log('🔧 loadTensorflowModel function exists:', typeof loadTensorflowModel);
 } catch (e) {
   console.warn('⚠️  react-native-fast-tflite not available (running in Expo Go?)', e);
 }
+
+// Known label sets for backward compatibility.
+// The old bundled model (2.87 MB) has 6 output classes in this exact order:
+const OLD_6CLASS_LABELS = ["Bees", "Butterfly", "Ladybug", "ant", "dragonfly", "wasp"];
 
 class OnDeviceClassifier {
   private modelLoaded: boolean = false;
@@ -35,13 +45,42 @@ class OnDeviceClassifier {
   private detectionModel: any = null;
 
   /**
+   * Resolve the correct label array based on the model's actual output size.
+   * When the model outputs fewer classes than the configured label list,
+   * fall back to the known old label set (e.g. old 6-class model).
+   */
+  private resolveLabels(numOutputClasses: number): string[] {
+    if (numOutputClasses === this.labels.length) {
+      // Labels match model — use as-is
+      return this.labels;
+    }
+    if (numOutputClasses === OLD_6CLASS_LABELS.length) {
+      console.log(`🏷️ Model outputs ${numOutputClasses} classes — using OLD_6CLASS_LABELS`);
+      return OLD_6CLASS_LABELS;
+    }
+    // Unknown mismatch — truncate or pad labels as best we can
+    console.warn(`⚠️ Label mismatch: model outputs ${numOutputClasses} classes but labels has ${this.labels.length}. Truncating.`);
+    return this.labels.slice(0, numOutputClasses);
+  }
+
+  /**
    * Ensure ML directory exists in document storage
    */
   private async ensureMlDirExists(): Promise<void> {
     const mlDir = `${FileSystem.documentDirectory!}ml/`;
-    const dirInfo = await FileSystem.getInfoAsync(mlDir);
-    if (!dirInfo.exists) {
-      await FileSystem.makeDirectoryAsync(mlDir, { intermediates: true });
+    try {
+      const dirInfo = await FileSystem.getInfoAsync(mlDir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(mlDir, { intermediates: true }).catch(() => {
+          console.warn('Could not create ML directory, may already exist:', mlDir);
+        });
+      }
+    } catch (error) {
+      try {
+        await FileSystem.makeDirectoryAsync(mlDir, { intermediates: true });
+      } catch {
+        console.warn('Could not create ML directory, may already exist:', mlDir);
+      }
     }
   }
 
@@ -82,8 +121,139 @@ class OnDeviceClassifier {
       .slice(0, k);
   }
 
+  // ─── YOLOv5 output parsing ────────────────────────────────────
+
   /**
-   * Load model and labels from specified paths
+   * Auto-detect whether output tensor is YOLOv5 detection format or plain
+   * classification softmax. YOLOv5 outputs [N, 5+C] where C = num classes;
+   * a classification model outputs [C] or [1, C].
+   */
+  private isYoloOutput(tensor: number[], numClasses: number): boolean {
+    // Classification: tensor.length === numClasses
+    if (tensor.length === numClasses) return false;
+    // YOLOv5: total length divisible by stride (5 + numClasses)
+    const stride = 5 + numClasses;
+    return tensor.length > numClasses && tensor.length % stride === 0;
+  }
+
+  /**
+   * Extract RGB pixel values from raw JPEG/PNG file bytes.
+   * Uses jpeg-js for proper JPEG decoding to real RGBA pixel data,
+   * then extracts just the RGB channels.
+   */
+  private extractRgbFromBytes(fileBytes: Uint8Array, pixelCount: number): Uint8Array {
+    try {
+      // Decode JPEG → { data: Uint8Array(RGBA), width, height }
+      const decoded = jpeg.decode(fileBytes, { useTArray: true, formatAsRGBA: true });
+      const rgba = decoded.data as Uint8Array;
+      const rgbCount = pixelCount; // H * W * 3
+      const rgb = new Uint8Array(rgbCount);
+
+      const numPixels = rgbCount / 3;
+      for (let i = 0; i < numPixels; i++) {
+        rgb[i * 3]     = rgba[i * 4];     // R
+        rgb[i * 3 + 1] = rgba[i * 4 + 1]; // G
+        rgb[i * 3 + 2] = rgba[i * 4 + 2]; // B
+      }
+      console.log(`📷 Decoded JPEG: ${decoded.width}×${decoded.height} → ${rgbCount} RGB bytes`);
+      return rgb;
+    } catch (err) {
+      console.warn('⚠️ JPEG decode failed, filling with mid-grey:', err);
+      const rgb = new Uint8Array(pixelCount);
+      rgb.fill(128);
+      return rgb;
+    }
+  }
+
+  /**
+   * Parse YOLOv5 TFLite output tensor.
+   * Each detection row: [cx, cy, w, h, obj_conf, cls0, cls1, ..., clsN]
+   */
+  private parseYoloOutput(
+    outputData: number[],
+    numClasses: number,
+    confidenceThreshold: number = 0.25
+  ): MLCandidate[] {
+    const results: MLCandidate[] = [];
+    const stride = 5 + numClasses;
+    const numDetections = Math.floor(outputData.length / stride);
+
+    for (let i = 0; i < numDetections; i++) {
+      const offset = i * stride;
+      const objConf = outputData[offset + 4];
+      if (objConf < confidenceThreshold) continue;
+
+      let bestClassIdx = 0;
+      let bestClassScore = 0;
+      for (let c = 0; c < numClasses; c++) {
+        const score = outputData[offset + 5 + c];
+        if (score > bestClassScore) {
+          bestClassScore = score;
+          bestClassIdx = c;
+        }
+      }
+
+      const finalConfidence = objConf * bestClassScore;
+      if (finalConfidence < confidenceThreshold) continue;
+
+      results.push({
+        label: this.labels[bestClassIdx] ?? `class_${bestClassIdx}`,
+        confidence: finalConfidence,
+        bbox: {
+          x: outputData[offset],
+          y: outputData[offset + 1],
+          w: outputData[offset + 2],
+          h: outputData[offset + 3],
+        },
+      });
+    }
+
+    results.sort((a, b) => b.confidence - a.confidence);
+    return this.nonMaxSuppression(results, 0.45);
+  }
+
+  /**
+   * Simple Non-Max Suppression to remove overlapping detections.
+   */
+  private nonMaxSuppression(detections: MLCandidate[], iouThreshold: number): MLCandidate[] {
+    const kept: MLCandidate[] = [];
+    for (const det of detections) {
+      let dominated = false;
+      for (const k of kept) {
+        if (det.bbox && k.bbox && this.computeIoU(det.bbox, k.bbox) > iouThreshold) {
+          dominated = true;
+          break;
+        }
+      }
+      if (!dominated) kept.push(det);
+    }
+    return kept;
+  }
+
+  /**
+   * Compute Intersection-over-Union for two center-format bounding boxes.
+   */
+  private computeIoU(
+    a: { x: number; y: number; w: number; h: number },
+    b: { x: number; y: number; w: number; h: number }
+  ): number {
+    const ax1 = a.x - a.w / 2, ay1 = a.y - a.h / 2;
+    const ax2 = a.x + a.w / 2, ay2 = a.y + a.h / 2;
+    const bx1 = b.x - b.w / 2, by1 = b.y - b.h / 2;
+    const bx2 = b.x + b.w / 2, by2 = b.y + b.h / 2;
+
+    const ix1 = Math.max(ax1, bx1), iy1 = Math.max(ay1, by1);
+    const ix2 = Math.min(ax2, bx2), iy2 = Math.min(ay2, by2);
+    const inter = Math.max(0, ix2 - ix1) * Math.max(0, iy2 - iy1);
+    const union = a.w * a.h + b.w * b.h - inter;
+    return union > 0 ? inter / union : 0;
+  }
+
+  /** Tracks why real model isn't available — exposed for UI diagnostics */
+  modelLoadError: string | null = null;
+
+  /**
+   * Load model and labels from specified paths (file:// URI approach).
    * @param modelPath - Path to .tflite model file
    * @param labelsPath - Path to labels JSON file
    */
@@ -98,17 +268,20 @@ class OnDeviceClassifier {
       console.log(`✅ Loaded ${this.labels.length} class labels`);
 
       // Load TFLite model if native module available
-      if (TFLite && TFLite.loadModel) {
+      if (loadTensorflowModel) {
         try {
-          this.model = await TFLite.loadModel(modelPath);
+          this.model = await loadTensorflowModel({url: `file://${modelPath}`});
+          this.modelLoadError = null;
           console.log('✅ TFLite classification model loaded with react-native-fast-tflite');
-          console.log(`   Input: ${JSON.stringify(this.model?.inputs)}`);
-          console.log(`   Output: ${JSON.stringify(this.model?.outputs)}`);
-        } catch (modelError) {
-          console.warn('⚠️  TFLite loading failed, using fallback:', modelError);
+          console.log(`   Input shapes: ${JSON.stringify(this.model?.inputs)}`);
+          console.log(`   Output shapes: ${JSON.stringify(this.model?.outputs)}`);
+        } catch (modelError: any) {
+          console.warn('⚠️  TFLite file-path loading failed:', modelError);
+          this.modelLoadError = `TFLite load failed: ${modelError?.message ?? modelError}`;
           this.model = null;
         }
       } else {
+        this.modelLoadError = 'react-native-fast-tflite not available (Expo Go?)';
         console.warn('⚠️  react-native-fast-tflite not available, using stub mode');
         console.log('   Build with: npx expo prebuild && eas build');
         this.model = null;
@@ -130,6 +303,60 @@ class OnDeviceClassifier {
   }
 
   /**
+   * Load model directly from a bundled asset module (most robust for production).
+   * Uses react-native-fast-tflite's native asset resolution which avoids the
+   * copy-to-document-directory dance entirely.
+   *
+   * @param assetModule - The return value of require('path/to/model.tflite')
+   * @param labels - Either a labels file path (string) or pre-parsed labels array
+   */
+  async loadModelFromAsset(assetModule: number, labels: string | string[]): Promise<void> {
+    console.log('🧠 Loading ML model from bundled asset...');
+
+    try {
+      // Load labels
+      if (typeof labels === 'string') {
+        this.labels = await this.readLabelsFile(labels);
+      } else {
+        this.labels = labels;
+      }
+      console.log(`✅ Loaded ${this.labels.length} class labels`);
+
+      // Load TFLite model directly from asset module (number from require())
+      if (loadTensorflowModel) {
+        try {
+          console.log('🔧 Calling loadTensorflowModel with asset module (require)...');
+          this.model = await loadTensorflowModel(assetModule);
+          this.modelLoadError = null;
+          console.log('✅ TFLite model loaded from bundled asset!');
+          console.log(`   Input shapes: ${JSON.stringify(this.model?.inputs)}`);
+          console.log(`   Output shapes: ${JSON.stringify(this.model?.outputs)}`);
+        } catch (modelError: any) {
+          console.error('❌ TFLite asset loading failed:', modelError);
+          this.modelLoadError = `TFLite asset load failed: ${modelError?.message ?? modelError}`;
+          this.model = null;
+        }
+      } else {
+        this.modelLoadError = 'react-native-fast-tflite not available (Expo Go?)';
+        console.warn('⚠️  react-native-fast-tflite not available, using stub mode');
+        this.model = null;
+      }
+
+      this.modelLoaded = true;
+      this.config = {
+        modelPath: '<bundled-asset>',
+        labelsPath: typeof labels === 'string' ? labels : '<inline>',
+        inputSize: 224,
+        topK: 5,
+        confidenceThreshold: 0.1,
+      };
+    } catch (error) {
+      console.error('❌ Failed to load model from asset:', error);
+      throw new Error(`Model asset loading failed: ${error}`);
+    }
+  }
+
+  /**
    * Classify image and return top-K predictions
    * @param imageUri - Image URI to classify
    * @param topK - Number of top predictions to return
@@ -144,53 +371,209 @@ class OnDeviceClassifier {
 
     try {
       // Real inference when model is available
-      if (this.model && TFLite) {
-        // Preprocess image to 224x224 RGB
-        const resized = await ImageManipulator.manipulateAsync(
-          imageUri,
-          [{ resize: { width: 224, height: 224 } }],
-          { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 }
-        );
-
-        // Run inference
-        // Note: react-native-fast-tflite handles image loading and tensor conversion
-        const outputs = await this.model.run(resized.uri);
-        
-        // Process output tensor into predictions
-        const predictions: MLCandidate[] = [];
-        const outputTensor = Array.isArray(outputs) ? outputs[0] : outputs;
-        
-        // Map output values to labels
-        for (let i = 0; i < this.labels.length && i < outputTensor.length; i++) {
-          predictions.push({
-            label: this.labels[i],
-            confidence: outputTensor[i],
+      if (this.model && loadTensorflowModel) {
+          console.log('🤖 USING REAL TENSORFLOW LITE INFERENCE (not stub mode)');
+          
+          // First pass: standard preprocessing
+          const predictions = await this.runInference(imageUri);
+          let topPredictions = this.sortTopK(predictions, topK);
+          
+          console.log('🏆 TOP PREDICTIONS FROM REAL TENSORFLOW LITE MODEL:');
+          topPredictions.forEach((pred, idx) => {
+            console.log(`  ${idx + 1}. ${pred.label}: ${(pred.confidence * 100).toFixed(2)}%`);
           });
-        }
 
-        // Sort and return top-K
-        const topPredictions = this.sortTopK(predictions, topK);
-        console.log(`✅ Classification complete: ${topPredictions[0]?.label} (${(topPredictions[0]?.confidence * 100).toFixed(1)}%)`);
-        return topPredictions;
-        
+          // Second pass: if top confidence is low, try enhanced preprocessing
+          // This helps with dark subjects like black ants on dark backgrounds
+          const LOW_CONFIDENCE_THRESHOLD = 0.45;
+          if (topPredictions.length > 0 && topPredictions[0].confidence < LOW_CONFIDENCE_THRESHOLD) {
+            console.log('🔆 Low confidence detected — trying enhanced preprocessing for dark subjects');
+            try {
+              const { mlPreprocessingService } = require('./MLPreprocessingService');
+              const enhancedUri = await mlPreprocessingService.preprocessWithEnhancement(imageUri, 224);
+              const enhancedPredictions = await this.runInference(enhancedUri);
+              const enhancedTop = this.sortTopK(enhancedPredictions, topK);
+              
+              console.log('🔆 ENHANCED PREDICTIONS:');
+              enhancedTop.forEach((pred, idx) => {
+                console.log(`  ${idx + 1}. ${pred.label}: ${(pred.confidence * 100).toFixed(2)}%`);
+              });
+              
+              // Use enhanced results if they're more confident
+              if (enhancedTop.length > 0 && enhancedTop[0].confidence > topPredictions[0].confidence) {
+                console.log('✅ Enhanced preprocessing gave better results — using those');
+                topPredictions = enhancedTop;
+              }
+            } catch (enhanceErr) {
+              console.warn('⚠️ Enhanced preprocessing failed (non-fatal):', enhanceErr);
+            }
+          }
+
+          // Tag all predictions with source — detect YOLOv5 vs classification
+          const yoloDetected = topPredictions.some(p => p.bbox != null);
+          const src = yoloDetected ? 'tflite-yolov5' as const : 'tflite' as const;
+          return topPredictions.map(p => ({ ...p, source: src }));
+          
       } else {
-        // Fallback to stub if model not loaded
-        console.warn('⚠️  Using STUB predictions (TFLite not available)');
-        return this.getStubPredictions(topK);
+        // No real model available — return stub predictions tagged as such
+        // so the UI can differentiate and show appropriate messaging
+        console.warn('⚠️ TensorFlow Lite not available — returning stub predictions');
+        console.warn('💡 To fix: Build a production APK with react-native-fast-tflite');
+        const stubs = this.getStubPredictions(topK);
+        return stubs.map(p => ({ ...p, source: 'stub' as const }));
       }
 
     } catch (error) {
       console.error('❌ Classification failed:', error);
-      console.warn('⚠️  Falling back to stub predictions');
-      return this.getStubPredictions(topK);
+      // Return stub predictions rather than crashing — never block the user
+      if (this.labels.length > 0) {
+        console.warn('⚠️ Falling back to stub predictions after error');
+        const stubs = this.getStubPredictions(topK);
+        return stubs.map(p => ({ ...p, source: 'stub' as const }));
+      }
+      return [];
     }
   }
 
   /**
-   * Check if model is loaded and ready
+   * Run a single inference pass on a preprocessed image URI.
+   * Auto-detects whether the model outputs YOLOv5 detection format
+   * (N × [5 + numClasses]) or plain classification softmax ([numClasses]).
+   */
+  private async runInference(imageUri: string): Promise<MLCandidate[]> {
+    // Determine model input shape and data type
+    const inputTensor = this.model.inputs?.[0];
+    const inputShape = inputTensor?.shape ?? [1, 224, 224, 3];
+    const inputType = inputTensor?.dataType ?? 'float32';
+    const height = inputShape[1] ?? 224;
+    const width  = inputShape[2] ?? 224;
+    const channels = inputShape[3] ?? 3;
+    const pixelCount = height * width * channels;
+
+    console.log(`🔢 Model input: ${inputType} shape=${JSON.stringify(inputShape)}`);
+
+    // Read image as base64 → decode to raw bytes → extract RGB → build tensor
+    const base64 = await FileSystem.readAsStringAsync(imageUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    const binaryStr = atob(base64);
+    const fileBytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      fileBytes[i] = binaryStr.codePointAt(i) ?? 0;
+    }
+
+    // Build the input typed array from raw JPEG/PNG bytes.
+    // For uint8 models the JPEG bytes directly won't work — we need decoded pixels.
+    // react-native doesn't have Canvas, so we approximate with the raw bytes of
+    // the JPEG file.  The expo-image-manipulator already resizes to 224×224 so
+    // the pixel count is deterministic. We extract pixel-level estimates from the
+    // JPEG body (skip headers, take uniformly-spaced samples).
+    let inputArray: Float32Array | Uint8Array;
+
+    if (inputType === 'uint8') {
+      inputArray = this.extractRgbFromBytes(fileBytes, pixelCount);
+    } else {
+      // float32 — normalise to [0, 1]
+      const raw = this.extractRgbFromBytes(fileBytes, pixelCount);
+      const f32 = new Float32Array(pixelCount);
+      for (let i = 0; i < pixelCount; i++) {
+        f32[i] = raw[i] / 255.0;
+      }
+      inputArray = f32;
+    }
+
+    console.log(`📊 Input tensor: ${inputArray.constructor.name}[${inputArray.length}]`);
+
+    // model.run() expects TypedArray[]
+    const outputs = await this.model.run([inputArray]);
+    
+    // Process output tensor into predictions
+    // outputs is TypedArray[] — first element is the output tensor
+    const rawOutput = Array.isArray(outputs) ? outputs[0] : outputs;
+    const outputTensor = Array.from(rawOutput as ArrayLike<number>);
+    
+    if (!Array.isArray(outputTensor) || outputTensor.length === 0) {
+      throw new TypeError(`Expected non-empty array tensor output, got: ${typeof rawOutput}`);
+    }
+
+    const numLabels = this.labels.length;
+    const numOutputs = outputTensor.length;
+
+    // ── Auto-detect YOLOv5 detection output vs classification output ──
+    if (this.isYoloOutput(outputTensor, numLabels)) {
+      console.log('🎯 Detected YOLOv5 output format — parsing detections');
+      const detections = this.parseYoloOutput(outputTensor, numLabels, 0.25);
+      console.log(`✅ YOLOv5: ${detections.length} detection(s) above threshold`);
+      return detections;
+    }
+
+    // ── Standard classification output — apply softmax ──
+    // Resolve the correct label set based on how many outputs the model actually produces.
+    const activeLabels = this.resolveLabels(numOutputs);
+    const numClasses = numOutputs;
+    console.log(`📊 Standard classification output — ${numClasses} classes, activeLabels: [${activeLabels.join(', ')}]`);
+
+    const maxVal = Math.max(...outputTensor);
+    const exps = outputTensor.map((v: number) => Math.exp(v - maxVal));
+    const sumExps = exps.reduce((a: number, b: number) => a + b, 0);
+    const softmaxValues = exps.map((e: number) => e / sumExps);
+
+    // Compute entropy to measure prediction uncertainty
+    let entropy = 0;
+    for (const p of softmaxValues) {
+      if (p > 1e-10) {
+        entropy -= p * Math.log2(p);
+      }
+    }
+    const maxEntropy = Math.log2(numClasses);
+    const normalizedEntropy = entropy / maxEntropy;
+    console.log(`📊 Prediction entropy: ${entropy.toFixed(3)} / ${maxEntropy.toFixed(3)} (normalized: ${(normalizedEntropy * 100).toFixed(1)}%)`);
+
+    // If entropy is very high (>0.85), the model is uncertain
+    if (normalizedEntropy > 0.85) {
+      console.log('⚠️ High entropy detected — model is very uncertain, likely not a bug photo');
+      const predictions: MLCandidate[] = [];
+      for (let i = 0; i < numClasses && i < softmaxValues.length; i++) {
+        predictions.push({
+          label: activeLabels[i] ?? `class_${i}`,
+          confidence: softmaxValues[i] * 0.3,
+        });
+      }
+      return predictions;
+    }
+    
+    const predictions: MLCandidate[] = [];
+    for (let i = 0; i < numClasses && i < softmaxValues.length; i++) {
+      predictions.push({
+        label: activeLabels[i] ?? `class_${i}`,
+        confidence: softmaxValues[i],
+      });
+    }
+
+    return predictions;
+  }
+
+  /**
+   * Check if model is loaded and ready (labels loaded)
    */
   isReady(): boolean {
     return this.modelLoaded;
+  }
+
+  /**
+   * Returns true only when the real TFLite native module is available AND the model
+   * is loaded — i.e. classifyImage() will run real inference, not stubs.
+   */
+  isUsingRealModel(): boolean {
+    return this.modelLoaded && this.model != null && loadTensorflowModel != null;
+  }
+
+  /**
+   * Returns true when the classifier can produce output:
+   * either real TFLite inference or stub predictions (labels loaded).
+   */
+  isRunnable(): boolean {
+    return this.modelLoaded && (this.isUsingRealModel() || this.labels.length > 0);
   }
 
   /**
@@ -233,12 +616,12 @@ class OnDeviceClassifier {
 
     try {
       // Load TFLite detection model if native module available
-      if (TFLite && TFLite.loadModel) {
+      if (loadTensorflowModel) {
         try {
-          this.detectionModel = await TFLite.loadModel(modelPath);
+          this.detectionModel = await loadTensorflowModel({url: `file://${modelPath}`});
           console.log('✅ TFLite detection model loaded with react-native-fast-tflite');
-          console.log(`   Input: ${JSON.stringify(this.detectionModel?.inputs)}`);
-          console.log(`   Output: ${JSON.stringify(this.detectionModel?.outputs)}`);
+          console.log(`   Input shapes: ${JSON.stringify(this.detectionModel?.inputs)}`);
+          console.log(`   Output shapes: ${JSON.stringify(this.detectionModel?.outputs)}`);
         } catch (modelError) {
           console.warn('⚠️  TFLite detection loading failed, using fallback:', modelError);
           this.detectionModel = null;
@@ -283,7 +666,7 @@ class OnDeviceClassifier {
 
     try {
       // Real detection when model is available
-      if (this.detectionModel && TFLite) {
+      if (this.detectionModel && loadTensorflowModel) {
         // Get original image dimensions
         const originalSize = await this.getImageSize(imageUri);
         
@@ -294,8 +677,28 @@ class OnDeviceClassifier {
           { format: ImageManipulator.SaveFormat.JPEG, compress: 0.9 }
         );
 
-        // Run detection inference
-        const outputs = await this.detectionModel.run(resized.uri);
+        // Run detection inference — convert image to tensor first
+        const detInputTensor = this.detectionModel.inputs?.[0];
+        const detInputType = detInputTensor?.dataType ?? 'uint8';
+        const detBase64 = await FileSystem.readAsStringAsync(resized.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const detBinary = atob(detBase64);
+        const detFileBytes = new Uint8Array(detBinary.length);
+        for (let i = 0; i < detBinary.length; i++) {
+          detFileBytes[i] = detBinary.codePointAt(i) ?? 0;
+        }
+        const detPixelCount = 320 * 320 * 3;
+        const detRgb = this.extractRgbFromBytes(detFileBytes, detPixelCount);
+        let detInput: Float32Array | Uint8Array;
+        if (detInputType === 'float32') {
+          const f = new Float32Array(detPixelCount);
+          for (let i = 0; i < detPixelCount; i++) f[i] = detRgb[i] / 255.0;
+          detInput = f;
+        } else {
+          detInput = detRgb;
+        }
+        const outputs = await this.detectionModel.run([detInput]);
         
         // Parse EfficientDet outputs
         // Typical format: [boxes, scores, classes, numDetections]
@@ -373,28 +776,89 @@ class OnDeviceClassifier {
    * Used when TFLite is not available
    */
   private getStubPredictions(topK: number): MLCandidate[] {
-    // Simulate inference with random but plausible predictions
-    const candidateIndices = this.getRandomIndices(this.labels.length, topK);
-    const predictions: MLCandidate[] = [];
+    // Enhanced mock predictions using your trained 15-species model data
+    console.log('🎭 Generating realistic mock predictions from trained model species');
+    
+    // Weighted probabilities based on common insect sightings (matches ALL trained model classes).
+    // Every class the model can output must appear here so stubs never skew toward a subset.
+    const speciesWeights: { [key: string]: number } = {
+      'ant':        0.18,
+      'Bees':       0.18,
+      'bee':        0.18, // alternate casing used by some label files
+      'Butterfly':  0.15,
+      'Ladybug':    0.12,
+      'wasp':       0.12,
+      'dragonfly':  0.10,
+      'scorpion':   0.08, // less common but must be represented
+      'Scorpion':   0.08,
+      'beetle':     0.06,
+      'Beetle':     0.06,
+      'grasshopper':0.04,
+      'moth':       0.03,
+    };
 
-    let remainingConfidence = 1.0;
-    for (let i = 0; i < candidateIndices.length; i++) {
-      const idx = candidateIndices[i];
-      const confidence = remainingConfidence * (0.4 - i * 0.08);
+    // Select species based on weights (simulating YOLOv8 confidence scores)
+    const predictions: MLCandidate[] = [];
+    
+    // Ensure labels are available, fallback to default species if not loaded
+    const fallbackLabels = [
+      "Bees", "Butterfly", "Ladybug", "ant", "dragonfly", "wasp"
+    ];
+    const labelsToUse = this.labels && this.labels.length > 0 ? this.labels : fallbackLabels;
+    const availableSpecies = [...labelsToUse];
+    
+    // Primary prediction (30-55% confidence — stubs should never pass the 85% threshold)
+    const primaryIdx = this.getWeightedRandomIndex(availableSpecies, speciesWeights);
+    const primarySpecies = availableSpecies[primaryIdx];
+    const primaryConfidence = 0.30 + Math.random() * 0.25; // 30-55%
+    
+    predictions.push({
+      label: primarySpecies,
+      confidence: primaryConfidence
+    });
+    
+    // Remove primary species for other predictions
+    availableSpecies.splice(primaryIdx, 1);
+    
+    // Secondary predictions with decreasing confidence
+    let remainingConfidence = 1.0 - primaryConfidence;
+    for (let i = 1; i < Math.min(topK, this.labels.length); i++) {
+      if (availableSpecies.length === 0) break;
+      
+      const idx = this.getWeightedRandomIndex(availableSpecies, speciesWeights);
+      const species = availableSpecies[idx];
+      const confidence = remainingConfidence * (0.6 - i * 0.15); // Rapidly decreasing
       
       predictions.push({
-        label: this.labels[idx] || 'Unknown',
-        confidence: Math.max(0.05, confidence),
+        label: species,
+        confidence: Math.max(0.01, confidence)
       });
       
       remainingConfidence -= confidence;
+      availableSpecies.splice(idx, 1);
     }
 
-    // Normalize confidences to sum to ~1.0
-    const total = predictions.reduce((sum, p) => sum + p.confidence, 0);
-    predictions.forEach(p => p.confidence = p.confidence / total);
-
+    console.log(`🎯 Mock prediction: ${predictions[0].label} (${(predictions[0].confidence * 100).toFixed(1)}%)`);
     return predictions;
+  }
+
+  /**
+   * Get weighted random index based on species probability
+   */
+  private getWeightedRandomIndex(species: string[], weights: { [key: string]: number }): number {
+    const random = Math.random();
+    let cumulativeWeight = 0;
+    
+    for (let i = 0; i < species.length; i++) {
+      const weight = weights[species[i]] || 0.01; // Default small weight
+      cumulativeWeight += weight;
+      if (random <= cumulativeWeight) {
+        return i;
+      }
+    }
+    
+    // Fallback to random if weights don't sum properly
+    return Math.floor(Math.random() * species.length);
   }
 
   /**
@@ -422,10 +886,14 @@ class OnDeviceClassifier {
     const targetPath = `${FileSystem.documentDirectory!}ml/${fileName}`;
     
     // Check if already copied
-    const fileInfo = await FileSystem.getInfoAsync(targetPath);
-    if (fileInfo.exists) {
-      console.log('✅ Model already in FileSystem:', targetPath);
-      return targetPath;
+    try {
+      const fileInfo = await FileSystem.getInfoAsync(targetPath);
+      if (fileInfo.exists) {
+        console.log('  ✅ Model already exists at:', targetPath);
+        return targetPath;
+      }
+    } catch {
+      // File doesn't exist, continue to copy
     }
 
     console.log('📦 Copying bundled model to FileSystem...');
@@ -454,10 +922,14 @@ class OnDeviceClassifier {
     const targetPath = `${FileSystem.documentDirectory!}ml/${fileName}`;
     
     // Check if already copied
-    const fileInfo = await FileSystem.getInfoAsync(targetPath);
-    if (fileInfo.exists) {
-      console.log('✅ Labels already in FileSystem:', targetPath);
-      return targetPath;
+    try {
+      const fileInfo = await FileSystem.getInfoAsync(targetPath);
+      if (fileInfo.exists) {
+        console.log('✅ Labels already in FileSystem:', targetPath);
+        return targetPath;
+      }
+    } catch {
+      // File doesn't exist, continue to copy
     }
 
     console.log('📦 Copying bundled labels to FileSystem...');

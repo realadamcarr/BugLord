@@ -1,29 +1,338 @@
 import { useTheme } from '@/contexts/ThemeContext';
 import { CameraType, CameraView, useCameraPermissions } from 'expo-camera';
-import Constants from 'expo-constants';
-import * as MediaLibrary from 'expo-media-library';
-import React, { useRef } from 'react';
-import { Alert, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+export type ScanMode = 'photo' | 'liveScan' | 'gallery';
 
 interface BugCameraProps {
   onCapture: (photoUri: string) => void;
   onClose: () => void;
+  mode?: ScanMode;
+  /** Called in liveScan mode after taking a photo — calls backend for species-level ID */
+  onClassifyPhoto?: (photoUri: string) => Promise<{ label: string; confidence: number; source: 'local' | 'backend' } | null>;
+  /** Called when the user confirms a live scan result */
+  onLiveScanConfirm?: (photoUri: string, label: string, confidence: number, source: 'local' | 'backend') => void;
 }
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-
-export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
+export const BugCamera: React.FC<BugCameraProps> = ({
+  onCapture,
+  onClose,
+  mode = 'photo',
+  onClassifyPhoto,
+  onLiveScanConfirm,
+}) => {
   const { theme } = useTheme();
   const facing: CameraType = 'back';
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
-  const isExpoGo = Constants.appOwnership === 'expo';
 
-  const styles = StyleSheet.create({
+  // Camera readiness gate — disables capture until the native surface is ready
+  const [cameraReady, setCameraReady] = useState(false);
+  // In-flight capture lock — prevents double-tap captures
+  const [isCapturing, setIsCapturing] = useState(false);
+
+  // Live scan state — simple: idle → classifying → result
+  const [liveScanState, setLiveScanState] = useState<'idle' | 'classifying' | 'result'>('idle');
+  const [scanPhotoUri, setScanPhotoUri] = useState<string | null>(null);
+  const [scanLabel, setScanLabel] = useState<string | null>(null);
+  const [scanConfidence, setScanConfidence] = useState<number>(0);
+  // Track whether the current scanLabel came from backend or local model
+  const scanLabelSourceRef = useRef<'local' | 'backend'>('local');
+
+  const styles = createStyles(theme);
+
+  // ─── Permission screens ────────────────────────────────────
+  if (!permission) {
+    return (
+      <SafeAreaView style={styles.permissionContainer}>
+        <TouchableOpacity style={styles.permissionClose} onPress={onClose}>
+          <Text style={styles.permissionCloseText}>✕</Text>
+        </TouchableOpacity>
+        <Text style={styles.permissionText}>
+          Camera permission is required to photograph bugs for your collection.
+        </Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (!permission.granted) {
+    return (
+      <SafeAreaView style={styles.permissionContainer}>
+        <TouchableOpacity style={styles.permissionClose} onPress={onClose}>
+          <Text style={styles.permissionCloseText}>✕</Text>
+        </TouchableOpacity>
+        <Text style={styles.permissionText}>
+          We need access to your camera to photograph bugs for your collection.
+        </Text>
+        <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
+          <Text style={styles.permissionButtonText}>Grant Camera Permission</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  /** Shared capture options — no base64/exif overhead, skip JPEG re-encode on Android */
+  const captureOptions = {
+    quality: 0.8,
+    base64: false as const,
+    exif: false as const,
+    ...(Platform.OS === 'android' ? { skipProcessing: true } : {}),
+  };
+
+  // ─── Photo Mode: capture and return ────────────────────────
+  const takePicture = async () => {
+    if (!cameraRef.current || !cameraReady || isCapturing) return;
+    setIsCapturing(true);
+
+    try {
+      let photo = await cameraRef.current.takePictureAsync(captureOptions);
+
+      // Single retry with short delay if first attempt fails
+      if (!photo?.uri) {
+        await new Promise(r => setTimeout(r, 150));
+        photo = await cameraRef.current.takePictureAsync(captureOptions);
+      }
+
+      if (photo?.uri) {
+        onCapture(photo.uri);
+      } else {
+        Alert.alert('Error', 'Failed to capture photo. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error taking picture:', error);
+      // Single retry on exception
+      try {
+        await new Promise(r => setTimeout(r, 150));
+        const retryPhoto = await cameraRef.current.takePictureAsync(captureOptions);
+        if (retryPhoto?.uri) {
+          onCapture(retryPhoto.uri);
+          return;
+        }
+      } catch { /* ignore retry error */ }
+      Alert.alert('Error', 'Failed to capture photo. Please try again.');
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  // ─── Live Scan: capture → classify → show result ───────────
+  const takeScanPhoto = async () => {
+    if (!cameraRef.current || !onClassifyPhoto) {
+      setLiveScanState('idle');
+      return;
+    }
+    if (!cameraReady || isCapturing) {
+      setLiveScanState('idle');
+      return;
+    }
+    setIsCapturing(true);
+
+    try {
+      setLiveScanState('classifying');
+
+      let photo = await cameraRef.current.takePictureAsync(captureOptions);
+
+      // Single retry if first attempt fails
+      if (!photo?.uri) {
+        await new Promise(r => setTimeout(r, 150));
+        photo = await cameraRef.current.takePictureAsync(captureOptions);
+      }
+
+      if (!photo?.uri) {
+        setLiveScanState('idle');
+        setIsCapturing(false);
+        return;
+      }
+
+      setScanPhotoUri(photo.uri);
+
+      // Run ML classification
+      const result = await onClassifyPhoto(photo.uri);
+
+      if (result === null) {
+        // null means the ML model is still loading — offer actionable choices
+        setLiveScanState('idle');
+        Alert.alert(
+          'No bug detected',
+          "Couldn't identify a bug in this photo. Make sure a bug is clearly visible and try again.",
+          [
+            { text: 'Try Again', onPress: () => { /* user taps scan button again */ } },
+            { text: 'Close', style: 'cancel', onPress: onClose },
+          ]
+        );
+      } else if (result.label && result.confidence > 0) {
+        // Show the result directly (backend provides species-level names)
+        setScanLabel(result.label);
+        setScanConfidence(result.confidence);
+        scanLabelSourceRef.current = (result as any).source || 'local';
+        setLiveScanState('result');
+      } else {
+        setLiveScanState('idle');
+        Alert.alert(
+          'No Bug Detected',
+          'Could not identify a bug in this photo. Try getting closer or adjusting the angle.',
+          [{ text: 'Try Again' }]
+        );
+      }
+    } catch (error) {
+      console.error('Live scan capture failed:', error);
+      setLiveScanState('idle');
+      Alert.alert('Error', 'Failed to capture photo. Please try again.');
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  const handleConfirmScan = () => {
+    if (scanPhotoUri && scanLabel && onLiveScanConfirm) {
+      onLiveScanConfirm(scanPhotoUri, scanLabel, scanConfidence, scanLabelSourceRef.current);
+    }
+  };
+
+  const handleRetakeScan = () => {
+    setScanPhotoUri(null);
+    setScanLabel(null);
+    setScanConfidence(0);
+    scanLabelSourceRef.current = 'local';
+    setLiveScanState('idle');
+  };
+
+  const confidencePercent = Math.round(scanConfidence * 100);
+  const confidenceColor =
+    confidencePercent >= 80 ? '#10B981' :
+    confidencePercent >= 60 ? '#F59E0B' :
+    '#EF4444';
+
+  // ─── Render ────────────────────────────────────────────────
+  return (
+    <SafeAreaView style={styles.container}>
+      {/* Result preview (live scan mode after classification) */}
+      {mode === 'liveScan' && liveScanState === 'result' && scanPhotoUri ? (
+        <View style={styles.resultContainer}>
+          {/* Preview photo */}
+          <Image source={{ uri: scanPhotoUri }} style={styles.resultPhoto} resizeMode="cover" />
+
+          {/* Result overlay */}
+          <View style={styles.resultOverlay}>
+            {/* Close button */}
+            <View style={styles.topBar}>
+              <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+                <Text style={styles.buttonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Spacer */}
+            <View style={{ flex: 1 }} />
+
+            {/* Result card */}
+            <View style={styles.resultCard}>
+              <Text style={styles.resultEmoji}>🐛</Text>
+              <Text style={styles.resultLabel}>{scanLabel}</Text>
+
+              {/* Confidence bar */}
+              <View style={styles.confidenceRow}>
+                <Text style={[styles.confidenceText, { color: confidenceColor }]}>
+                  {confidencePercent}% match
+                </Text>
+                <View style={styles.confidenceBarBg}>
+                  <View
+                    style={[
+                      styles.confidenceBarFill,
+                      { width: `${confidencePercent}%`, backgroundColor: confidenceColor },
+                    ]}
+                  />
+                </View>
+              </View>
+
+              {/* Action buttons */}
+              <View style={styles.resultActions}>
+                <TouchableOpacity style={styles.retakeButton} onPress={handleRetakeScan}>
+                  <Text style={styles.retakeButtonText}>↻ Retake</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.confirmButton, { backgroundColor: theme.colors.primary }]}
+                  onPress={handleConfirmScan}
+                >
+                  <Text style={styles.confirmButtonText}>✓ Capture Bug</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      ) : (
+        /* Camera viewfinder (photo mode OR live scan idle/classifying) */
+        <CameraView
+          style={styles.camera}
+          facing={facing}
+          mode="picture"
+          ref={cameraRef}
+          onCameraReady={() => setCameraReady(true)}
+        >
+          <View style={styles.overlay}>
+            {/* Top controls */}
+            <View style={styles.topBar}>
+              <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+                <Text style={styles.buttonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Targeting reticle */}
+            <View style={styles.reticle} />
+
+            {/* Instruction text */}
+            <Text style={styles.instructionText}>
+              {mode === 'liveScan'
+                ? '🎯 Point at a bug and tap to scan'
+                : '🐛 Position the bug in the center circle and tap to capture'}
+            </Text>
+
+            {/* Classifying spinner */}
+            {mode === 'liveScan' && liveScanState === 'classifying' && (
+              <View style={styles.classifyingOverlay}>
+                <View style={styles.classifyingCard}>
+                  <ActivityIndicator size="large" color={theme.colors.primary} />
+                  <Text style={styles.classifyingText}>🧠 Identifying bug...</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Bottom controls */}
+            <View style={styles.bottomBar}>
+              <TouchableOpacity
+                style={[
+                  styles.captureButton,
+                  (!cameraReady || isCapturing || liveScanState === 'classifying') && { opacity: 0.5 },
+                ]}
+                onPress={mode === 'liveScan' ? takeScanPhoto : takePicture}
+                disabled={!cameraReady || isCapturing || liveScanState === 'classifying'}
+              >
+                <View style={styles.captureIcon} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </CameraView>
+      )}
+    </SafeAreaView>
+  );
+};
+
+// ─── Styles ──────────────────────────────────────────────────
+function createStyles(theme: any) {
+  return StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: theme.colors.background,
+      backgroundColor: '#000',
     },
     camera: {
       flex: 1,
@@ -45,17 +354,19 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
       paddingBottom: 20,
     },
     closeButton: {
-      backgroundColor: 'rgba(0, 0, 0, 0.6)',
-      borderRadius: 25,
-      width: 50,
-      height: 50,
+      backgroundColor: 'rgba(0, 0, 0, 0.7)',
+      borderRadius: 8,
+      width: 46,
+      height: 46,
       justifyContent: 'center',
       alignItems: 'center',
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.3)',
     },
     buttonText: {
       color: '#FFFFFF',
-      fontSize: 18,
-      fontWeight: 'bold',
+      fontSize: 16,
+      fontWeight: '900',
     },
     bottomBar: {
       flexDirection: 'row',
@@ -65,9 +376,9 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
       paddingHorizontal: 20,
     },
     captureButton: {
-      width: 80,
-      height: 80,
-      borderRadius: 40,
+      width: 76,
+      height: 76,
+      borderRadius: 12,
       backgroundColor: theme.colors.primary,
       borderWidth: 4,
       borderColor: '#FFFFFF',
@@ -80,24 +391,21 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
       elevation: 5,
     },
     captureIcon: {
-      width: 60,
-      height: 60,
-      borderRadius: 30,
+      width: 56,
+      height: 56,
+      borderRadius: 8,
       backgroundColor: '#FFFFFF',
     },
     reticle: {
       position: 'absolute',
       top: '50%',
       left: '50%',
-      transform: [
-        { translateX: -75 },
-        { translateY: -75 }
-      ],
+      transform: [{ translateX: -75 }, { translateY: -75 }],
       width: 150,
       height: 150,
-      borderWidth: 2,
+      borderWidth: 3,
       borderColor: theme.colors.primary,
-      borderRadius: 75,
+      borderRadius: 10,
       borderStyle: 'dashed',
     },
     instructionText: {
@@ -107,13 +415,17 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
       right: 0,
       textAlign: 'center',
       color: '#FFFFFF',
-      fontSize: 16,
-      fontWeight: '600',
-      backgroundColor: 'rgba(0, 0, 0, 0.6)',
+      fontSize: 13,
+      fontWeight: '800',
+      backgroundColor: 'rgba(0, 0, 0, 0.7)',
       paddingVertical: 10,
-      paddingHorizontal: 20,
+      paddingHorizontal: 16,
       marginHorizontal: 40,
-      borderRadius: 10,
+      borderRadius: 6,
+      textTransform: 'uppercase',
+      letterSpacing: 0.3,
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.2)',
     },
     permissionContainer: {
       flex: 1,
@@ -121,6 +433,25 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
       alignItems: 'center',
       backgroundColor: theme.colors.background,
       paddingHorizontal: 40,
+    },
+    permissionClose: {
+      position: 'absolute',
+      top: Platform.OS === 'ios' ? 16 : 12,
+      right: 16,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: theme.colors.card,
+      borderWidth: 2,
+      borderColor: theme.colors.border,
+      justifyContent: 'center',
+      alignItems: 'center',
+      zIndex: 10,
+    },
+    permissionCloseText: {
+      fontSize: 20,
+      fontWeight: '900',
+      color: theme.colors.text,
     },
     permissionText: {
       textAlign: 'center',
@@ -130,101 +461,123 @@ export const BugCamera: React.FC<BugCameraProps> = ({ onCapture, onClose }) => {
     },
     permissionButton: {
       backgroundColor: theme.colors.primary,
-      paddingHorizontal: 30,
-      paddingVertical: 15,
-      borderRadius: 10,
+      paddingHorizontal: 28,
+      paddingVertical: 14,
+      borderRadius: 8,
+      borderWidth: 3,
+      borderColor: `${theme.colors.primary}80`,
     },
     permissionButtonText: {
       color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '900',
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    // ─── Live scan classifying overlay ────────
+    classifyingOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    classifyingCard: {
+      backgroundColor: 'rgba(0,0,0,0.85)',
+      borderRadius: 16,
+      paddingVertical: 24,
+      paddingHorizontal: 32,
+      alignItems: 'center',
+      gap: 12,
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.2)',
+    },
+    classifyingText: {
+      color: '#FFFFFF',
       fontSize: 16,
-      fontWeight: '600',
+      fontWeight: '700',
+    },
+    // ─── Live scan result screen ─────────────
+    resultContainer: {
+      flex: 1,
+      backgroundColor: '#000',
+    },
+    resultPhoto: {
+      flex: 1,
+      width: '100%',
+    },
+    resultOverlay: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    resultCard: {
+      backgroundColor: 'rgba(0,0,0,0.9)',
+      marginHorizontal: 16,
+      marginBottom: 40,
+      borderRadius: 16,
+      padding: 20,
+      alignItems: 'center',
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.15)',
+    },
+    resultEmoji: {
+      fontSize: 40,
+      marginBottom: 8,
+    },
+    resultLabel: {
+      color: '#FFFFFF',
+      fontSize: 24,
+      fontWeight: '900',
+      textTransform: 'uppercase',
+      letterSpacing: 1,
+      marginBottom: 12,
+    },
+    confidenceRow: {
+      width: '100%',
+      marginBottom: 16,
+    },
+    confidenceText: {
+      fontSize: 14,
+      fontWeight: '700',
+      marginBottom: 6,
+      textAlign: 'center',
+    },
+    confidenceBarBg: {
+      height: 8,
+      backgroundColor: 'rgba(255,255,255,0.15)',
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+    confidenceBarFill: {
+      height: '100%',
+      borderRadius: 4,
+    },
+    resultActions: {
+      flexDirection: 'row',
+      gap: 12,
+      width: '100%',
+    },
+    retakeButton: {
+      flex: 1,
+      paddingVertical: 14,
+      borderRadius: 10,
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.3)',
+      alignItems: 'center',
+    },
+    retakeButtonText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '800',
+    },
+    confirmButton: {
+      flex: 1,
+      paddingVertical: 14,
+      borderRadius: 10,
+      alignItems: 'center',
+    },
+    confirmButtonText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '800',
     },
   });
-
-  if (!permission) {
-    return (
-      <SafeAreaView style={styles.permissionContainer}>
-        <Text style={styles.permissionText}>
-          Camera permission is required to photograph bugs for your collection.
-        </Text>
-      </SafeAreaView>
-    );
-  }
-
-  if (!permission.granted) {
-    return (
-      <SafeAreaView style={styles.permissionContainer}>
-        <Text style={styles.permissionText}>
-          We need access to your camera to photograph bugs for your collection.
-        </Text>
-        <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
-          <Text style={styles.permissionButtonText}>Grant Camera Permission</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
-
-
-  const takePicture = async () => {
-    if (!cameraRef.current) return;
-
-    try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
-        base64: true,
-        exif: true,
-      });
-
-      if (photo?.uri) {
-        // In Expo Go, skip saving to gallery (limited access)
-        if (!isExpoGo) {
-          try {
-            await MediaLibrary.saveToLibraryAsync(photo.uri);
-          } catch (error) {
-            console.warn('Could not save to media library:', error);
-          }
-        }
-        onCapture(photo.uri);
-      }
-    } catch (error) {
-      console.error('Error taking picture:', error);
-      Alert.alert('Error', 'Failed to capture photo. Please try again.');
-    }
-  };
-
-  return (
-    <SafeAreaView style={styles.container}>
-      <CameraView 
-        style={styles.camera} 
-        facing={facing}
-        mode="picture"
-        ref={cameraRef}
-      >
-        <View style={styles.overlay}>
-          {/* Top controls */}
-          <View style={styles.topBar}>
-            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Text style={styles.buttonText}>✕</Text>
-            </TouchableOpacity>
-            
-          </View>
-
-          {/* Targeting reticle */}
-          <View style={styles.reticle} />
-
-          {/* Instruction text */}
-          <Text style={styles.instructionText}>
-            🐛 Position the bug in the center circle and tap to capture
-          </Text>
-
-          {/* Bottom controls */}
-          <View style={styles.bottomBar}>
-            <TouchableOpacity style={styles.captureButton} onPress={takePicture}>
-              <View style={styles.captureIcon} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </CameraView>
-    </SafeAreaView>
-  );
-};
+}

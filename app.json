@@ -10,17 +10,32 @@
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#4CAF50"
+      "backgroundColor": "#3D8B37"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "fetch",
+          "processing"
+        ],
+        "NSMotionUsageDescription": "Allow BugLord to track your steps for Walk Mode",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.realadamcarr.buglord"
     },
+    "healthConnectPermissions": [
+      {
+        "accessType": "read",
+        "recordType": "Steps"
+      }
+    ],
     "android": {
       "package": "com.realadamcarr.buglord",
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#4CAF50"
+        "backgroundColor": "#3D8B37"
       },
       "permissions": [
         "android.permission.WRITE_EXTERNAL_STORAGE",
@@ -28,8 +43,27 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.ACTIVITY_RECOGNITION",
-        "android.permission.FOREGROUND_SERVICE"
-      ]
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_HEALTH",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.health.READ_STEPS",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.WAKE_LOCK"
+      ],
+      "navigationBar": {
+        "visible": "immersive"
+      },
+      "statusBar": {
+        "hidden": false,
+        "style": "dark",
+        "translucent": true,
+        "backgroundColor": "transparent"
+      }
     },
     "web": {
       "bundler": "metro",
@@ -38,6 +72,16 @@
     },
     "plugins": [
       "expo-router",
+      "react-native-fast-tflite",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true,
+            "minSdkVersion": 26
+          }
+        }
+      ],
       [
         "expo-camera",
         {
@@ -50,7 +94,41 @@
           "photosPermission": "Allow BugLord to save captured insect photos",
           "savePhotosPermission": "Allow BugLord to save insect photos to your library"
         }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Allow BugLord to track your steps for Walk Mode"
+        }
+      ],
+      "expo-notifications",
+      "expo-asset",
+      "expo-task-manager",
+      [
+        "expo-background-fetch",
+        {
+          "stopOnTerminate": false,
+          "startOnBoot": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow BugLord to access your photos to scan existing bug images"
+        }
+      ],
+      "expo-build-properties",
+      "react-native-health-connect",
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "Allow BugLord to read your step count for Walk Mode",
+          "background": false
+        }
       ]
+    ],
+    "assetBundlePatterns": [
+      "assets/**"
     ],
     "experiments": {
       "typedRoutes": true
@@ -58,7 +136,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "af4e786a-105a-4d73-8ba5-26832e7561ed"
+        "projectId": "2082c807-fe86-4f1f-9c06-e17167de286a"
       }
     }
   }

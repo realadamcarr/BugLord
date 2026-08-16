@@ -1,0 +1,11 @@
+# BugLord ML Training Requirements
+# Install with: pip install -r requirements.txt
+
+# Core ML libraries
+tensorflow>=2.15.0
+numpy>=1.24.0
+pillow>=10.0.0
+
+# Progress and utilities
+tqdm>=4.65.0
+requests>=2.31.0

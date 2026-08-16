@@ -1,170 +1,319 @@
 # 🐛 BugLord
 
-An immersive bug-collecting app built with React Native and Expo. Capture real-world insects with your camera, build your collection, and become the ultimate BugLord! Uses AI-powered identification to discover species, manage your 6-bug party, and level up as you explore the insect kingdom.
+> **Combining Entomology and gamification to make learning about insects and their role in the ecosystem fun and engaging.**
+
+BugLord is a cross-platform mobile app built with **React Native + Expo**. Players use their phone camera to photograph real-world insects, which the app identifies using an on-device AI model. Discovered bugs are added to a personal collection, organized into a 6-bug party, and used to progress through an RPG-style leveling system — rewarding real-world exploration and ecological curiosity.
+
+---
+
+## 📲 Live Demo
+
+A pre-built Android APK is available for immediate testing — no build environment required.
+
+**Download APK:**
+[https://expo.dev/accounts/stackzilla/projects/note-quest/builds/c58d5694-2db5-4d17-af71-4c885d933b44](https://expo.dev/accounts/stackzilla/projects/note-quest/builds/c58d5694-2db5-4d17-af71-4c885d933b44)
+
+> **To install:** Download the APK, transfer to your Android device, and enable *Install from Unknown Sources* in your device settings before installing.
 
 ---
 
 ## ✨ Features
 
-### 📸 Bug Scanning & Identification
-- Real-time camera with targeting reticle for bug capture
-- AI-powered multi-tier identification (iNaturalist → Google Vision → local heuristic)
-- On-device ML inference when TFLite model is available; falls back to API/stub otherwise
-- Photo storage and gallery integration via `expo-media-library`
+### 📸 Bug Photography & AI Identification
+- Real-time camera with a targeting reticle for capturing insects
+- On-device TFLite model identifies species from your photo
+- Confidence scoring and species metadata returned per identification
+- Graceful fallback if identification confidence is below threshold
 
-### 🐛 Collection & Logs
-- **Rarity System**: Common, Uncommon, Rare, Epic, Legendary
-- **Biome Classification**: Forest, Garden, Wetland, Desert, Urban, Mountain, Meadow
-- **Detailed Bug Cards**: Name, species, description, traits, catch location
-- **Persistent Collection**: All discoveries saved with AsyncStorage
+### 🐛 Bug Collection System
+- **Rarity Tiers:** Common → Uncommon → Rare → Epic → Legendary
+- **Biome Classification:** Forest, Garden, Wetland, Desert, Urban, Mountain, Meadow
+- **Detailed Bug Cards:** Species name, description, traits, catch location, and rarity badge
+- **Persistent Storage:** Full collection saved locally with AsyncStorage
 
 ### 🏆 Party Management
-- 6-slot active party lineup
-- Strategic selection and quick swap interface
-- Visual party display on the main hub
+- Maintain an active party of up to **6 bugs**
+- Swap bugs in and out of your lineup strategically
+- Visual party display on the main hub screen
 
-### 🎮 RPG Progression
-- XP & Leveling — earn XP based on bug rarity (10–120 XP per catch)
-- Explorer levels every 100 XP
-- XP progress bars and level displays
+### 🎮 RPG Progression System
+- **XP per catch:** 10 XP (Common) up to 120 XP (Legendary)
+- **Explorer Levels:** Level up every 100 XP
+- **Achievement Milestones:** Track collection progress and exploration goals
+- **Visual Feedback:** XP bars, level-up celebrations, and progress indicators
 
-### 🚶 Walk Mode
-- GPS-driven encounters while walking
-- Step tracking with expo-sensors
-- Biome-aware spawns
-
-### ⚔️ Hive Mode *(planned)*
-- PvE battles using your bug party
-- Item system with loot and buffs
+### 🐝 Hive Mode
+- A cooperative/competitive mode centered around insect ecosystem roles
+- Item system tied to bug types and biomes
+- See `docs/features/HIVE_MODE_README.md` for full details
 
 ---
 
-## 🛠️ Tech Stack
+## 🛠 Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Framework | Expo SDK 54 / React Native 0.81 |
+| Mobile Framework | React Native + Expo (SDK ~52) |
+| Language | TypeScript |
 | Navigation | Expo Router (file-based) |
-| State | React Context + AsyncStorage |
-| Camera | expo-camera |
-| Image Processing | expo-image-manipulator |
-| ML Inference | react-native-fast-tflite (stub until model ships) |
-| Theming | System-driven light/dark via ThemeContext |
+| Styling | NativeWind (Tailwind for RN) |
+| Backend / Auth / DB | Firebase (Firestore, Auth, Functions) |
+| ML / Bug ID | TensorFlow Lite (converted from YOLO) |
+| Animations | React Native Reanimated |
+| Storage (local) | AsyncStorage |
+| Build System | EAS Build (Expo Application Services) |
 
 ---
 
-## 🚀 Setup & Run
+## 📁 Project Structure
+
+```
+BugLord/
+├── app/                        # Screen files (Expo Router)
+│   ├── (tabs)/                 # Tab navigation screens
+│   │   ├── index.tsx           # Main hub / collection view
+│   │   ├── camera.tsx          # Bug capture screen
+│   │   ├── party.tsx           # Party management screen
+│   │   └── _layout.tsx         # Tab bar configuration
+│   └── _layout.tsx             # Root layout / providers
+│
+├── components/                 # Reusable UI components
+│   ├── BugCard.tsx             # Bug display card
+│   ├── PartySlot.tsx           # Party member slot
+│   ├── CameraReticle.tsx       # Camera targeting overlay
+│   └── ui/                     # Generic UI primitives
+│
+├── contexts/                   # React Context providers
+│   └── GameContext.tsx         # Global game state (XP, level, collection)
+│
+├── hooks/                      # Custom React hooks
+│   └── useBugIdentification.ts # ML inference hook
+│
+├── services/                   # External integrations
+│   ├── firebase.ts             # Firebase initialization
+│   ├── firestore.ts            # Firestore read/write helpers
+│   └── bugIdentification.ts   # TFLite model wrapper
+│
+├── models/                     # ML model file(s)
+│   └── bug_detector.tflite    # On-device insect detection model
+│
+├── training/                   # Python scripts for model training
+│   └── (YOLO training pipeline — see docs/ml/)
+│
+├── backend/                    # Firebase Cloud Functions
+│   └── functions/
+│
+├── assets/                     # Static assets
+│   ├── images/                 # App icons, splash screens
+│   └── bugs/                   # Bug artwork and thumbnails
+│
+├── constants/                  # App-wide constants
+│   └── Colors.ts               # Color palette
+│
+├── types/                      # TypeScript type definitions
+│   └── bug.ts                  # Bug, Rarity, Biome interfaces
+│
+├── utils/                      # Utility / helper functions
+│
+├── scripts/                    # Build and utility scripts
+│   ├── build-apk.sh
+│   ├── build-apk.bat
+│   └── download_model.ps1
+│
+├── docs/                       # Extended documentation
+│   ├── ml/                     # ML model guides
+│   ├── features/               # Feature-specific docs
+│   └── build/                  # APK and deployment guides
+│
+├── __tests__/                  # Unit and integration tests
+├── app.json                    # Expo app configuration
+├── eas.json                    # EAS Build profiles
+├── firebase.json               # Firebase project config
+├── firestore.rules             # Firestore security rules
+├── package.json
+└── tsconfig.json
+```
+
+---
+
+## 🚀 Getting Started
+
+> Developing on another computer? Follow the reproducible setup guide in
+> [`docs/development/MACHINE_SETUP.md`](docs/development/MACHINE_SETUP.md).
 
 ### Prerequisites
-- Node.js ≥ 18, npm
-- Expo CLI (`npx expo`)
-- Android Studio (for Android builds) or Xcode (for iOS)
 
-### Install & Start
+Ensure the following are installed before proceeding:
+
+- **Node.js** v18 or higher — [nodejs.org](https://nodejs.org)
+- **npm** v9+ (bundled with Node) or **yarn**
+- **Expo CLI** — `npm install -g expo-cli`
+- **EAS CLI** (for builds) — `npm install -g eas-cli`
+- **Android Studio** (for Android emulator) or **Xcode** (for iOS simulator)
+- A **Firebase project** (see Firebase Setup below)
+
+---
+
+### 1. Clone the Repository
+
 ```bash
-git clone https://github.com/yourusername/buglord.git
-cd buglord
+git clone https://github.com/realadamcarr/BugLord.git
+cd BugLord
+```
+
+---
+
+### 2. Install Dependencies
+
+```bash
 npm install
-npm start          # press 'a' for Android, 'w' for web
-```
-
-### Run on Device
-```bash
-npm run android    # Android emulator / device
-npm run web        # Web browser
 ```
 
 ---
 
-## 📦 Build Notes (EAS)
+### 3. Firebase Setup
 
-Cloud builds are recommended:
+BugLord uses Firebase for authentication, Firestore database, and Cloud Functions.
+
+#### 3a. Create a Firebase Project
+
+1. Go to [console.firebase.google.com](https://console.firebase.google.com)
+2. Click **Add project** and follow the prompts
+3. Enable **Authentication** → Sign-in method → Email/Password (and any others you want)
+4. Enable **Cloud Firestore** in production or test mode
+5. Enable **Cloud Functions** if using the backend module
+
+#### 3b. Register Your App
+
+- In the Firebase console, click **Add app** → iOS and/or Android
+- For Android: enter the package name from `app.json` (`com.stackzilla.buglord` or similar)
+- For iOS: enter the bundle ID from `app.json`
+- Download the config files:
+  - Android → `google-services.json` → place in `/android/app/`
+  - iOS → `GoogleService-Info.plist` → place in `/ios/BugLord/`
+
+#### 3c. Environment Variables
+
+Create a `.env` file in the project root (never commit this file):
+
+```env
+EXPO_PUBLIC_FIREBASE_API_KEY=your_api_key
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+EXPO_PUBLIC_FIREBASE_APP_ID=your_app_id
+```
+
+These values are found in your Firebase project settings under **General → Your apps → SDK setup**.
+
+#### 3d. Deploy Firestore Rules
 
 ```bash
-npm install -g eas-cli
+firebase deploy --only firestore:rules
+```
+
+---
+
+### 4. ML Model Setup
+
+The bug identification model must be present for the camera identification feature to work.
+
+```bash
+# Option A — PowerShell (Windows)
+./download_model.ps1
+
+# Option B — place manually
+# Copy your bug_detector.tflite file into the /models directory
+```
+
+See `docs/ml/ML_INTEGRATION_SUMMARY.md` for full details on the model and `docs/ml/YOLO_TO_TFLITE_CONVERSION.md` for how it was trained and converted.
+
+---
+
+### 5. Run the Development Server
+
+```bash
+npx expo start
+```
+
+This opens the Expo Developer Tools. From here:
+
+- Press **`a`** to launch on an Android emulator
+- Press **`i`** to launch on an iOS simulator
+- Scan the **QR code** with the Expo Go app on a physical device
+
+---
+
+## 📱 Building a Release APK / IPA
+
+BugLord uses **EAS Build** for generating release binaries.
+
+### Android APK (Preview Build)
+
+```bash
+# Login to your Expo account
 eas login
-eas build --platform android --profile preview   # APK for testing
-eas build --platform android --profile production # release build
+
+# Build a preview APK (no signing required)
+eas build --platform android --profile preview
 ```
 
-Local APK (requires Android SDK):
+### iOS (Ad-hoc / TestFlight)
+
 ```bash
-npx expo prebuild --platform android
-cd android && gradlew assembleRelease
+eas build --platform ios --profile preview
 ```
 
-See [APK_BUILD_GUIDE.md](APK_BUILD_GUIDE.md) for detailed instructions.
-
-> **Demo Mode**: In Expo Go, native modules (TFLite, dev-client) are unavailable. The app gracefully falls back to stub/API identification so the full UI flow still works.
+Build profiles are configured in `eas.json`. See `docs/build/APK_BUILD_GUIDE.md` for detailed instructions including local builds.
 
 ---
 
-## 📂 Project Structure
+## 🔒 What's Excluded from the Repository
 
-```
-buglord/
-├── app/                        # Screens (Expo Router file-based)
-│   ├── _layout.tsx             # Root layout + providers
-│   ├── (tabs)/
-│   │   ├── _layout.tsx         # Tab bar config
-│   │   ├── index.tsx           # Capture screen
-│   │   ├── train.tsx           # Train / XP screen
-│   │   └── player.tsx          # Player profile
-│   ├── hivemode.tsx            # Hive Mode screen
-│   ├── inventory.tsx           # Inventory screen
-│   └── walkmode.tsx            # Walk Mode screen
-├── components/                 # Reusable UI components
-│   ├── BugCamera.tsx
-│   ├── BugInfoModal.tsx
-│   ├── ManualCropper.tsx
-│   ├── CollectionScreen.tsx
-│   └── ui/                     # Low-level UI primitives
-├── contexts/                   # React Context providers
-│   ├── BugCollectionContext.tsx # Collection, party, XP state
-│   ├── InventoryContext.tsx     # Item inventory state
-│   └── ThemeContext.tsx         # Light/dark theme
-├── services/                   # Business logic & APIs
-│   ├── BugIdentificationService.ts
-│   ├── ImageProcessingService.ts
-│   ├── WalkModeService.ts
-│   ├── HiveBattleService.ts
-│   └── ml/                     # ML inference pipeline
-│       ├── OnDeviceClassifier.ts
-│       ├── MLPreprocessingService.ts
-│       └── ModelUpdateService.ts
-├── types/                      # TypeScript domain types
-│   ├── Bug.ts
-│   ├── HiveMode.ts
-│   └── Item.ts
-├── constants/                  # Colors, item defs
-├── assets/                     # Images, fonts, sprites, ML labels
-├── app.json                    # Expo config
-├── eas.json                    # EAS build profiles
-└── package.json
-```
+The following are intentionally **not committed** to source control:
+
+| Excluded Item | Reason |
+|---|---|
+| `node_modules/` | Regenerated via `npm install` |
+| `.env` | Contains private API keys |
+| `google-services.json` | Firebase credentials — private |
+| `GoogleService-Info.plist` | Firebase credentials — private |
+| `dist/` | Build output — not source |
+| `*.tflite` (large models) | Binary assets managed separately |
 
 ---
 
-## ⚠️ Known Limitations
+## 🗺 Roadmap
 
-- **TFLite stub mode**: On-device ML returns mock predictions until a trained model is bundled. The full capture → crop → classify UI still works.
-- **ManualCropper**: Simplified crop UI (no drag/pinch gestures yet).
-- **Upload / Model Update services**: Coded and ready but require a backend server to activate.
-- **Expo Go**: Native modules (TFLite, dev-client) are unavailable; the app falls back gracefully.
+- [ ] iNaturalist API integration for extended species data
+- [ ] Social features — compare collections with friends
+- [ ] Augmented Reality bug overlay mode
+- [ ] Expanded Hive Mode multiplayer events
+- [ ] iOS App Store and Google Play release
 
 ---
 
-## 🗺️ Roadmap
+## 🤝 Contributing
 
-- [ ] Train and ship real TFLite insect classification model
-- [ ] Backend for dataset upload and model OTA updates
-- [ ] Full Hive Mode PvE battles with item integration
-- [ ] Walk Mode encounter polish and biome detection
-- [ ] iOS build support and App Store submission
-- [ ] Leaderboards and social features
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Commit your changes: `git commit -m 'Add your feature'`
+4. Push to your branch: `git push origin feature/your-feature`
+5. Open a Pull Request
 
 ---
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE).
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 👥 Team
+
+Built by the BugLord team as part of a software engineering capstone project.
+
+---
+
+*Turn the world around you into a living Pokédex. 🌿🐛*

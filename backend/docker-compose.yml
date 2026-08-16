@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  buglord-api:
+    build: .
+    container_name: buglord-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - CORS_ORIGINS=*
+    # Uncomment below to use a GPU (requires nvidia-docker)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
