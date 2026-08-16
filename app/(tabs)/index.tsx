@@ -9,18 +9,16 @@ import { BUG_SPRITE } from '@/constants/bugSprites';
 import { getProfilePictureSource } from '@/constants/profilePictures';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { predictInsect } from '@/services/BackendPredictionService';
 import { bugIdentificationService } from '@/services/BugIdentificationService';
 import { datasetUploadService } from '@/services/DatasetUploadService';
 import { recordConfirmedLabel } from '@/services/LearningService';
-import { mlPreprocessingService } from '@/services/ml/MLPreprocessingService';
 import { modelUpdateService } from '@/services/ml/ModelUpdateService';
 import { onDeviceClassifier } from '@/services/ml/OnDeviceClassifier';
 import { appendScanLog } from '@/services/ScanLogService';
-import { runBugScanPipeline, ScanResult } from '@/src/features/scanner/scanPipeline';
-import { classifyBugImage, isClassifierReady, loadBugClassifier } from '@/src/ml/bugClassifier';
+import { classificationService } from '@/src/application/classification/createClassificationService';
+import { isClassifierReady, loadBugClassifier } from '@/src/ml/bugClassifier';
 import { GbifSpeciesSuggestion } from '@/src/services/gbifService';
-import { BugPrediction, buildPrediction } from '@/src/types/bugPrediction';
+import { BugPrediction } from '@/src/types/bugPrediction';
 import { Bug, BugIdentificationResult, ConfirmationMethod, IdentificationCandidate, RARITY_CONFIG } from '@/types/Bug';
 import { labelToCategory } from '@/utils/bugCategory';
 import * as ImagePicker from 'expo-image-picker';
@@ -66,7 +64,6 @@ export default function CaptureScreen() {
   const [identifiedBug, setIdentifiedBug] = useState<Bug | null>(null);
   const [selectedRecentBug, setSelectedRecentBug] = useState<Bug | null>(null);
   const [showRecentBugModal, setShowRecentBugModal] = useState(false);
-  const [mlReady, setMlReady] = useState(false);
   const [modelVersion, setModelVersion] = useState<string | null>(null);
   const [scanMode, setScanMode] = useState<ScanMode>('liveScan');
   const [lastPrediction, setLastPrediction] = useState<BugPrediction | null>(null);
@@ -77,7 +74,9 @@ export default function CaptureScreen() {
   const SCAN_MODES: ScanMode[] = ['liveScan', 'gallery'];
   const SCAN_LABELS: Record<ScanMode, string> = { photo: '📷 Photo', liveScan: '🎯 Live Scan', gallery: '🖼️ Gallery' };
   const scanSliderAnim = useSharedValue(0);
-  const scanScaleAnims = SCAN_MODES.map(() => useSharedValue(1));
+  const liveScanScaleAnim = useSharedValue(1);
+  const galleryScaleAnim = useSharedValue(1);
+  const scanScaleAnims = [liveScanScaleAnim, galleryScaleAnim];
   const [scanToggleWidth, setScanToggleWidth] = useState(0);
 
   const styles = createStyles(theme);
@@ -161,7 +160,6 @@ export default function CaptureScreen() {
         await onDeviceClassifier.loadModel(paths.modelPath, paths.labelsPath);
         const version = await modelUpdateService.getCurrentVersion();
         setModelVersion(version);
-        setMlReady(true);
         console.log('✅ ML model loaded from server update:', version || 'bundled');
         return;
       }
@@ -177,7 +175,6 @@ export default function CaptureScreen() {
 
         if (onDeviceClassifier.isUsingRealModel()) {
           setModelVersion('bundled-tflite');
-          setMlReady(true);
           console.log('✅ TFLite model loaded from bundled asset — REAL inference active');
           return;
         }
@@ -221,7 +218,6 @@ export default function CaptureScreen() {
           await onDeviceClassifier.loadModel(modelPath, labelsPath);
           if (onDeviceClassifier.isUsingRealModel()) {
             setModelVersion('bundled-file');
-            setMlReady(true);
             console.log('✅ TFLite model loaded from file path — REAL inference active');
             return;
           }
@@ -246,12 +242,10 @@ export default function CaptureScreen() {
         }
       }
       setModelVersion('labels-only');
-      setMlReady(true);
       console.log('✅ ML ready in labels-only mode (iNaturalist + color analysis will run)');
 
     } catch (error) {
       console.error('❌ Model loading failed completely:', error);
-      setMlReady(false);
     }
   };
 
@@ -347,209 +341,39 @@ export default function CaptureScreen() {
       const analysisPhoto = processedImage.croppedImage || imageToClassify || originalPhoto;
 
       // ── NEW HONEST PIPELINE ────────────────────────────────
-      // Primary path: runBugScanPipeline → offline TFLite classifier + GBIF enrichment.
-      // Falls back to legacy path only when the new classifier isn't loaded.
+      // Provider selection and metadata enrichment are owned by ClassificationService.
 
-      let mlCandidates: any[] = [];
-      let prediction: BugPrediction | null = null;
-      let pipelineGbif: GbifSpeciesSuggestion[] = [];
-
-      // ── PRIORITY 1: FastAPI backend (EVA-02 iNat21 model) ──────────
-      // Skip the backend if we already have a backend-refined result from the
-      // live scan overlay — avoids a second call on the cropped image that
-      // may produce a worse prediction than the one the user already confirmed.
-      let backendHandled = false;
-      let backendFailed = false;
-      let backendSaysNoInsect = false;
-      if (preConfirmedResult?.source === 'backend') {
-        console.log('✅ Using backend-refined live scan result directly:', preConfirmedResult.label);
-        mlCandidates = [{
-          label: preConfirmedResult.label,
-          confidence: preConfirmedResult.confidence,
-          source: 'backend-eva02',
-        }];
-        backendHandled = true;
-      }
-
-      if (!backendHandled) try {
-        console.log('🌐 Trying FastAPI backend prediction…');
-        const backendResult = await predictInsect(analysisPhoto);
-        console.log('🌐 Backend result:', backendResult);
-
-        // Accept any result where the backend returned a real prediction
-        // (confidence > 0 means the model produced a usable output).
-        // Also accept when topPredictions are available — even if the main
-        // prediction was below threshold, the species-level candidates are
-        // far more informative than the 6-class on-device model.
-        //
-        // IMPORTANT: When the backend says "No insect detected" it zeros
-        // out confidence and returns empty topPredictions, so both checks
-        // below will correctly be false and we fall through to local
-        // pipelines.  We also explicitly check the message as a safety net.
-        const noInsectDetected = backendResult.message?.includes('No insect detected');
-        const MIN_CONFIDENCE = 0.15; // Below this the backend is just guessing
-        if (noInsectDetected || backendResult.confidence < MIN_CONFIDENCE) backendSaysNoInsect = true;
-        const hasMainPrediction = backendResult.confidence >= MIN_CONFIDENCE && !noInsectDetected;
-        const hasTopPredictions = !noInsectDetected && backendResult.topPredictions && backendResult.topPredictions.length > 0
-          && backendResult.topPredictions.some(t => t.confidence >= MIN_CONFIDENCE);
-
-        if (hasMainPrediction) {
-            // Prefer common name from iNaturalist, then display label, then species name.
-            const label = backendResult.commonName
-              || backendResult.displayLabel
-              || backendResult.speciesName
-              || 'Unknown Bug';
-            mlCandidates = [{
-              label,
-              confidence: backendResult.confidence,
-              source: 'backend-eva02',
-              category: backendResult.spriteType !== 'unknown-bug' ? backendResult.spriteType as any : undefined,
-            }];
-            backendHandled = true;
-        } else if (hasTopPredictions) {
-            // Main prediction was below threshold, but we still have top-N species.
-            // Use the best one that maps to a BugLord category, or the overall best.
-            const topPreds = backendResult.topPredictions!;
-            const bestMapped = topPreds.find(t => t.mappedBuglordType);
-            const best = bestMapped || topPreds[0];
-            const label = (best as any).commonName
-              || (best.mappedBuglordType
-                ? best.mappedBuglordType.charAt(0).toUpperCase() + best.mappedBuglordType.slice(1)
-                : best.speciesName);
-            mlCandidates = [{
-              label,
-              confidence: best.confidence,
-              source: 'backend-eva02',
-              category: best.mappedBuglordType ?? undefined,
-            }];
-            backendHandled = true;
-            console.log('🌐 Using backend top prediction (main was below threshold):', mlCandidates[0]);
-        }
-
-        // Add runner-up candidates from topPredictions
-        if (backendHandled && hasTopPredictions) {
-            const topPreds = backendResult.topPredictions!;
-            const primaryLabel = mlCandidates[0]?.label;
-            topPreds.slice(0, 5).forEach(t => {
-              const candidateLabel = (t as any).commonName
-                || (t.mappedBuglordType
-                  ? t.mappedBuglordType.charAt(0).toUpperCase() + t.mappedBuglordType.slice(1)
-                  : t.speciesName);
-              if (candidateLabel !== primaryLabel) {
-                mlCandidates.push({
-                  label: candidateLabel,
-                  confidence: t.confidence,
-                  source: 'backend-eva02',
-                  category: t.mappedBuglordType ?? undefined,
-                });
-              }
-            });
-        }
-
-        if (backendHandled) {
-            console.log('✅ Backend identification accepted:', mlCandidates[0]);
+      const preparedImage = {
+        uri: analysisPhoto,
+        originalUri: originalPhoto,
+        cropped: Boolean(processedImage.croppedImage),
+      };
+      const confirmed = preConfirmedResult
+        ? {
+            label: preConfirmedResult.label,
+            confidence: preConfirmedResult.confidence,
+            provider: preConfirmedResult.source === 'backend' ? 'remote' as const : 'local' as const,
           }
-        } catch (backendErr) {
-          console.warn('⚠️ Backend prediction failed, falling back to local pipeline:', backendErr);
-          backendFailed = true;
-        }
+        : undefined;
+      const classification = await classificationService.classify(preparedImage, confirmed);
 
-      if (backendHandled) {
-        // Backend handled it — skip all other pipelines
-      } else if (preConfirmedResult) {
-        console.log('✅ Using pre-confirmed live scan result:', preConfirmedResult);
-        mlCandidates = [{ label: preConfirmedResult.label, confidence: preConfirmedResult.confidence }];
-        // Build a synthetic prediction for the UI
-        prediction = buildPrediction([{ label: preConfirmedResult.label, confidence: preConfirmedResult.confidence }]);
-      } else if (isClassifierReady()) {
-        // ── Run the new honest scan pipeline ──
-        console.log('🔬 Running honest scan pipeline (offline model + GBIF enrichment)…');
-        const scanResult: ScanResult = await runBugScanPipeline(analysisPhoto);
-        prediction = scanResult.prediction;
-        pipelineGbif = scanResult.gbifSuggestions;
-
-        if (prediction.accepted) {
-          // Map the broad class through YOLO_SPECIES_MAP for game-friendly names
-          const mapped = YOLO_SPECIES_MAP[prediction.broadClass] ?? prediction.broadClass;
-          mlCandidates = [{ label: mapped, confidence: prediction.confidence, source: 'offline-model' }];
-          // Also add runner-up classes as lower-priority candidates
-          prediction.scores.slice(1, 5).forEach(s => {
-            const m = YOLO_SPECIES_MAP[s.label] ?? s.label;
-            mlCandidates.push({ label: m, confidence: s.confidence, source: 'offline-model' });
-          });
-        } else {
-          // Model not confident — still provide candidates for manual selection
-          prediction.scores.slice(0, 5).forEach(s => {
-            const m = YOLO_SPECIES_MAP[s.label] ?? s.label;
-            mlCandidates.push({ label: m, confidence: s.confidence, source: 'offline-model' });
-          });
-          if (mlCandidates.length === 0) {
-            mlCandidates = [{ label: 'Unknown Bug', confidence: 0, source: 'manual' }];
-          }
-        }
-      } else {
-        // ── Legacy fallback when new classifier isn't available ──
-        console.log('⚠️ New classifier not ready — falling back to legacy pipeline');
-        const usingRealModel = onDeviceClassifier.isUsingRealModel();
-        console.log(`🔍 ML Debug — mlReady: ${mlReady}, isUsingRealModel: ${usingRealModel}`);
-
-        // Step 1: Run old TFLite on-device classification
-        let tfliteCandidates: any[] = [];
-        if (mlReady && onDeviceClassifier.isReady()) {
-          try {
-            const mlInput = await mlPreprocessingService.preprocessForInference(analysisPhoto, { targetSize: 224, quality: 0.9 });
-            const candidates = await onDeviceClassifier.classifyImage(mlInput, 5);
-            const allStubs = candidates.length > 0 && candidates.every((c: any) => c.source === 'stub');
-            if (!allStubs) tfliteCandidates = candidates;
-          } catch (err) { console.warn('⚠️ TFLite classification failed:', err); }
-        }
-
-        // Step 2: Query iNaturalist as enrichment
-        let iNatCandidates: any[] = [];
-        try {
-          const tfliteTopLabel = tfliteCandidates[0]?.label;
-          if (tfliteTopLabel) {
-            const iNatResult = await bugIdentificationService.identifyWithINaturalistQuery(tfliteTopLabel);
-            if (iNatResult?.candidates?.length) {
-              iNatCandidates = iNatResult.candidates.map((c: any) => ({ label: c.label || c.species, confidence: c.confidence, source: c.source || 'iNaturalist' }));
-            }
-          }
-          if (iNatCandidates.length === 0) {
-            const fullResult = await bugIdentificationService.identify(analysisPhoto);
-            if (fullResult?.candidates?.length) {
-              iNatCandidates = fullResult.candidates.map((c: any) => ({ label: c.label || c.species, confidence: c.confidence, source: c.source || fullResult.provider || 'iNaturalist' }));
-            }
-          }
-        } catch (err) { console.warn('⚠️ iNaturalist failed:', err); }
-
-        // Merge
-        const TFLITE_CONFIDENCE_FLOOR = 0.4;
-        const tfliteTopConf = tfliteCandidates.length > 0 ? Math.max(...tfliteCandidates.map((c: any) => c.confidence)) : 0;
-        if (tfliteCandidates.length > 0 && iNatCandidates.length > 0) {
-          if (tfliteTopConf >= TFLITE_CONFIDENCE_FLOOR) {
-            const seenLabels = new Set(tfliteCandidates.map((c: any) => c.label));
-            mlCandidates = [...tfliteCandidates, ...iNatCandidates.filter((c: any) => !seenLabels.has(c.label))].slice(0, 10);
-          } else {
-            const seenLabels = new Set(iNatCandidates.map((c: any) => c.label));
-            mlCandidates = [...iNatCandidates, ...tfliteCandidates.filter((c: any) => !seenLabels.has(c.label))].slice(0, 10);
-          }
-        } else if (tfliteCandidates.length > 0) { mlCandidates = tfliteCandidates; }
-        else if (iNatCandidates.length > 0) { mlCandidates = iNatCandidates; }
-        if (mlCandidates.length === 0) mlCandidates = [{ label: 'Unknown Bug', confidence: 0, source: 'manual' }];
-      }
-
-      // Reject results when every candidate came from a stub/fallback source
-      // (i.e. no real model or API produced a confident identification).
-      // Real sources: 'backend-eva02', 'offline-model', 'iNaturalist', 'tflite'
-      // Also reject when the backend explicitly said "No insect detected" —
-      // the 6-class offline model can't distinguish "not a bug" so trust the backend.
-      const REAL_SOURCES = new Set(['backend-eva02', 'offline-model', 'iNaturalist', 'tflite']);
-      const hasRealResult = mlCandidates.some(c => REAL_SOURCES.has(c.source));
-      if (!hasRealResult || backendSaysNoInsect) {
+      if (classification.status !== 'classified' || !classification.result) {
         throw new Error('STUB_FALLBACK');
       }
 
-      // Store pipeline results for BugInfoModal
+      const mlCandidates = classification.result.rankedPredictions.map((candidate) => ({
+        label: candidate.displayLabel,
+        confidence: candidate.confidence,
+        source: classification.result!.provider,
+        category: candidate.category ?? undefined,
+      }));
+      const prediction = classification.prediction;
+      const pipelineGbif = classification.metadataSuggestions;
+
+      if (mlCandidates.length === 0) {
+        throw new Error('STUB_FALLBACK');
+      }
+
       setLastPrediction(prediction);
       setLastGbifSuggestions(pipelineGbif);
 
@@ -781,79 +605,20 @@ export default function CaptureScreen() {
    *  Priority: Backend (EVA-02 + iNat) → local on-device model → Unknown.
    *  Returns null ONLY when nothing at all is ready yet. */
   const handleClassifyPhoto = useCallback(async (photoUri: string): Promise<{ label: string; confidence: number; source: 'local' | 'backend' } | null> => {
-    console.log('🔍 handleClassifyPhoto — calling backend for species-level ID…');
+    const outcome = await classificationService.classifyLive({
+      uri: photoUri,
+      originalUri: photoUri,
+      cropped: false,
+    });
 
-    // 1. Backend (EVA-02 iNat21 model) — preferred path
-    try {
-      const backendResult = await predictInsect(photoUri);
-      const noInsect = backendResult.message?.includes('No insect detected');
-      const MIN_BACKEND_CONFIDENCE = 0.15; // Reject very low-confidence guesses (walls, non-bugs)
-      if (backendResult.confidence >= MIN_BACKEND_CONFIDENCE && !noInsect) {
-        const label = backendResult.commonName
-          || backendResult.displayLabel
-          || backendResult.speciesName
-          || null;
-        if (label) {
-          console.log(`✅ Backend live scan: "${label}" (${Math.round(backendResult.confidence * 100)}%)`);
-          return { label, confidence: backendResult.confidence, source: 'backend' };
-        }
-      }
-      // Check top predictions as fallback
-      if (!noInsect && backendResult.topPredictions?.length) {
-        const best = backendResult.topPredictions.find(t => t.mappedBuglordType) || backendResult.topPredictions[0];
-        if (best.confidence >= MIN_BACKEND_CONFIDENCE) {
-          const label = (best as any).commonName
-            || (best.mappedBuglordType
-              ? best.mappedBuglordType.charAt(0).toUpperCase() + best.mappedBuglordType.slice(1)
-              : best.speciesName);
-          if (label) {
-            console.log(`✅ Backend live scan (top prediction): "${label}" (${Math.round(best.confidence * 100)}%)`);
-            return { label, confidence: best.confidence, source: 'backend' };
-          }
-        }
-      }
-      // Backend responded but no confident prediction — treat as "no bug"
-      if (noInsect || backendResult.confidence < MIN_BACKEND_CONFIDENCE) {
-        console.log('🚫 Backend: no confident bug detection, skipping local fallback');
-        return null;
-      }
-    } catch (err) {
-      console.warn('⚠️ Backend live scan failed, falling back to local model:', err);
-    }
+    if (outcome.status !== 'classified' || !outcome.result) return null;
 
-    // 2. Local on-device classifier fallback
-    if (isClassifierReady()) {
-      try {
-        const scores = await classifyBugImage(photoUri);
-        if (scores.length > 0) {
-          const mapped = YOLO_SPECIES_MAP[scores[0].label] ?? scores[0].label;
-          return { label: mapped, confidence: scores[0].confidence, source: 'local' };
-        }
-      } catch (err) {
-        console.warn('Local classifier live scan error:', err);
-      }
-    }
-
-    // 3. Legacy TFLite fallback
-    if (mlReady && onDeviceClassifier.isReady() && onDeviceClassifier.isUsingRealModel()) {
-      try {
-        const mlInput = await mlPreprocessingService.preprocessForInference(photoUri, {
-          targetSize: 224,
-          quality: 0.7,
-        });
-        const candidates = await onDeviceClassifier.classifyImage(mlInput, 3);
-        const real = candidates.filter((c: any) => c.source !== 'stub');
-        if (real.length > 0 && real[0].label) {
-          const mappedLabel = YOLO_SPECIES_MAP[real[0].label] ?? real[0].label;
-          return { label: mappedLabel, confidence: real[0].confidence, source: 'local' };
-        }
-      } catch (err) {
-        console.warn('TFLite live scan error:', err);
-      }
-    }
-
-    return { label: 'Unknown Bug', confidence: 0.15, source: 'local' };
-  }, [mlReady]);
+    return {
+      label: outcome.result.displayLabel,
+      confidence: outcome.result.confidence,
+      source: outcome.result.provider === 'remote' ? 'backend' : 'local',
+    };
+  }, []);
 
   /** Called when user taps "Capture!" after live scan lock */
   const handleLiveScanConfirm = async (photoUri: string, label: string, confidence: number, source: 'local' | 'backend' = 'local') => {

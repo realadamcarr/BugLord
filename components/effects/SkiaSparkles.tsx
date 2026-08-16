@@ -49,7 +49,22 @@ export const SkiaSparkles: React.FC<SkiaSparklesProps> = ({
 }) => {
   if (!SkiaCanvas || !SkiaCircle || !reanimated || Platform.OS === 'web') return null;
 
-  const { useSharedValue, useDerivedValue, withRepeat, withTiming, Easing } = reanimated;
+  return (
+    <AvailableSkiaSparkles
+      width={width}
+      height={height}
+      count={count}
+      colors={colors}
+      style={style}
+    />
+  );
+};
+
+const AvailableSkiaSparkles: React.FC<
+  Required<Pick<SkiaSparklesProps, 'width' | 'height' | 'count' | 'colors'>> &
+  Pick<SkiaSparklesProps, 'style'>
+> = ({ width, height, count, colors, style }) => {
+  const { useSharedValue, withRepeat, withTiming, Easing } = reanimated;
 
   const tick = useSharedValue(0);
 
@@ -95,7 +110,6 @@ function SparkleParticle({
   tick: { value: number };
   height: number;
 }) {
-  if (!reanimated || !SkiaCircle) return null;
   const { useDerivedValue } = reanimated;
 
   const cy = useDerivedValue(() => {

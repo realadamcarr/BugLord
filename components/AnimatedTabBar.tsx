@@ -53,21 +53,6 @@ export function AnimatedTabBar({ state, descriptors, navigation }: Readonly<Bott
   }));
 
   // ── Per-tab scale animations ──────────────────────────────────────────
-  const scales = state.routes.map(() => useSharedValue(1));
-
-  const animatePress = useCallback((index: number) => {
-    scales[index].value = withSequence(
-      withSpring(0.8, { damping: 15, stiffness: 400 }),
-      withSpring(1.15, { damping: 10, stiffness: 300 }),
-      withSpring(1, { damping: 12, stiffness: 250 }),
-    );
-  }, [scales]);
-
-  // When the active tab changes externally, play the scale animation
-  useEffect(() => {
-    animatePress(state.index);
-  }, [state.index]);
-
   const defaultPad = Platform.OS === 'ios' ? 20 : 6;
   const bottomPad = insets.bottom > 0 ? insets.bottom : defaultPad;
 
@@ -129,7 +114,6 @@ export function AnimatedTabBar({ state, descriptors, navigation }: Readonly<Bott
             navigation.navigate(route.name, route.params);
           }
 
-          animatePress(index);
         };
 
         const onLongPress = () => {
@@ -142,7 +126,6 @@ export function AnimatedTabBar({ state, descriptors, navigation }: Readonly<Bott
         return (
           <TabItem
             key={route.key}
-            scale={scales[index]}
             icon={icon}
             label={label}
             color={color}
@@ -159,7 +142,6 @@ export function AnimatedTabBar({ state, descriptors, navigation }: Readonly<Bott
 
 /** Individual tab — extracted so each can use its own useAnimatedStyle */
 function TabItem({
-  scale,
   icon,
   label,
   color,
@@ -168,7 +150,6 @@ function TabItem({
   onLongPress,
   accessibilityLabel,
 }: {
-  scale: import('react-native-reanimated').SharedValue<number>;
   icon: React.ReactNode;
   label: string;
   color: string;
@@ -177,6 +158,25 @@ function TabItem({
   onLongPress: () => void;
   accessibilityLabel?: string;
 }) {
+  const scale = useSharedValue(1);
+
+  const animatePress = useCallback(() => {
+    scale.value = withSequence(
+      withSpring(0.8, { damping: 15, stiffness: 400 }),
+      withSpring(1.15, { damping: 10, stiffness: 300 }),
+      withSpring(1, { damping: 12, stiffness: 250 }),
+    );
+  }, [scale]);
+
+  useEffect(() => {
+    if (isFocused) animatePress();
+  }, [isFocused]);
+
+  const handlePress = () => {
+    onPress();
+    animatePress();
+  };
+
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
@@ -186,7 +186,7 @@ function TabItem({
       accessibilityRole="button"
       accessibilityState={isFocused ? { selected: true } : {}}
       accessibilityLabel={accessibilityLabel}
-      onPress={onPress}
+      onPress={handlePress}
       onLongPress={onLongPress}
       activeOpacity={0.7}
       style={styles.tab}

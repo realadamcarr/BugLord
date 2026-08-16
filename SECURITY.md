@@ -18,16 +18,21 @@ These patterns are already listed in `.gitignore`.
 
 ### Local Development
 - Keep keystores and key files **outside** the repo (e.g., `~/.android/keystores/`).
-- Use a `.env` file (git-ignored) for API keys and reference them via `expo-constants` or `process.env`.
+- Use `.env` only for public mobile configuration documented in `.env.example`.
+- Treat every `EXPO_PUBLIC_*` value as bundled and readable by app users.
+- Keep passwords, OAuth client secrets, reusable tokens, and service-account
+  credentials in server-side secret storage, never in the React Native environment.
 
 ### CI / Cloud Builds (EAS)
 - Store signing credentials with **EAS Credentials** (`eas credentials`).
-- Add environment variables in the Expo dashboard under **Project → Secrets**.
-- Reference secrets in `eas.json` via `%VARIABLE_NAME%` or in your app via `expo-constants`.
+- EAS environment variables referenced by client code are not private after
+  compilation. Use them only for public client configuration.
+- Store server-only application secrets in Firebase Functions Secret Manager
+  or the backend host environment.
 
 ```bash
-# Example: set an EAS secret
-eas secret:create --name GOOGLE_VISION_API_KEY --value "your-key-here"
+# Example: configure a server-only Firebase Functions secret
+firebase functions:secrets:set SERVER_ONLY_SECRET
 ```
 
 ### Android Keystore

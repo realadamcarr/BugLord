@@ -67,7 +67,6 @@ export const RarityBadge: React.FC<RarityBadgeProps> = ({
 };
 
 const styles = StyleSheet.create({
-const styles = StyleSheet.create({
   wrapper: {
     alignSelf: 'flex-start',
   },

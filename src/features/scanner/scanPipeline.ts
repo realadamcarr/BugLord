@@ -41,6 +41,7 @@ export interface ScanResult {
  * @param photoUri  Local URI (file://, content://) of the image to scan.
  * @returns A {@link ScanResult} the UI can render directly.
  */
+/** @deprecated Use ClassificationService through createClassificationService. */
 export async function runBugScanPipeline(photoUri: string): Promise<ScanResult> {
   const t0 = Date.now();
 

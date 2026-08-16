@@ -36,7 +36,7 @@ export default function InventoryScreen() {
     loading,
     addItem,
     removeItem,
-    useItem,
+    useItem: consumeItem,
     getItemQuantity,
     clearInventory,
   } = useInventory();
@@ -91,7 +91,7 @@ export default function InventoryScreen() {
   const handleUseItem = async (targetBug: Bug) => {
     if (!selectedItem) return;
 
-    const result = await useItem(selectedItem.id, targetBug);
+    const result = await consumeItem(selectedItem.id, targetBug);
 
     if (result.success) {
       const maxHp = targetBug.maxHp || targetBug.maxXp;

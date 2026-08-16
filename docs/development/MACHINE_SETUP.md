@@ -41,6 +41,15 @@ Values whose names start with `EXPO_PUBLIC_` are compiled into the mobile
 application. They must never contain an account password or a private OAuth
 client secret.
 
+BugLord's iNaturalist integration uses public, read-only API endpoints for
+taxa, observations, and species-count metadata. It does not require an
+iNaturalist application secret, account email, account password, OAuth token,
+or JWT in the mobile environment. Do not add `EXPO_PUBLIC_INAT_*` credentials.
+
+If a future feature needs authenticated iNaturalist write access, keep its
+client secret on Firebase Functions or the backend host and implement explicit
+user OAuth. Store any user token in platform secure storage, not AsyncStorage.
+
 ## 4. Install the Python backend
 
 ```powershell

@@ -42,7 +42,7 @@ export class HiveBattleService {
       attack: Math.floor(10 + bug.level * 2), // Simple attack calculation
       sprite: bug.pixelArt || bug.photo,
       isEnemy: false,
-    };
+    } as BattleBug;
   }
 
   // Create enemy bug for a round

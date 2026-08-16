@@ -12,6 +12,7 @@ import { InventoryProvider } from '@/contexts/InventoryContext';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { restoreBackgroundStepTrackingIfNeeded } from '@/services/BackgroundStepTracking';
+import { purgeLegacyINatCredentials } from '@/services/SensitiveCredentialCleanup';
 import { walkModeService } from '@/services/WalkModeService';
 import { bugLordDarkPaperTheme, bugLordLightPaperTheme } from '@/theme/paperTheme';
 
@@ -42,6 +43,12 @@ export default function RootLayout() {
 
   useEffect(() => {
     (async () => {
+      try {
+        await purgeLegacyINatCredentials();
+      } catch (err) {
+        console.warn('Legacy iNaturalist credential cleanup skipped:', err);
+      }
+
       try {
         await walkModeService.initialize();
       } catch (err) {

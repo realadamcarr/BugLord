@@ -34,9 +34,9 @@ interface BugInfoModalProps {
   onRescan?: () => void;
   isNewCatch?: boolean;
   candidates?: IdentificationCandidate[];
-  /** Honest offline-model prediction from scanPipeline. */
+  /** Honest offline-model prediction from the classification boundary. */
   prediction?: BugPrediction | null;
-  /** GBIF enrichment results from scanPipeline. */
+  /** GBIF enrichment results from the classification metadata provider. */
   scanGbifSuggestions?: GbifSpeciesSuggestion[];
 }
 
@@ -77,7 +77,7 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
   }, [bug, isNewCatch, visible]);
 
   // Fetch GBIF real-world species suggestions when modal opens
-  // Only runs as fallback when scanPipeline didn't provide suggestions.
+  // Only runs as fallback when the classification service provided no suggestions.
   useEffect(() => {
     if (!visible || !bug) {
       setGbifSuggestions(prev => (prev.length === 0 ? prev : []));
@@ -495,7 +495,7 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
                     <>
                       <ThemedText style={styles.sectionTitle}>Local BugLord Scan</ThemedText>
                       <ThemedText style={{ fontSize: 13, marginBottom: 4 }}>
-                        Couldn't confidently identify this bug.
+                        Couldn&apos;t confidently identify this bug.
                       </ThemedText>
                       <ThemedText style={{ fontSize: 12, marginBottom: 6, color: theme.colors.textSecondary }}>
                         Try a closer photo, better lighting, or a simpler background.
@@ -592,7 +592,7 @@ export const BugInfoModal: React.FC<BugInfoModalProps> = ({
               </View>
               <ThemedText style={styles.sectionTitle}>🌍 Possible Real-World Species</ThemedText>
               <ThemedText style={{ fontSize: 11, color: theme.colors.textSecondary, marginBottom: 8 }}>
-                These species from the GBIF database match the broad class "{prediction?.broadClass ?? bug?.category ?? '?'}". 
+                These species from the GBIF database match the broad class &quot;{prediction?.broadClass ?? bug?.category ?? '?'}&quot;.
                 GBIF did NOT identify your photo — it only provides taxonomy context.
               </ThemedText>
               {gbifLoading ? (
