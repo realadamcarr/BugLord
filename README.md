@@ -138,6 +138,9 @@ BugLord/
 
 ## 🚀 Getting Started
 
+> Developing on another computer? Follow the reproducible setup guide in
+> [`docs/development/MACHINE_SETUP.md`](docs/development/MACHINE_SETUP.md).
+
 ### Prerequisites
 
 Ensure the following are installed before proceeding:

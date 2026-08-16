@@ -29,9 +29,20 @@ android/local.properties
 # --------------------
 # ML / Training (CRITICAL)
 # --------------------
-training/
-**/training/**
-!training/yolov5_insect_train.py
+# Training source and documentation are versioned. Large datasets,
+# environments, downloaded upstream repos, and generated outputs are not.
+training/.venv*/
+training/venv/
+training/dataset*/
+training/models*/
+training/pre_trained/
+training/phone test images/
+training/*.zip
+training/*output*.log
+
+# TensorFlow Models is an optional external checkout. See
+# docs/development/MACHINE_SETUP.md for the pinned revision.
+/models/
 data/
 !backend/data/
 dataset/
@@ -66,6 +77,7 @@ datasets/**/*.webp
 # But allow the bundled app model & labels used at runtime
 !assets/ml/model.tflite
 !assets/ml/labels.json
+!assets/ml/labels.txt
 
 # Training outputs
 runs/
