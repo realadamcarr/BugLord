@@ -1033,7 +1033,7 @@ The immediate focus is the **BugLord commercial classification pipeline**.
 * [x] Establish the baseline training experiment.
 * [x] [REVIEW] Finalise BugDex taxonomy v0.1.
 * [x] [REVIEW] Complete BIOSCAN-5M commercial rights review.
-* [ ] [AUTO] Build the BIOSCAN v0.1 dataset acquisition and preparation pipeline.
+* [x] [AUTO] Build the BIOSCAN v0.1 dataset acquisition and preparation pipeline.
 * [ ] [REVIEW]Train and evaluate the first BugLord-owned classifier.
 
 Development should remain focused on this milestone before beginning unrelated BugLord 2.0 feature work.
