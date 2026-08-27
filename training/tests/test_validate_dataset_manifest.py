@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -55,6 +57,8 @@ class ValidateManifestTests(unittest.TestCase):
     def test_rejects_each_required_intake_gate_violation(self) -> None:
         cases = {
             "missing review evidence": ("rightsReviewer", None),
+            "missing review timestamp": ("rightsReviewedAt", None),
+            "commercial use not verified": ("commercialMlUseVerified", False),
             "non-approved status": ("rightsReviewStatus", "pending"),
             "invalid hash": ("sha256", "not-a-sha256"),
             "iNaturalist origin": ("originContainsINaturalistData", True),
@@ -69,13 +73,66 @@ class ValidateManifestTests(unittest.TestCase):
                     record[field] = value
                 self.assertTrue(validate_manifest([record], self.schema))
 
+    def test_reports_nested_locations_in_deterministic_order(self) -> None:
+        record = copy.deepcopy(APPROVED_RECORD)
+        record["retrievedAt"] = "not-a-timestamp"
+        record["sha256"] = "not-a-sha256"
+
+        self.assertEqual(
+            validate_manifest([record], self.schema),
+            [
+                "$[0].retrievedAt: 'not-a-timestamp' is not a 'date-time'",
+                "$[0].sha256: 'not-a-sha256' does not match "
+                "'^[a-fA-F0-9]{64}$'",
+            ],
+        )
+
+    def test_rejects_unknown_manifest_fields(self) -> None:
+        record = copy.deepcopy(APPROVED_RECORD)
+        record["unreviewedMetadata"] = "must not silently pass"
+
+        violations = validate_manifest([record], self.schema)
+
+        self.assertEqual(len(violations), 1)
+        self.assertIn("Additional properties are not allowed", violations[0])
+
+    def test_cli_returns_success_for_valid_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest_path = Path(directory) / "manifest.json"
+            manifest_path.write_text(json.dumps([APPROVED_RECORD]), encoding="utf-8")
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main([str(manifest_path)])
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("Manifest is valid", stdout.getvalue())
+
     def test_cli_returns_failure_for_invalid_manifest(self) -> None:
         record = copy.deepcopy(APPROVED_RECORD)
         record["originContainsINaturalistData"] = True
         with tempfile.TemporaryDirectory() as directory:
             manifest_path = Path(directory) / "manifest.json"
             manifest_path.write_text(json.dumps([record]), encoding="utf-8")
-            self.assertEqual(main([str(manifest_path)]), 1)
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stderr(stderr):
+                exit_code = main([str(manifest_path)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("$[0].originContainsINaturalistData", stderr.getvalue())
+
+    def test_cli_returns_input_error_for_malformed_json(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest_path = Path(directory) / "manifest.json"
+            manifest_path.write_text("{not valid JSON", encoding="utf-8")
+            stderr = io.StringIO()
+
+            with contextlib.redirect_stderr(stderr):
+                exit_code = main([str(manifest_path)])
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn("Manifest validation could not run", stderr.getvalue())
 
 
 if __name__ == "__main__":
