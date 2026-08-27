@@ -1031,7 +1031,7 @@ The immediate focus is the **BugLord commercial classification pipeline**.
 * [x] Identify commercially compatible insect datasets.
 * [x] Establish the first dataset version.
 * [x] Establish the baseline training experiment.
-* [ ] [REVIEW] Finalise BugDex taxonomy v0.1.
+* [x] [REVIEW] Finalise BugDex taxonomy v0.1.
 * [ ] [REVIEW] Complete BIOSCAN-5M commercial rights review.
 * [ ] Train and evaluate the first BugLord-owned classifier.
 

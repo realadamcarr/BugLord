@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://buglord.app/schemas/bugdex-taxonomy.schema.json",
+  "title": "BugLord BugDex taxonomy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["taxonomyVersion", "canonicalRankOrder", "resolutionPolicy", "taxa"],
+  "properties": {
+    "taxonomyVersion": { "const": "buglord-taxonomy-v0.1.0" },
+    "canonicalRankOrder": { "const": ["family", "genus", "species"] },
+    "resolutionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "subspecies", "synonyms", "speciesUnlock", "genusFallback", "unknownFallback", "confidenceThresholds"],
+      "properties": {
+        "strategy": { "const": "species-first" },
+        "subspecies": { "const": "collapse-to-species" },
+        "synonyms": { "const": "resolve-to-one-canonical-accepted-species" },
+        "speciesUnlock": { "const": "accepted-confident-species-only" },
+        "genusFallback": { "const": "display-only-no-species-unlock" },
+        "unknownFallback": { "const": "unknown-or-unsupported-no-unlock" },
+        "confidenceThresholds": { "const": "external-versioned-configuration" }
+      }
+    },
+    "taxa": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/taxon" }
+    }
+  },
+  "$defs": {
+    "sourceIdentifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "identifier"],
+      "properties": {
+        "authority": { "type": "string", "minLength": 1 },
+        "identifier": { "type": "string", "minLength": 1 }
+      }
+    },
+    "taxon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["canonicalId", "rank", "scientificName", "parentCanonicalId", "acceptedCanonicalId", "sourceIdentifiers"],
+      "properties": {
+        "canonicalId": { "type": "string", "pattern": "^buglord:taxon:[a-z0-9][a-z0-9._-]*$" },
+        "rank": { "enum": ["family", "genus", "species", "synonym"] },
+        "scientificName": { "type": "string", "minLength": 1 },
+        "parentCanonicalId": { "type": ["string", "null"] },
+        "acceptedCanonicalId": { "type": ["string", "null"] },
+        "sourceIdentifiers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sourceIdentifier" }
+        }
+      }
+    }
+  }
+}

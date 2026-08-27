@@ -1,0 +1,14 @@
+{
+  "taxonomyVersion": "buglord-taxonomy-v0.1.0",
+  "canonicalRankOrder": ["family", "genus", "species"],
+  "resolutionPolicy": {
+    "strategy": "species-first",
+    "subspecies": "collapse-to-species",
+    "synonyms": "resolve-to-one-canonical-accepted-species",
+    "speciesUnlock": "accepted-confident-species-only",
+    "genusFallback": "display-only-no-species-unlock",
+    "unknownFallback": "unknown-or-unsupported-no-unlock",
+    "confidenceThresholds": "external-versioned-configuration"
+  },
+  "taxa": []
+}
