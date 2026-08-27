@@ -1024,7 +1024,7 @@ The immediate focus is the **BugLord commercial classification pipeline**.
 
 ### Next tasks
 
-* [ ] Restore/create `docs/ml/BUGLORD_ML_V2_SPEC.md`.
+* [x] Restore/create `docs/ml/BUGLORD_ML_V2_SPEC.md`.
 * [ ] Restore/create `training/schemas/commercial_dataset_manifest.schema.json`.
 * [ ] Implement dataset manifest validation.
 * [ ] Add manifest validator tests.
