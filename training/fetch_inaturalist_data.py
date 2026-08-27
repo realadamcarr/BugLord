@@ -1,6 +1,11 @@
 """
 iNaturalist Data Fetcher for BugLord ML Training
 
+NON-COMMERCIAL / LEGACY: Historical FYP research tooling only. Current
+iNaturalist Terms prohibit using iNaturalist data to train commercial AI/ML
+systems. Do not use this script or its outputs in the BugLord commercial ML
+pipeline. It is retained only to preserve project history.
+
 This script fetches insect observation data from iNaturalist API and downloads
 images organized by species for training a custom insect classifier.
 

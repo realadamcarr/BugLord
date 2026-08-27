@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://buglord.app/schemas/commercial-dataset-manifest.schema.json",
+  "title": "BugLord Commercial ML Dataset Manifest",
+  "description": "One traceable rights and taxonomy record per source image. Validation does not replace legal review.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "internalImageId",
+      "source",
+      "sourceIdentifier",
+      "creator",
+      "license",
+      "licenseUrl",
+      "licenseVersion",
+      "attributionText",
+      "retrievedAt",
+      "taxonLabel",
+      "taxonomicId",
+      "split",
+      "sha256",
+      "commercialMlUseVerified",
+      "rightsReviewStatus",
+      "originContainsINaturalistData",
+      "notes"
+    ],
+    "properties": {
+      "internalImageId": { "type": "string", "minLength": 1 },
+      "source": { "type": "string", "minLength": 1 },
+      "sourceIdentifier": {
+        "description": "Canonical source URL or stable source ID.",
+        "type": "string",
+        "minLength": 1
+      },
+      "creator": { "type": ["string", "null"] },
+      "license": { "type": ["string", "null"] },
+      "licenseUrl": { "type": ["string", "null"], "format": "uri" },
+      "licenseVersion": { "type": ["string", "null"] },
+      "attributionText": { "type": ["string", "null"] },
+      "retrievedAt": { "type": "string", "format": "date-time" },
+      "taxonLabel": { "type": "string", "minLength": 1 },
+      "taxonomicId": { "type": ["string", "null"] },
+      "split": { "enum": ["train", "validation", "test", "benchmark", "quarantine"] },
+      "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+      "perceptualHash": { "type": ["string", "null"] },
+      "observationGroupId": { "type": ["string", "null"] },
+      "photographerBurstId": { "type": ["string", "null"] },
+      "parentImageId": { "type": ["string", "null"] },
+      "commercialMlUseVerified": { "type": "boolean", "const": true },
+      "rightsReviewStatus": { "const": "approved" },
+      "rightsReviewer": { "type": "string", "minLength": 1 },
+      "rightsReviewedAt": { "type": "string", "format": "date-time" },
+      "originContainsINaturalistData": {
+        "description": "Must remain false, including when an aggregator supplied the file.",
+        "type": "boolean",
+        "const": false
+      },
+      "notes": { "type": "string" }
+    },
+    "allOf": [
+      {
+        "if": { "properties": { "rightsReviewStatus": { "const": "approved" } } },
+        "then": { "required": ["rightsReviewer", "rightsReviewedAt"] }
+      }
+    ]
+  }
+}

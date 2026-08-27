@@ -1,6 +1,11 @@
 """
 iNaturalist Data Fetcher for Object Detection Training
 
+NON-COMMERCIAL / LEGACY: Historical FYP research tooling only. Current
+iNaturalist Terms prohibit using iNaturalist data to train commercial AI/ML
+systems. Do not use this script or its outputs in the BugLord commercial ML
+pipeline. It is retained only to preserve project history.
+
 Fetches insect images with bounding box annotations in COCO format
 for training BugLord's object detection model.
 
