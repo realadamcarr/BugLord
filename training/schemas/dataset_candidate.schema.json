@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://buglord.app/schemas/dataset-candidate.schema.json",
+  "title": "BugLord quarantined dataset candidate",
+  "description": "A reproducible proposal for a dataset that is not approved for acquisition or training.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["datasetVersion", "status", "source", "taxonomy", "splits", "rights", "controls"],
+  "properties": {
+    "datasetVersion": { "type": "string", "pattern": "^[a-z0-9-]+-v[0-9]+\\.[0-9]+\\.[0-9]+-candidate$" },
+    "status": { "const": "commercial-quarantine" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "canonicalUrl", "upstreamVersion", "imagePackage", "imagePackageChecksum", "retrievedAt"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "canonicalUrl": { "type": "string", "format": "uri" },
+        "upstreamVersion": { "type": ["string", "null"] },
+        "imagePackage": { "type": "string", "minLength": 1 },
+        "imagePackageChecksum": { "type": ["string", "null"], "pattern": "^[a-fA-F0-9]{64}$" },
+        "retrievedAt": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "taxonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "authority", "targetRank", "sourceFields", "preserveSourceLabels", "bugLordRemapping"],
+      "properties": {
+        "status": { "const": "provisional-candidate" },
+        "authority": { "const": "BIOSCAN-5M source taxonomy" },
+        "targetRank": { "const": "species" },
+        "sourceFields": {
+          "const": ["phylum", "class", "order", "family", "subfamily", "genus", "species", "taxon"]
+        },
+        "preserveSourceLabels": { "const": true },
+        "bugLordRemapping": { "const": null }
+      }
+    },
+    "splits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "sourceField", "preserveSourceAssignments", "values"],
+      "properties": {
+        "strategy": { "const": "upstream-official" },
+        "sourceField": { "const": "split" },
+        "preserveSourceAssignments": { "const": true },
+        "values": {
+          "const": ["train", "val", "test", "key_unseen", "val_unseen", "test_unseen", "other_heldout", "pretrain"]
+        }
+      }
+    },
+    "rights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewStatus", "license", "licenseVersion", "licenseUrl", "copyrightHolder", "attributionRequired", "pendingReview"],
+      "properties": {
+        "reviewStatus": { "const": "pending-human-review" },
+        "license": { "const": "Creative Commons Attribution 3.0 Unported" },
+        "licenseVersion": { "const": "3.0" },
+        "licenseUrl": { "const": "https://creativecommons.org/licenses/by/3.0/" },
+        "copyrightHolder": { "const": "CBG Photography Group" },
+        "attributionRequired": { "const": true },
+        "pendingReview": {
+          "const": ["database-rights", "source-terms", "attribution-implementation", "trained-weight-treatment"]
+        }
+      }
+    },
+    "controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["downloadAuthorized", "trainingAuthorized", "approvedManifestRequiredBeforePromotion"],
+      "properties": {
+        "downloadAuthorized": { "const": false },
+        "trainingAuthorized": { "const": false },
+        "approvedManifestRequiredBeforePromotion": { "const": true }
+      }
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "datasetVersion": "buglord-bioscan-v0.1.0-candidate",
+  "status": "commercial-quarantine",
+  "source": {
+    "name": "BIOSCAN-5M",
+    "canonicalUrl": "https://github.com/bioscan-ml/BIOSCAN-5M",
+    "upstreamVersion": null,
+    "imagePackage": "BIOSCAN_5M_original_full",
+    "imagePackageChecksum": null,
+    "retrievedAt": null
+  },
+  "taxonomy": {
+    "status": "provisional-candidate",
+    "authority": "BIOSCAN-5M source taxonomy",
+    "targetRank": "species",
+    "sourceFields": ["phylum", "class", "order", "family", "subfamily", "genus", "species", "taxon"],
+    "preserveSourceLabels": true,
+    "bugLordRemapping": null
+  },
+  "splits": {
+    "strategy": "upstream-official",
+    "sourceField": "split",
+    "preserveSourceAssignments": true,
+    "values": ["train", "val", "test", "key_unseen", "val_unseen", "test_unseen", "other_heldout", "pretrain"]
+  },
+  "rights": {
+    "reviewStatus": "pending-human-review",
+    "license": "Creative Commons Attribution 3.0 Unported",
+    "licenseVersion": "3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/3.0/",
+    "copyrightHolder": "CBG Photography Group",
+    "attributionRequired": true,
+    "pendingReview": ["database-rights", "source-terms", "attribution-implementation", "trained-weight-treatment"]
+  },
+  "controls": {
+    "downloadAuthorized": false,
+    "trainingAuthorized": false,
+    "approvedManifestRequiredBeforePromotion": true
+  }
+}

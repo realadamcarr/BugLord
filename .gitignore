@@ -47,6 +47,8 @@ data/
 !backend/data/
 dataset/
 datasets/
+!training/datasets/
+!training/datasets/*.json
 inaturalist/
 
 # Images used for training (exclude training folders specifically, but keep app assets)
