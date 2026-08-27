@@ -1030,7 +1030,7 @@ The immediate focus is the **BugLord commercial classification pipeline**.
 * [x] Add manifest validator tests.
 * [x] Identify commercially compatible insect datasets.
 * [x] Establish the first dataset version.
-* [ ] Establish the baseline training experiment.
+* [x] Establish the baseline training experiment.
 * [ ] Train and evaluate the first BugLord-owned classifier.
 
 Development should remain focused on this milestone before beginning unrelated BugLord 2.0 feature work.

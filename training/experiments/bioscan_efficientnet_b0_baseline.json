@@ -1,0 +1,34 @@
+{
+  "experimentId": "bioscan-efficientnet-b0-scratch-224-v1",
+  "datasetCandidate": "../datasets/buglord-bioscan-v0.1.0-candidate.json",
+  "model": {
+    "architecture": "efficientnet_b0",
+    "initialization": "random",
+    "pretrainedWeights": null,
+    "inputSize": [224, 224]
+  },
+  "training": {
+    "batchSize": 32,
+    "optimizer": "AdamW",
+    "learningRate": 0.0003,
+    "weightDecay": 0.01,
+    "maximumEpochs": 30,
+    "earlyStopping": { "monitor": "validation_loss", "patience": 5 },
+    "automaticMixedPrecision": true,
+    "seed": 42,
+    "loss": "cross_entropy"
+  },
+  "data": {
+    "imagePackage": "BIOSCAN_5M_original_full",
+    "targetField": "species",
+    "sourceSplitField": "split",
+    "splitPolicy": "preserve_upstream_assignments",
+    "trainingSplit": "train",
+    "validationSplit": "val",
+    "evaluationSplits": ["test", "key_unseen", "val_unseen", "test_unseen", "other_heldout", "pretrain"]
+  },
+  "reporting": {
+    "metrics": ["top_1_accuracy", "top_5_accuracy", "macro_f1", "confusion_matrix"],
+    "reportPerSourceSplit": true
+  }
+}
