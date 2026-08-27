@@ -1,6 +1,6 @@
 {
   "datasetVersion": "buglord-bioscan-v0.1.0-candidate",
-  "status": "commercial-quarantine",
+  "status": "internal-training-approved",
   "source": {
     "name": "BIOSCAN-5M",
     "canonicalUrl": "https://github.com/bioscan-ml/BIOSCAN-5M",
@@ -24,17 +24,24 @@
     "values": ["train", "val", "test", "key_unseen", "val_unseen", "test_unseen", "other_heldout", "pretrain"]
   },
   "rights": {
-    "reviewStatus": "pending-human-review",
+    "reviewStatus": "approved-internal-training",
     "license": "Creative Commons Attribution 3.0 Unported",
     "licenseVersion": "3.0",
     "licenseUrl": "https://creativecommons.org/licenses/by/3.0/",
     "copyrightHolder": "CBG Photography Group",
+    "attribution": "CBG Photography Group, Centre for Biodiversity Genomics",
     "attributionRequired": true,
-    "pendingReview": ["database-rights", "source-terms", "attribution-implementation", "trained-weight-treatment"]
+    "preserveSourceIdentifiers": true,
+    "preserveModificationRecords": true,
+    "endorsementImplied": false,
+    "sourceDatasetOwnershipClaimed": false,
+    "pretrainedModelsApproved": false,
+    "residualReview": ["trained-weight-treatment-before-public-commercial-release"]
   },
   "controls": {
-    "downloadAuthorized": false,
-    "trainingAuthorized": false,
+    "downloadAuthorized": true,
+    "trainingAuthorized": true,
+    "publicCommercialReleaseAuthorized": false,
     "approvedManifestRequiredBeforePromotion": true
   }
 }

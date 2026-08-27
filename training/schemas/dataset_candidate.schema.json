@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://buglord.app/schemas/dataset-candidate.schema.json",
-  "title": "BugLord quarantined dataset candidate",
-  "description": "A reproducible proposal for a dataset that is not approved for acquisition or training.",
+  "title": "BugLord BIOSCAN-5M dataset candidate",
+  "description": "A reproducible BIOSCAN-5M proposal approved for internal acquisition and training, subject to provenance controls.",
   "type": "object",
   "additionalProperties": false,
   "required": ["datasetVersion", "status", "source", "taxonomy", "splits", "rights", "controls"],
   "properties": {
     "datasetVersion": { "type": "string", "pattern": "^[a-z0-9-]+-v[0-9]+\\.[0-9]+\\.[0-9]+-candidate$" },
-    "status": { "const": "commercial-quarantine" },
+    "status": { "const": "internal-training-approved" },
     "source": {
       "type": "object",
       "additionalProperties": false,
@@ -53,26 +53,33 @@
     "rights": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["reviewStatus", "license", "licenseVersion", "licenseUrl", "copyrightHolder", "attributionRequired", "pendingReview"],
+      "required": ["reviewStatus", "license", "licenseVersion", "licenseUrl", "copyrightHolder", "attribution", "attributionRequired", "preserveSourceIdentifiers", "preserveModificationRecords", "endorsementImplied", "sourceDatasetOwnershipClaimed", "pretrainedModelsApproved", "residualReview"],
       "properties": {
-        "reviewStatus": { "const": "pending-human-review" },
+        "reviewStatus": { "const": "approved-internal-training" },
         "license": { "const": "Creative Commons Attribution 3.0 Unported" },
         "licenseVersion": { "const": "3.0" },
         "licenseUrl": { "const": "https://creativecommons.org/licenses/by/3.0/" },
         "copyrightHolder": { "const": "CBG Photography Group" },
+        "attribution": { "const": "CBG Photography Group, Centre for Biodiversity Genomics" },
         "attributionRequired": { "const": true },
-        "pendingReview": {
-          "const": ["database-rights", "source-terms", "attribution-implementation", "trained-weight-treatment"]
+        "preserveSourceIdentifiers": { "const": true },
+        "preserveModificationRecords": { "const": true },
+        "endorsementImplied": { "const": false },
+        "sourceDatasetOwnershipClaimed": { "const": false },
+        "pretrainedModelsApproved": { "const": false },
+        "residualReview": {
+          "const": ["trained-weight-treatment-before-public-commercial-release"]
         }
       }
     },
     "controls": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["downloadAuthorized", "trainingAuthorized", "approvedManifestRequiredBeforePromotion"],
+      "required": ["downloadAuthorized", "trainingAuthorized", "publicCommercialReleaseAuthorized", "approvedManifestRequiredBeforePromotion"],
       "properties": {
-        "downloadAuthorized": { "const": false },
-        "trainingAuthorized": { "const": false },
+        "downloadAuthorized": { "const": true },
+        "trainingAuthorized": { "const": true },
+        "publicCommercialReleaseAuthorized": { "const": false },
         "approvedManifestRequiredBeforePromotion": { "const": true }
       }
     }

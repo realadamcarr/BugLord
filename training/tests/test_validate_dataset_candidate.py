@@ -1,4 +1,4 @@
-"""Tests for quarantined dataset candidate configuration."""
+"""Tests for the rights-reviewed BIOSCAN dataset candidate configuration."""
 
 from __future__ import annotations
 
@@ -28,23 +28,33 @@ class ValidateDatasetCandidateTests(unittest.TestCase):
     def test_candidate_configuration_is_valid(self) -> None:
         self.assertEqual(validate_manifest(self.candidate, self.schema), [])
 
-    def test_candidate_cannot_authorize_download_or_training(self) -> None:
+    def test_candidate_authorizes_internal_acquisition_and_training(self) -> None:
         for control in ("downloadAuthorized", "trainingAuthorized"):
             with self.subTest(control=control):
-                candidate = copy.deepcopy(self.candidate)
-                candidate["controls"][control] = True
-                self.assertTrue(validate_manifest(candidate, self.schema))
+                self.assertIs(self.candidate["controls"][control], True)
 
-    def test_candidate_cannot_claim_rights_or_taxonomy_approval(self) -> None:
-        cases = (
-            ("rights", "reviewStatus", "approved"),
-            ("taxonomy", "status", "approved"),
-        )
-        for section, field, value in cases:
-            with self.subTest(section=section, field=field):
-                candidate = copy.deepcopy(self.candidate)
-                candidate[section][field] = value
-                self.assertTrue(validate_manifest(candidate, self.schema))
+        self.assertIs(self.candidate["controls"]["publicCommercialReleaseAuthorized"], False)
+
+        candidate = copy.deepcopy(self.candidate)
+        candidate["controls"]["publicCommercialReleaseAuthorized"] = True
+        self.assertTrue(validate_manifest(candidate, self.schema))
+
+    def test_candidate_does_not_approve_taxonomy_or_pretrained_models(self) -> None:
+        self.assertEqual(self.candidate["taxonomy"]["status"], "provisional-candidate")
+        self.assertIs(self.candidate["rights"]["pretrainedModelsApproved"], False)
+
+        candidate = copy.deepcopy(self.candidate)
+        candidate["rights"]["pretrainedModelsApproved"] = True
+        self.assertTrue(validate_manifest(candidate, self.schema))
+
+    def test_candidate_locks_attribution_and_provenance_controls(self) -> None:
+        rights = self.candidate["rights"]
+        self.assertEqual(rights["copyrightHolder"], "CBG Photography Group")
+        self.assertIn("Centre for Biodiversity Genomics", rights["attribution"])
+        self.assertIs(rights["preserveSourceIdentifiers"], True)
+        self.assertIs(rights["preserveModificationRecords"], True)
+        self.assertIs(rights["endorsementImplied"], False)
+        self.assertIs(rights["sourceDatasetOwnershipClaimed"], False)
 
     def test_candidate_must_preserve_official_splits_and_source_labels(self) -> None:
         candidate = copy.deepcopy(self.candidate)

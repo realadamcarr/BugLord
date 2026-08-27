@@ -33,8 +33,8 @@ class ValidateBaselineExperimentTests(unittest.TestCase):
         experiment["data"]["evaluationSplits"].remove("key_unseen")
         self.assertTrue(validate_experiment(experiment, DEFAULT_EXPERIMENT))
 
-    def test_full_training_remains_unauthorized(self) -> None:
-        self.assertFalse(training_authorized(self.experiment, DEFAULT_EXPERIMENT))
+    def test_internal_training_is_authorized_after_rights_review(self) -> None:
+        self.assertTrue(training_authorized(self.experiment, DEFAULT_EXPERIMENT))
 
 
 if __name__ == "__main__":
