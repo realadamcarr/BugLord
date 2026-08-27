@@ -17,7 +17,9 @@ from pathlib import Path
 TRAINING_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TRAINING_ROOT))
 
-from prepare_bioscan_v0_1 import PipelineError, prepare, safe_extract  # noqa: E402
+from prepare_bioscan_v0_1 import (  # noqa: E402
+    PipelineError, generate_eligibility_report, prepare, safe_extract,
+)
 
 
 class BioscanPipelineTests(unittest.TestCase):
@@ -96,6 +98,33 @@ class BioscanPipelineTests(unittest.TestCase):
                 target.writestr("../escape.txt", "bad")
             with self.assertRaises(PipelineError):
                 safe_extract(archive, root / "out")
+
+    def test_generates_metadata_only_eligibility_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            metadata = root / "metadata.csv"
+            base = {"phylum": "Arthropoda", "class": "Insecta", "order": "Diptera",
+                    "family": "Testidae", "subfamily": "", "genus": "Testus",
+                    "taxon": "Testus example"}
+            self.write_metadata(metadata, [
+                base | {"processid": "A", "split": "train", "species": "Testus example"},
+                base | {"processid": "B", "split": "val", "species": ""},
+                base | {"processid": "C", "split": "unknown", "species": "Testus other"},
+            ])
+
+            report = generate_eligibility_report(
+                metadata,
+                TRAINING_ROOT / "datasets" / "buglord-bioscan-v0.1.0-candidate.json",
+                "https://example.test/metadata.zip",
+            )
+
+            self.assertEqual(report["metadata"]["rows"], 3)
+            self.assertEqual(report["eligibleBaselineRows"], 1)
+            self.assertEqual(report["ineligibleByReason"], {
+                "missing-or-unsupported-split": 1, "missing-species": 1})
+            self.assertFalse(report["policy"]["imageValidationPerformed"])
+            self.assertFalse(report["policy"]["trainingStarted"])
+            self.assertEqual(report["decision"], "eligible-for-image-acquisition-review")
 
 
 if __name__ == "__main__":

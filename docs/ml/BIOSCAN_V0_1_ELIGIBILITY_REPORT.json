@@ -1,0 +1,74 @@
+{
+  "reportType": "bioscan-v0.1-metadata-eligibility",
+  "datasetVersion": "buglord-bioscan-v0.1.0",
+  "metadata": {
+    "filename": "BIOSCAN_5M_Insect_Dataset_metadata.csv",
+    "sourceUrl": "https://huggingface.co/datasets/bioscan-ml/BIOSCAN-5M/resolve/eeefb30/BIOSCAN_5M_Insect_Dataset_metadata_MultiTypes.zip",
+    "sha256": "5e7d21d48eef124644bd0717c58f75d1586e3ac4ebc1bc287a7794419eef1826",
+    "bytes": 4284000097,
+    "rows": 5150850
+  },
+  "policy": {
+    "requiredFields": [
+      "processid",
+      "species",
+      "split"
+    ],
+    "allowedSourceSplits": [
+      "key_unseen",
+      "other_heldout",
+      "pretrain",
+      "test",
+      "test_unseen",
+      "train",
+      "val",
+      "val_unseen"
+    ],
+    "baselineSourceSplits": [
+      "test",
+      "train",
+      "val"
+    ],
+    "imageValidationPerformed": false,
+    "trainingStarted": false
+  },
+  "countsBySourceSplit": {
+    "key_unseen": 36465,
+    "other_heldout": 76590,
+    "pretrain": 4677756,
+    "test": 39373,
+    "test_unseen": 7887,
+    "train": 289203,
+    "val": 14757,
+    "val_unseen": 8819
+  },
+  "eligibleBySourceSplit": {
+    "key_unseen": 36465,
+    "other_heldout": 76590,
+    "test": 39373,
+    "test_unseen": 7887,
+    "train": 289203,
+    "val": 14757,
+    "val_unseen": 8819
+  },
+  "distinctEligibleSpeciesBySourceSplit": {
+    "key_unseen": 914,
+    "other_heldout": 9862,
+    "test": 3483,
+    "test_unseen": 880,
+    "train": 11846,
+    "val": 3378,
+    "val_unseen": 903
+  },
+  "ineligibleByReason": {
+    "missing-species": 4677756
+  },
+  "eligibleBaselineRows": 343333,
+  "eligibleAllAllowedSplitRows": 473094,
+  "decision": "eligible-for-image-acquisition-review",
+  "limitations": [
+    "Metadata eligibility does not establish that corresponding images are present or valid.",
+    "Image checksums, duplicate pixels, and cross-split image leakage require the image archives.",
+    "This report does not approve image acquisition or start model training."
+  ]
+}

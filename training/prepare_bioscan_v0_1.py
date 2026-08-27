@@ -9,6 +9,7 @@ make acquisition neither auditable nor reproducible.
 from __future__ import annotations
 
 import argparse
+from collections import Counter, defaultdict
 import csv
 import hashlib
 import json
@@ -208,6 +209,74 @@ class PreparationResult:
     report: dict[str, object]
 
 
+def generate_eligibility_report(metadata: Path, candidate_path: Path,
+                                metadata_url: str | None = None) -> dict[str, object]:
+    """Summarize eligibility using metadata only; never inspect image assets."""
+    candidate = load_candidate(candidate_path)
+    split_counts: Counter[str] = Counter()
+    eligible_counts: Counter[str] = Counter()
+    rejection_counts: Counter[str] = Counter()
+    species_by_split: dict[str, set[str]] = defaultdict(set)
+    total = 0
+
+    with metadata.open(encoding="utf-8-sig", newline="") as source:
+        reader = csv.DictReader(source)
+        required = {"processid", "species", "split"}
+        if not reader.fieldnames or not required.issubset(reader.fieldnames):
+            raise PipelineError(f"metadata is missing required columns: {sorted(required)}")
+        for row in reader:
+            total += 1
+            source_split = first_value(row, "split")
+            process_id = first_value(row, "processid")
+            species = first_value(row, "species")
+            split_counts[source_split or "<missing>"] += 1
+            if source_split not in ALLOWED_SOURCE_SPLITS:
+                rejection_counts["missing-or-unsupported-split"] += 1
+            elif not process_id:
+                rejection_counts["missing-processid"] += 1
+            elif not species:
+                rejection_counts["missing-species"] += 1
+            else:
+                eligible_counts[source_split] += 1
+                species_by_split[source_split].add(species)
+
+    supervised = {"train", "val", "test"}
+    eligible_supervised = sum(eligible_counts[split] for split in supervised)
+    report = {
+        "reportType": "bioscan-v0.1-metadata-eligibility",
+        "datasetVersion": candidate["datasetVersion"].removesuffix("-candidate"),
+        "metadata": {
+            "filename": metadata.name,
+            "sourceUrl": metadata_url,
+            "sha256": sha256_file(metadata),
+            "bytes": metadata.stat().st_size,
+            "rows": total,
+        },
+        "policy": {
+            "requiredFields": ["processid", "species", "split"],
+            "allowedSourceSplits": sorted(ALLOWED_SOURCE_SPLITS),
+            "baselineSourceSplits": sorted(supervised),
+            "imageValidationPerformed": False,
+            "trainingStarted": False,
+        },
+        "countsBySourceSplit": dict(sorted(split_counts.items())),
+        "eligibleBySourceSplit": dict(sorted(eligible_counts.items())),
+        "distinctEligibleSpeciesBySourceSplit": {
+            split: len(species) for split, species in sorted(species_by_split.items())
+        },
+        "ineligibleByReason": dict(sorted(rejection_counts.items())),
+        "eligibleBaselineRows": eligible_supervised,
+        "eligibleAllAllowedSplitRows": sum(eligible_counts.values()),
+        "decision": "eligible-for-image-acquisition-review" if eligible_supervised else "not-eligible",
+        "limitations": [
+            "Metadata eligibility does not establish that corresponding images are present or valid.",
+            "Image checksums, duplicate pixels, and cross-split image leakage require the image archives.",
+            "This report does not approve image acquisition or start model training.",
+        ],
+    }
+    return report
+
+
 def prepare(metadata: Path, images_root: Path, output: Path, candidate_path: Path,
             selected_splits: set[str], retrieved_at: str, copy_images: bool = True) -> PreparationResult:
     candidate = load_candidate(candidate_path)
@@ -294,6 +363,12 @@ def build_parser() -> argparse.ArgumentParser:
     prep.add_argument("--splits", default="train,val,test")
     prep.add_argument("--retrieved-at", default=None)
     prep.add_argument("--manifest-only", action="store_true")
+    eligibility = subcommands.add_parser(
+        "eligibility-report", help="create an eligibility report from metadata only")
+    eligibility.add_argument("--metadata", type=Path, required=True)
+    eligibility.add_argument("--output", type=Path, required=True)
+    eligibility.add_argument("--metadata-url")
+    eligibility.add_argument("--candidate", type=Path, default=DEFAULT_CANDIDATE)
     return parser
 
 
@@ -307,12 +382,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(receipt, indent=2))
         elif args.command == "extract":
             safe_extract(args.archive, args.output)
-        else:
+        elif args.command == "prepare":
             timestamp = args.retrieved_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             result = prepare(args.metadata, args.images, args.output, args.candidate,
                              set(filter(None, args.splits.split(","))), timestamp,
                              not args.manifest_only)
             print(f"Prepared {len(result.records)} images; rejected {result.report['rejected']}.")
+        else:
+            report = generate_eligibility_report(
+                args.metadata, args.candidate, args.metadata_url)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+            print(f"Reported {report['eligibleBaselineRows']} eligible baseline rows.")
         return 0
     except (OSError, json.JSONDecodeError, PipelineError, zipfile.BadZipFile) as error:
         print(f"BIOSCAN pipeline failed: {error}", file=sys.stderr)

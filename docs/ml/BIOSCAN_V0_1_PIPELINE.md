@@ -7,6 +7,18 @@ SHA-256 checksum. This avoids treating a mutable Google Drive link as a pinned d
 
 ## Workflow
 
+Before image acquisition is approved, generate the eligibility report from the publisher's
+checksum-verified metadata CSV alone:
+
+```powershell
+python training/prepare_bioscan_v0_1.py eligibility-report --metadata <metadata.csv> --metadata-url <pinned-source-url> --output docs/ml/BIOSCAN_V0_1_ELIGIBILITY_REPORT.json
+```
+
+This streaming report checks the required `processid`, `species`, and official `split` values,
+counts eligible rows and distinct species by split, and records the CSV SHA-256. It never opens or
+downloads an image archive and cannot start training. Image presence, integrity, pixel duplicates,
+and leakage remain explicit limitations for the subsequent acquisition review.
+
 1. Obtain the metadata and the five `BIOSCAN_5M_original_full` archives from the BIOSCAN-5M
    publisher. Record the upstream version, URLs, retrieval time, and published or independently
    verified checksums in the acquisition record.
