@@ -1025,7 +1025,7 @@ The immediate focus is the **BugLord commercial classification pipeline**.
 ### Next tasks
 
 * [x] Restore/create `docs/ml/BUGLORD_ML_V2_SPEC.md`.
-* [ ] Restore/create `training/schemas/commercial_dataset_manifest.schema.json`.
+* [x] Restore/create `training/schemas/commercial_dataset_manifest.schema.json`.
 * [ ] Implement dataset manifest validation.
 * [ ] Add manifest validator tests.
 * [ ] Identify commercially compatible insect datasets.
