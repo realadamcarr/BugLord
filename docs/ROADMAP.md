@@ -1028,7 +1028,7 @@ The immediate focus is the **BugLord commercial classification pipeline**.
 * [x] Restore/create `training/schemas/commercial_dataset_manifest.schema.json`.
 * [x] Implement dataset manifest validation.
 * [x] Add manifest validator tests.
-* [ ] Identify commercially compatible insect datasets.
+* [x] Identify commercially compatible insect datasets.
 * [ ] Establish the first dataset version.
 * [ ] Establish the baseline training experiment.
 * [ ] Train and evaluate the first BugLord-owned classifier.
