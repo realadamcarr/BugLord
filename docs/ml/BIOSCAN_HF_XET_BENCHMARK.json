@@ -1,0 +1,19 @@
+{
+  "repoId": "bioscan-ml/BIOSCAN-5M",
+  "repoType": "dataset",
+  "revision": "eeefb301c2594124090842049cc38a0b0c7b2ecb",
+  "filename": "BIOSCAN_5M_Insect_Dataset_metadata_MultiTypes.zip",
+  "path": "training\\dataset-bioscan-v0.1\\benchmark\\BIOSCAN_5M_Insect_Dataset_metadata_MultiTypes.zip",
+  "sha256": "f94fd342f7e8c35c94f4177c4d5597e578b6203cb970876a8fc2dde58c12aa75",
+  "bytes": 2065075527,
+  "transfer": {
+    "backend": "huggingface_hub/hf_xet",
+    "forced": true,
+    "huggingfaceHubVersion": "1.29.0",
+    "hfXetVersion": "1.6.0",
+    "highPerformance": true,
+    "elapsedSeconds": 1485.588531,
+    "mebibytesPerSecond": 1.326
+  },
+  "retrievedAt": "2026-08-28T16:13:35.778740Z"
+}

@@ -9,6 +9,7 @@ pillow>=10.0.0
 # Progress and utilities
 tqdm>=4.65.0
 requests>=2.31.0
+huggingface_hub[hf_xet]>=0.32.0,<2.0.0
 
 # Dataset manifest validation
 jsonschema[format]>=4.23.0,<5.0.0

@@ -1,9 +1,9 @@
 # BIOSCAN v0.1 acquisition and preparation
 
-`training/prepare_bioscan_v0_1.py` turns the rights-reviewed BIOSCAN-5M original
-full-resolution package into an auditable, training-ready local dataset. It does not download
-anything unless an operator supplies both the current upstream URL and its independently recorded
-SHA-256 checksum. This avoids treating a mutable Google Drive link as a pinned dataset version.
+`training/prepare_bioscan_v0_1.py` turns the rights-reviewed BIOSCAN-5M `cropped_256`
+package into an auditable, training-ready local dataset. Acquisition uses the Hugging Face Hub
+client and its Xet transfer backend. It requires an immutable Hub revision plus an independently
+recorded SHA-256 checksum, avoiding mutable branches or Google Drive links as dataset versions.
 
 ## Workflow
 
@@ -19,19 +19,34 @@ counts eligible rows and distinct species by split, and records the CSV SHA-256.
 downloads an image archive and cannot start training. Image presence, integrity, pixel duplicates,
 and leakage remain explicit limitations for the subsequent acquisition review.
 
-1. Obtain the metadata and the five `BIOSCAN_5M_original_full` archives from the BIOSCAN-5M
-   publisher. Record the upstream version, URLs, retrieval time, and published or independently
-   verified checksums in the acquisition record.
-2. Acquire each asset atomically:
+1. Identify the metadata and split-specific `BIOSCAN_5M_cropped_256_train.zip` and
+   `BIOSCAN_5M_cropped_256_eval.zip` archives from the BIOSCAN-5M
+   publisher's Hugging Face dataset repository. Record the immutable commit revision, Hub paths,
+   retrieval time, sizes, and published or independently verified checksums.
+2. Acquire each asset through `huggingface_hub`. Current clients install and use `hf_xet`
+   automatically:
 
    ```powershell
-   python training/prepare_bioscan_v0_1.py acquire --url <upstream-url> --sha256 <64-hex-digest> --output training/dataset-bioscan-v0.1/raw/<filename>
+   python training/prepare_bioscan_v0_1.py acquire --repo-id bioscan-ml/BIOSCAN-5M --filename <Hub-path> --revision <commit> --sha256 <64-hex-digest> --bytes <published-size> --output training/dataset-bioscan-v0.1/raw/<filename>
    ```
 
-3. Extract each verified archive. ZIP traversal paths are rejected:
+   To benchmark an actual transfer, add `--force-download` and
+   `--benchmark-output <report.json>`. The receipt records elapsed seconds and MiB/s. Run this on
+   the intended acquisition machine; forced benchmarks consume the full asset bandwidth and Xet
+   can still reuse its local chunk cache. `HF_XET_HIGH_PERFORMANCE=1` may be set for a second run
+   to measure the high-performance mode on suitable hardware.
+
+   The checked-in [benchmark receipt](./BIOSCAN_HF_XET_BENCHMARK.json) is a real forced transfer
+   of the checksum-pinned 2.07 GB metadata archive on the development machine with Xet
+   high-performance mode enabled. It measured 1.326 MiB/s over 1,485.59 seconds. Treat this as a
+   machine/network baseline, not a universal Hub performance claim; image acquisition remains
+   subject to its separate review gate.
+
+3. Selectively extract only metadata-eligible train/validation/test images from each verified
+   archive. ZIP traversal paths are rejected:
 
    ```powershell
-   python training/prepare_bioscan_v0_1.py extract training/dataset-bioscan-v0.1/raw/<archive.zip> --output training/dataset-bioscan-v0.1/images
+   python training/prepare_bioscan_v0_1.py extract training/dataset-bioscan-v0.1/raw/<archive.zip> --metadata training/dataset-bioscan-v0.1/raw/bioscan5m/metadata/csv/BIOSCAN_5M_Insect_Dataset_metadata.csv --splits train,val,test --output training/dataset-bioscan-v0.1/images
    ```
 
 4. Prepare the supervised baseline splits:

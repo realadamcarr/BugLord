@@ -19,7 +19,7 @@
     "loss": "cross_entropy"
   },
   "data": {
-    "imagePackage": "BIOSCAN_5M_original_full",
+    "imagePackage": "BIOSCAN_5M_cropped_256",
     "targetField": "species",
     "sourceSplitField": "split",
     "splitPolicy": "preserve_upstream_assignments",

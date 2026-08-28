@@ -9,6 +9,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 import struct
 import zlib
@@ -18,7 +19,8 @@ TRAINING_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TRAINING_ROOT))
 
 from prepare_bioscan_v0_1 import (  # noqa: E402
-    PipelineError, generate_eligibility_report, prepare, safe_extract,
+    PipelineError, eligible_process_ids, generate_eligibility_report, hub_download,
+    prepare, safe_extract, selective_extract,
 )
 
 
@@ -98,6 +100,59 @@ class BioscanPipelineTests(unittest.TestCase):
                 target.writestr("../escape.txt", "bad")
             with self.assertRaises(PipelineError):
                 safe_extract(archive, root / "out")
+
+    def test_hub_download_is_revision_pinned_verified_and_benchmarked(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = b"xet transfer"
+
+            def fake_download(**kwargs: object) -> str:
+                self.assertEqual(kwargs["repo_type"], "dataset")
+                self.assertEqual(kwargs["revision"], "abc123")
+                target = Path(str(kwargs["local_dir"])) / str(kwargs["filename"])
+                target.write_bytes(payload)
+                return str(target)
+
+            with patch("huggingface_hub.hf_hub_download", side_effect=fake_download):
+                receipt = hub_download(
+                    "bioscan-ml/BIOSCAN-5M", "asset.zip", "abc123",
+                    root / "asset.zip", hashlib.sha256(payload).hexdigest(), len(payload), True)
+
+            self.assertEqual(receipt["revision"], "abc123")
+            self.assertEqual(receipt["transfer"]["backend"], "huggingface_hub/hf_xet")
+            self.assertTrue(receipt["transfer"]["forced"])
+            self.assertIn("huggingfaceHubVersion", receipt["transfer"])
+            self.assertIn("hfXetVersion", receipt["transfer"])
+
+    def test_hub_download_rejects_unpinned_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(PipelineError):
+                hub_download("bioscan-ml/BIOSCAN-5M", "asset.zip", "",
+                             Path(directory) / "asset.zip", "0" * 64)
+
+    def test_selective_extract_keeps_only_eligible_images(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            metadata = root / "metadata.csv"
+            base = {"phylum": "Arthropoda", "class": "Insecta", "order": "Diptera",
+                    "family": "Testidae", "subfamily": "", "genus": "Testus", "taxon": ""}
+            self.write_metadata(metadata, [
+                base | {"processid": "KEEP", "split": "train", "species": "Testus example"},
+                base | {"processid": "NO_LABEL", "split": "train", "species": ""},
+                base | {"processid": "HELDOUT", "split": "key_unseen", "species": "Testus other"},
+            ])
+            archive = root / "images.zip"
+            with zipfile.ZipFile(archive, "w") as target:
+                target.writestr("train/chunk/KEEP.jpg", b"keep")
+                target.writestr("train/chunk/NO_LABEL.jpg", b"skip")
+                target.writestr("key_unseen/chunk/HELDOUT.jpg", b"skip")
+
+            ids = eligible_process_ids(metadata, {"train", "val", "test"})
+            result = selective_extract(archive, root / "out", ids)
+
+            self.assertEqual(result["extracted"], 1)
+            self.assertTrue((root / "out" / "train" / "chunk" / "KEEP.jpg").is_file())
+            self.assertFalse((root / "out" / "key_unseen" / "chunk" / "HELDOUT.jpg").exists())
 
     def test_generates_metadata_only_eligibility_report(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

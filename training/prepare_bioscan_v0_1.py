@@ -12,17 +12,18 @@ import argparse
 from collections import Counter, defaultdict
 import csv
 import hashlib
+from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 import shutil
 import sys
-import urllib.request
 import zipfile
 import struct
 import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Iterable, Sequence
 
 from validate_dataset_manifest import DEFAULT_SCHEMA_PATH, load_json, validate_manifest
@@ -59,26 +60,67 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
-def download(url: str, destination: Path, expected_sha256: str) -> dict[str, object]:
-    """Download one pinned asset atomically and verify it before promotion."""
+def hub_download(repo_id: str, filename: str, revision: str, destination: Path,
+                 expected_sha256: str, expected_bytes: int | None = None,
+                 force_download: bool = False) -> dict[str, object]:
+    """Download one revision-pinned Hub asset with Xet and verify it."""
     if len(expected_sha256) != 64:
         raise PipelineError("expected SHA-256 must contain 64 hexadecimal characters")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    partial = destination.with_name(destination.name + ".partial")
+    if not revision:
+        raise PipelineError("a pinned Hugging Face revision is required")
+    if destination.name != Path(filename).name:
+        raise PipelineError("output filename must match the Hugging Face asset filename")
     try:
-        with urllib.request.urlopen(url) as response, partial.open("wb") as target:
-            shutil.copyfileobj(response, target)
-        actual = sha256_file(partial)
+        from huggingface_hub import hf_hub_download
+    except ImportError as error:
+        raise PipelineError(
+            "huggingface_hub is required; install training/requirements.txt"
+        ) from error
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    started = perf_counter()
+    try:
+        downloaded = Path(hf_hub_download(
+            repo_id=repo_id, repo_type="dataset", filename=filename,
+            revision=revision, local_dir=destination.parent,
+            force_download=force_download,
+        ))
+        if downloaded.resolve() != destination.resolve():
+            raise PipelineError(
+                f"Hub asset path {filename!r} does not resolve to output {destination}"
+            )
+        elapsed = perf_counter() - started
+        if expected_bytes is not None and destination.stat().st_size != expected_bytes:
+            raise PipelineError(
+                f"size mismatch for {filename}: expected {expected_bytes}, "
+                f"got {destination.stat().st_size}"
+            )
+        actual = sha256_file(destination)
         if actual.lower() != expected_sha256.lower():
             raise PipelineError(
-                f"checksum mismatch for {url}: expected {expected_sha256}, got {actual}"
+                f"checksum mismatch for {filename}: expected {expected_sha256}, got {actual}"
             )
-        partial.replace(destination)
-    finally:
-        if partial.exists():
-            partial.unlink()
-    return {"url": url, "path": destination.name, "sha256": expected_sha256.lower(),
-            "bytes": destination.stat().st_size}
+    except PipelineError:
+        raise
+    size = destination.stat().st_size
+    try:
+        xet_version = version("hf-xet")
+    except PackageNotFoundError:
+        xet_version = None
+    return {
+        "repoId": repo_id, "repoType": "dataset", "revision": revision,
+        "filename": filename, "path": str(destination),
+        "sha256": expected_sha256.lower(), "bytes": size,
+        "transfer": {
+            "backend": "huggingface_hub/hf_xet", "forced": force_download,
+            "huggingfaceHubVersion": version("huggingface-hub"),
+            "hfXetVersion": xet_version,
+            "highPerformance": os.environ.get("HF_XET_HIGH_PERFORMANCE", "").upper()
+            in {"1", "ON", "YES", "TRUE"},
+            "elapsedSeconds": round(elapsed, 6),
+            "mebibytesPerSecond": round(size / (1024 * 1024) / elapsed, 3) if elapsed else None,
+        },
+    }
 
 
 def safe_extract(archive: Path, destination: Path) -> None:
@@ -93,14 +135,50 @@ def safe_extract(archive: Path, destination: Path) -> None:
         source.extractall(destination)
 
 
+def eligible_process_ids(metadata: Path, selected_splits: set[str]) -> set[str]:
+    """Return exactly the labelled identifiers in the requested official splits."""
+    result: set[str] = set()
+    with metadata.open(encoding="utf-8-sig", newline="") as source:
+        reader = csv.DictReader(source)
+        required = {"processid", "species", "split"}
+        if not reader.fieldnames or not required.issubset(reader.fieldnames):
+            raise PipelineError(f"metadata is missing required columns: {sorted(required)}")
+        for row in reader:
+            if (first_value(row, "split") in selected_splits
+                    and first_value(row, "species") and first_value(row, "processid")):
+                result.add(first_value(row, "processid").casefold())
+    return result
+
+
+def selective_extract(archive: Path, destination: Path, process_ids: set[str]) -> dict[str, int]:
+    """Safely extract only requested images from a BIOSCAN ZIP."""
+    destination.mkdir(parents=True, exist_ok=True)
+    root = destination.resolve()
+    extracted = skipped = 0
+    with zipfile.ZipFile(archive) as source:
+        for member in source.infolist():
+            target = (destination / member.filename).resolve()
+            if target != root and root not in target.parents:
+                raise PipelineError(f"unsafe ZIP member in {archive}: {member.filename}")
+            if member.is_dir() or Path(member.filename).suffix.lower() not in IMAGE_SUFFIXES:
+                skipped += 1
+                continue
+            if Path(member.filename).stem.casefold() not in process_ids:
+                skipped += 1
+                continue
+            source.extract(member, destination)
+            extracted += 1
+    return {"extracted": extracted, "skipped": skipped}
+
+
 def load_candidate(path: Path) -> dict:
     candidate = load_json(path)
     controls = candidate.get("controls", {})
     source = candidate.get("source", {})
     if not controls.get("downloadAuthorized") or not controls.get("trainingAuthorized"):
         raise PipelineError("candidate does not authorize acquisition and training")
-    if source.get("name") != "BIOSCAN-5M" or source.get("imagePackage") != "BIOSCAN_5M_original_full":
-        raise PipelineError("candidate must select BIOSCAN-5M original full-resolution images")
+    if source.get("name") != "BIOSCAN-5M" or source.get("imagePackage") != "BIOSCAN_5M_cropped_256":
+        raise PipelineError("candidate must select BIOSCAN-5M cropped_256 images")
     return candidate
 
 
@@ -178,7 +256,10 @@ def manifest_record(row: dict[str, str], image_id: str, digest: str,
     notes = {
         "sourceSplit": source_split,
         "sourceTaxonomy": {rank: row.get(rank) or None for rank in candidate["taxonomy"]["sourceFields"]},
-        "modifications": ["Copied without pixel modification into canonical split layout"],
+        "modifications": [
+            "Upstream BIOSCAN crop and resize to 256 pixels on the shorter side",
+            "Copied without further pixel modification into canonical split layout",
+        ],
     }
     return {
         "internalImageId": image_id,
@@ -347,14 +428,22 @@ def prepare(metadata: Path, images_root: Path, output: Path, candidate_path: Pat
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
-    acquire = subcommands.add_parser("acquire", help="download one checksum-pinned upstream asset")
-    acquire.add_argument("--url", required=True)
+    acquire = subcommands.add_parser(
+        "acquire", help="download one checksum-pinned Hugging Face dataset asset via Xet")
+    acquire.add_argument("--repo-id", default="bioscan-ml/BIOSCAN-5M")
+    acquire.add_argument("--filename", required=True)
+    acquire.add_argument("--revision", required=True)
     acquire.add_argument("--sha256", required=True)
     acquire.add_argument("--output", type=Path, required=True)
+    acquire.add_argument("--bytes", type=int, default=None)
+    acquire.add_argument("--force-download", action="store_true")
+    acquire.add_argument("--benchmark-output", type=Path)
     acquire.add_argument("--candidate", type=Path, default=DEFAULT_CANDIDATE)
     extract = subcommands.add_parser("extract", help="safely extract a verified BIOSCAN ZIP")
     extract.add_argument("archive", type=Path)
     extract.add_argument("--output", type=Path, required=True)
+    extract.add_argument("--metadata", type=Path)
+    extract.add_argument("--splits", default="train,val,test")
     prep = subcommands.add_parser("prepare", help="validate images and create the training layout")
     prep.add_argument("--metadata", type=Path, required=True)
     prep.add_argument("--images", type=Path, required=True)
@@ -377,11 +466,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "acquire":
             load_candidate(args.candidate)
-            receipt = download(args.url, args.output, args.sha256)
+            receipt = hub_download(
+                args.repo_id, args.filename, args.revision, args.output,
+                args.sha256, args.bytes, args.force_download)
             receipt["retrievedAt"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            if args.benchmark_output:
+                args.benchmark_output.parent.mkdir(parents=True, exist_ok=True)
+                args.benchmark_output.write_text(
+                    json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
             print(json.dumps(receipt, indent=2))
         elif args.command == "extract":
-            safe_extract(args.archive, args.output)
+            if args.metadata:
+                selected = set(filter(None, args.splits.split(",")))
+                unknown = selected - ALLOWED_SOURCE_SPLITS
+                if unknown:
+                    raise PipelineError(f"unsupported BIOSCAN split(s): {', '.join(sorted(unknown))}")
+                print(json.dumps(selective_extract(
+                    args.archive, args.output, eligible_process_ids(args.metadata, selected)), indent=2))
+            else:
+                safe_extract(args.archive, args.output)
         elif args.command == "prepare":
             timestamp = args.retrieved_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             result = prepare(args.metadata, args.images, args.output, args.candidate,
