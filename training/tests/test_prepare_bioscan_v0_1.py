@@ -20,7 +20,9 @@ sys.path.insert(0, str(TRAINING_ROOT))
 
 from prepare_bioscan_v0_1 import (  # noqa: E402
     PipelineError, eligible_process_ids, generate_eligibility_report, hub_download,
-    prepare, safe_extract, selective_extract,
+    prepare, safe_extract, selective_extract, storage_preflight,
+    validate_approved_acquisition, APPROVED_IMAGE_ASSET, APPROVED_IMAGE_BYTES,
+    APPROVED_IMAGE_SHA256, APPROVED_REPO_ID, APPROVED_REVISION,
 )
 
 
@@ -129,6 +131,25 @@ class BioscanPipelineTests(unittest.TestCase):
             with self.assertRaises(PipelineError):
                 hub_download("bioscan-ml/BIOSCAN-5M", "asset.zip", "",
                              Path(directory) / "asset.zip", "0" * 64)
+
+    def test_approval_rejects_unrelated_asset_and_high_performance_mode(self) -> None:
+        with self.assertRaises(PipelineError):
+            validate_approved_acquisition(
+                APPROVED_REPO_ID, "unrelated.zip", APPROVED_REVISION,
+                APPROVED_IMAGE_SHA256, APPROVED_IMAGE_BYTES)
+        with patch.dict("os.environ", {"HF_XET_HIGH_PERFORMANCE": "1"}):
+            with self.assertRaises(PipelineError):
+                validate_approved_acquisition(
+                    APPROVED_REPO_ID, APPROVED_IMAGE_ASSET, APPROVED_REVISION,
+                    APPROVED_IMAGE_SHA256, APPROVED_IMAGE_BYTES)
+
+    def test_storage_preflight_preserves_reserve(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("prepare_bioscan_v0_1.shutil.disk_usage") as usage:
+                usage.return_value.free = 25 * 1024 ** 3
+                storage_preflight(Path(directory) / "asset.zip", 4 * 1024 ** 3)
+                with self.assertRaises(PipelineError):
+                    storage_preflight(Path(directory) / "asset.zip", 6 * 1024 ** 3)
 
     def test_selective_extract_keeps_only_eligible_images(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -4,9 +4,9 @@
   "source": {
     "name": "BIOSCAN-5M",
     "canonicalUrl": "https://github.com/bioscan-ml/BIOSCAN-5M",
-    "upstreamVersion": null,
+    "upstreamVersion": "eeefb301c2594124090842049cc38a0b0c7b2ecb",
     "imagePackage": "BIOSCAN_5M_cropped_256",
-    "imagePackageChecksum": null,
+    "imagePackageChecksum": "609883a5a840d99f7ea3bd56f4c4f7739ee9fbe27e1e07b218c6ddbfee91eb2f",
     "retrievedAt": null
   },
   "taxonomy": {

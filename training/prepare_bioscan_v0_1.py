@@ -46,10 +46,41 @@ MANIFEST_SPLITS = {
     "pretrain": "quarantine",
 }
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
+APPROVED_REPO_ID = "bioscan-ml/BIOSCAN-5M"
+APPROVED_REVISION = "eeefb301c2594124090842049cc38a0b0c7b2ecb"
+APPROVED_IMAGE_ASSET = "BIOSCAN_5M_cropped_256.zip"
+APPROVED_IMAGE_SHA256 = "609883a5a840d99f7ea3bd56f4c4f7739ee9fbe27e1e07b218c6ddbfee91eb2f"
+APPROVED_IMAGE_BYTES = 39_119_785_806
+DEFAULT_FREE_SPACE_RESERVE_GIB = 20
 
 
 class PipelineError(Exception):
     """An expected, user-actionable pipeline failure."""
+
+
+def storage_preflight(destination: Path, required_bytes: int,
+                      reserve_gib: int = DEFAULT_FREE_SPACE_RESERVE_GIB) -> None:
+    """Fail before a write that would consume the acquisition safety reserve."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    free = shutil.disk_usage(destination.parent).free
+    reserve = reserve_gib * 1024 ** 3
+    if required_bytes < 0 or free - required_bytes < reserve:
+        raise PipelineError(
+            f"storage preflight failed: {free} bytes free, {required_bytes} bytes required, "
+            f"and {reserve} bytes ({reserve_gib} GiB) must remain free"
+        )
+
+
+def validate_approved_acquisition(repo_id: str, filename: str, revision: str,
+                                  expected_sha256: str, expected_bytes: int | None) -> None:
+    """Restrict the review approval to the one pinned BIOSCAN image package."""
+    supplied = (repo_id, filename, revision, expected_sha256.lower(), expected_bytes)
+    approved = (APPROVED_REPO_ID, APPROVED_IMAGE_ASSET, APPROVED_REVISION,
+                APPROVED_IMAGE_SHA256, APPROVED_IMAGE_BYTES)
+    if supplied != approved:
+        raise PipelineError("asset is outside BIOSCAN v0.1 acquisition approval BL-AUTO-E5122207")
+    if os.environ.get("HF_XET_HIGH_PERFORMANCE", "").upper() in {"1", "ON", "YES", "TRUE"}:
+        raise PipelineError("HF_XET_HIGH_PERFORMANCE must remain disabled on this 32 GB machine")
 
 
 def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -77,7 +108,9 @@ def hub_download(repo_id: str, filename: str, revision: str, destination: Path,
             "huggingface_hub is required; install training/requirements.txt"
         ) from error
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    already_present = destination.is_file() and destination.stat().st_size == expected_bytes
+    required_bytes = 0 if already_present else (expected_bytes or 0)
+    storage_preflight(destination, required_bytes)
     started = perf_counter()
     try:
         downloaded = Path(hf_hub_download(
@@ -128,6 +161,7 @@ def safe_extract(archive: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     root = destination.resolve()
     with zipfile.ZipFile(archive) as source:
+        storage_preflight(destination / ".preflight", sum(member.file_size for member in source.infolist()))
         for member in source.infolist():
             target = (destination / member.filename).resolve()
             if target != root and root not in target.parents:
@@ -156,7 +190,14 @@ def selective_extract(archive: Path, destination: Path, process_ids: set[str]) -
     root = destination.resolve()
     extracted = skipped = 0
     with zipfile.ZipFile(archive) as source:
-        for member in source.infolist():
+        members = source.infolist()
+        selected_bytes = sum(
+            member.file_size for member in members
+            if (not member.is_dir() and Path(member.filename).suffix.lower() in IMAGE_SUFFIXES
+                and Path(member.filename).stem.casefold() in process_ids)
+        )
+        storage_preflight(destination / ".preflight", selected_bytes)
+        for member in members:
             target = (destination / member.filename).resolve()
             if target != root and root not in target.parents:
                 raise PipelineError(f"unsafe ZIP member in {archive}: {member.filename}")
@@ -370,6 +411,9 @@ def prepare(metadata: Path, images_root: Path, output: Path, candidate_path: Pat
     digest_split: dict[str, str] = {}
     counts: dict[str, int] = {}
     output.mkdir(parents=True, exist_ok=True)
+    if copy_images:
+        storage_preflight(output / "images" / ".preflight",
+                          sum(image.stat().st_size for image in images.values()))
 
     with metadata.open(encoding="utf-8-sig", newline="") as source:
         reader = csv.DictReader(source)
@@ -466,6 +510,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "acquire":
             load_candidate(args.candidate)
+            validate_approved_acquisition(
+                args.repo_id, args.filename, args.revision, args.sha256, args.bytes)
             receipt = hub_download(
                 args.repo_id, args.filename, args.revision, args.output,
                 args.sha256, args.bytes, args.force_download)

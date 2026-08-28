@@ -19,16 +19,20 @@ counts eligible rows and distinct species by split, and records the CSV SHA-256.
 downloads an image archive and cannot start training. Image presence, integrity, pixel duplicates,
 and leakage remain explicit limitations for the subsequent acquisition review.
 
-1. Identify the metadata and split-specific `BIOSCAN_5M_cropped_256_train.zip` and
-   `BIOSCAN_5M_cropped_256_eval.zip` archives from the BIOSCAN-5M
-   publisher's Hugging Face dataset repository. Record the immutable commit revision, Hub paths,
-   retrieval time, sizes, and published or independently verified checksums.
+1. Use only the approved `BIOSCAN_5M_cropped_256.zip` archive from the BIOSCAN-5M
+   publisher's Hugging Face dataset repository. It is pinned by the acquisition approval to commit
+   `eeefb301c2594124090842049cc38a0b0c7b2ecb`, 39,119,785,806 bytes, and SHA-256
+   `609883a5a840d99f7ea3bd56f4c4f7739ee9fbe27e1e07b218c6ddbfee91eb2f`.
 2. Acquire each asset through `huggingface_hub`. Current clients install and use `hf_xet`
    automatically:
 
    ```powershell
    python training/prepare_bioscan_v0_1.py acquire --repo-id bioscan-ml/BIOSCAN-5M --filename <Hub-path> --revision <commit> --sha256 <64-hex-digest> --bytes <published-size> --output training/dataset-bioscan-v0.1/raw/<filename>
    ```
+
+   The command enforces the [image acquisition approval](./BIOSCAN_V0_1_ACQUISITION_APPROVAL.md),
+   rejects unrelated assets and high-performance Xet mode, and preserves at least 20 GiB of free
+   space. Xet's default adaptive concurrency and valid local Hub/Xet caches remain available.
 
    To benchmark an actual transfer, add `--force-download` and
    `--benchmark-output <report.json>`. The receipt records elapsed seconds and MiB/s. Run this on
