@@ -1035,6 +1035,7 @@ The immediate focus is the **BugLord commercial classification pipeline**.
 * [x] [REVIEW] Complete BIOSCAN-5M commercial rights review.
 * [x] [AUTO] Build the BIOSCAN v0.1 dataset acquisition and preparation pipeline.
 * [x] [AUTO] Generate the BIOSCAN v0.1 eligibility report from metadata only; do not download image archives or start training.
+* [ ] [AUTO] Migrate the BIOSCAN downloader to Hugging Face Hub/Xet and benchmark transfer performance.
 * [ ] [REVIEW] Approve BIOSCAN v0.1 image acquisition.
 * [ ] [REVIEW]Train and evaluate the first BugLord-owned classifier.
 
