@@ -119,6 +119,7 @@
       ],
       "expo-build-properties",
       "react-native-health-connect",
+      "./plugins/withHealthConnect",
       [
         "@kingstinct/react-native-healthkit",
         {
