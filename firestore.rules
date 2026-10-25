@@ -95,15 +95,23 @@ service cloud.firestore {
       // Owner can always read and write
       allow read, write: if isMe(uid);
 
-      // Allow a trade participant to clear the trade lock on the other
-      // party's bug.  Only lockedByTradeId and lockedAt may be changed,
-      // and both must be set to null.
+      // Allow a participant of the locking trade to clear the lock on the
+      // other party's bug once that trade has ended. Only lockedByTradeId
+      // and lockedAt may be changed, and both must be set to null.
       allow update: if isSignedIn()
         && resource.data.lockedByTradeId != null
         && request.resource.data.lockedByTradeId == null
         && request.resource.data.lockedAt == null
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['lockedByTradeId', 'lockedAt']);
+             .hasOnly(['lockedByTradeId', 'lockedAt'])
+        && canReleaseLock(resource.data.lockedByTradeId);
+    }
+
+    function canReleaseLock(tradeId) {
+      let path = /databases/$(database)/documents/trades/$(tradeId);
+      return !exists(path)
+        || (request.auth.uid in [get(path).data.fromUid, get(path).data.toUid]
+            && get(path).data.status != 'proposed');
     }
 
     // ── Trades ──────────────────────────────────────────────────────
@@ -119,33 +127,67 @@ service cloud.firestore {
         && request.auth.uid == request.resource.data.fromUid
         && request.resource.data.status == 'proposed';
 
-      // Update rules for active trades (status must still be 'proposed')
-      // Client can never set status to 'completed' — only the Cloud Function does that
+      // Update rules for active trades (status must still be 'proposed').
+      // Each branch limits which fields may change, so a player can only
+      // touch their own side. The client can never set status to
+      // 'completed'; only the acceptTrade Cloud Function does that.
       allow update: if isSignedIn()
         && resource.data.status == 'proposed'
-        && request.resource.data.status != 'completed'
         && (
           // fromUid can cancel
           (request.auth.uid == resource.data.fromUid
-            && request.resource.data.status == 'cancelled')
+            && request.resource.data.status == 'cancelled'
+            && changedOnly(endTradeKeys()))
           ||
           // toUid can decline
           (request.auth.uid == resource.data.toUid
-            && request.resource.data.status == 'declined')
+            && request.resource.data.status == 'declined'
+            && changedOnly(endTradeKeys()))
+          ||
+          // Either participant can mark a past-expiry trade as expired
+          (isParticipant()
+            && request.resource.data.status == 'expired'
+            && resource.data.expiresAt < request.time
+            && changedOnly(['status', 'updatedAt']))
           ||
           // toUid can set their offered bug (toBugId) when it's still empty
           (request.auth.uid == resource.data.toUid
             && resource.data.toBugId == ''
             && request.resource.data.toBugId != ''
-            && request.resource.data.status == 'proposed')
+            && request.resource.data.status == 'proposed'
+            && changedOnly(['toBugId', 'toBugSnapshot', 'updatedAt']))
           ||
-          // Either participant can toggle their accept flag
+          // fromUid can toggle only their own accept flag
           (request.auth.uid == resource.data.fromUid
-            && request.resource.data.status == 'proposed')
+            && request.resource.data.status == 'proposed'
+            && changedOnly(['fromAccepted', 'fromAcceptedAt', 'updatedAt', 'events'])
+            && (request.resource.data.fromAccepted == false
+                || resource.data.toBugId != ''))
           ||
+          // toUid can toggle only their own accept flag
           (request.auth.uid == resource.data.toUid
-            && request.resource.data.status == 'proposed')
+            && request.resource.data.status == 'proposed'
+            && changedOnly(['toAccepted', 'toAcceptedAt', 'updatedAt', 'events'])
+            && (request.resource.data.toAccepted == false
+                || resource.data.toBugId != ''))
+          ||
+          // Either participant can append to the event log
+          (isParticipant() && changedOnly(['events']))
         );
+
+      function isParticipant() {
+        return request.auth.uid == resource.data.fromUid
+          || request.auth.uid == resource.data.toUid;
+      }
+
+      function changedOnly(keys) {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+      }
+
+      function endTradeKeys() {
+        return ['status', 'fromAccepted', 'toAccepted', 'fromAcceptedAt',
+                'toAcceptedAt', 'updatedAt', 'events'];
+      }
 
       allow delete: if false;
     }
