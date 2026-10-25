@@ -1,10 +1,9 @@
 import { initializeApp } from "firebase-admin/app";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { checkTradeCanComplete, TradeStatus } from "./tradeValidation";
 
 initializeApp();
-
-type TradeStatus = "proposed" | "declined" | "cancelled" | "completed";
 
 type TradeDoc = {
   fromUid: string;
@@ -12,6 +11,9 @@ type TradeDoc = {
   fromBugId: string;
   toBugId: string;
   status: TradeStatus;
+  fromAccepted: boolean;
+  toAccepted: boolean;
+  expiresAt: { toMillis(): number } | null;
 };
 
 function cleanBugForTransfer(bug: Record<string, any>) {
@@ -40,24 +42,17 @@ export const acceptTrade = onCall(async (request) => {
     if (!tradeSnap.exists) throw new HttpsError("not-found", "Trade not found.");
 
     const trade = tradeSnap.data() as Partial<TradeDoc>;
-    const { fromUid, toUid, fromBugId, toBugId, status } = trade;
+    const rejection = checkTradeCanComplete(
+      {
+        ...trade,
+        expiresAtMillis: trade.expiresAt?.toMillis() ?? null,
+      },
+      uid,
+      Date.now(),
+    );
+    if (rejection) throw new HttpsError(rejection.code, rejection.message);
 
-    if (!fromUid || !toUid || !fromBugId || !status) {
-      throw new HttpsError("failed-precondition", "Trade is missing required fields.");
-    }
-
-    if (!toBugId) {
-      throw new HttpsError("failed-precondition", "Recipient has not selected a bug yet.");
-    }
-
-    if (status !== "proposed") {
-      throw new HttpsError("failed-precondition", "Trade is no longer available.");
-    }
-
-    // Either participant can trigger the final swap (both must have accepted client-side first)
-    if (uid !== fromUid && uid !== toUid) {
-      throw new HttpsError("permission-denied", "Only participants can complete this trade.");
-    }
+    const { fromUid, toUid, fromBugId, toBugId } = trade as TradeDoc;
 
     const fromBugRef = db.doc(`inventories/${fromUid}/bugs/${fromBugId}`);
     const toBugRef = db.doc(`inventories/${toUid}/bugs/${toBugId}`);
@@ -109,6 +104,7 @@ export const acceptTrade = onCall(async (request) => {
       status: "completed",
       updatedAt: FieldValue.serverTimestamp(),
       completedAt: FieldValue.serverTimestamp(),
+      events: FieldValue.arrayUnion({ type: "completed", by: uid, at: new Date() }),
     });
   });
 

@@ -7,7 +7,6 @@ import {
     collection,
     doc,
     DocumentReference,
-    getDoc,
     onSnapshot,
     orderBy,
     query,
@@ -142,94 +141,89 @@ export function subscribeOutgoingTrades(
 
 // ── Status transitions (client-side) ─────────────────────────────────
 
-export async function declineTrade(
+/**
+ * Move a proposed trade to a terminal status (declined / cancelled) inside a
+ * transaction, so it can't interleave with the acceptTrade swap. Accept flags
+ * are cleared at the same time so a stale "ready" can never complete it.
+ */
+async function endTrade(
   tradeId: string,
   uid: string,
-): Promise<void> {
+  status: 'declined' | 'cancelled',
+): Promise<Omit<Trade, 'id'>> {
   const ref = doc(db, TRADES, tradeId);
-  const snap = await getDoc(ref);
 
-  if (!snap.exists()) throw new Error('Trade not found');
+  return runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Trade not found');
 
-  const data = snap.data() as Omit<Trade, 'id'>;
+    const data = snap.data() as Omit<Trade, 'id'>;
 
-  if (data.toUid !== uid) {
-    throw new Error('Only the recipient can decline a trade');
-  }
-  if (data.status !== 'proposed') {
-    throw new Error(`Cannot decline a trade with status "${data.status}"`);
-  }
+    if (status === 'declined' && data.toUid !== uid) {
+      throw new Error('Only the recipient can decline a trade');
+    }
+    if (status === 'cancelled' && data.fromUid !== uid) {
+      throw new Error('Only the sender can cancel a trade');
+    }
+    const verb = status === 'declined' ? 'decline' : 'cancel';
+    if (data.status !== 'proposed') {
+      throw new Error(`Cannot ${verb} a trade with status "${data.status}"`);
+    }
 
-  await updateDoc(ref, {
-    status: 'declined' satisfies TradeStatus,
-    updatedAt: serverTimestamp(),
-    events: arrayUnion({
-      type: 'declined',
-      by: uid,
-      at: Timestamp.now(),
-    }),
+    tx.update(ref, {
+      status: status satisfies TradeStatus,
+      fromAccepted: false,
+      toAccepted: false,
+      fromAcceptedAt: null,
+      toAcceptedAt: null,
+      updatedAt: serverTimestamp(),
+      events: arrayUnion({
+        type: status,
+        by: uid,
+        at: Timestamp.now(),
+      }),
+    });
+
+    return data;
   });
+}
 
-  // Release the sender's locked bug
+/** Release both bugs locked by a trade that has ended without a swap. */
+async function releaseTradeLocks(
+  data: Omit<Trade, 'id'>,
+  tradeId: string,
+  reason: string,
+): Promise<void> {
   try {
     await unlockOfferedBug(data.fromUid, data.fromBugId, tradeId);
   } catch (err) {
-    console.warn('[tradeService] Failed to unlock fromBug after decline:', err);
+    console.warn(`[tradeService] Failed to unlock fromBug after ${reason}:`, err);
   }
 
-  // Release the recipient's locked bug (if they had chosen one)
+  // The recipient's bug is only locked if they had chosen one
   if (data.toBugId) {
     try {
       await unlockOfferedBug(data.toUid, data.toBugId, tradeId);
     } catch (err) {
-      console.warn('[tradeService] Failed to unlock toBug after decline:', err);
+      console.warn(`[tradeService] Failed to unlock toBug after ${reason}:`, err);
     }
   }
+}
+
+export async function declineTrade(
+  tradeId: string,
+  uid: string,
+): Promise<void> {
+  const data = await endTrade(tradeId, uid, 'declined');
+  await releaseTradeLocks(data, tradeId, 'decline');
 }
 
 export async function cancelTrade(
   tradeId: string,
   uid: string,
 ): Promise<void> {
-  const ref = doc(db, TRADES, tradeId);
-  const snap = await getDoc(ref);
-
-  if (!snap.exists()) throw new Error('Trade not found');
-
-  const data = snap.data() as Omit<Trade, 'id'>;
-
-  if (data.fromUid !== uid) {
-    throw new Error('Only the sender can cancel a trade');
-  }
-  if (data.status !== 'proposed') {
-    throw new Error(`Cannot cancel a trade with status "${data.status}"`);
-  }
-
-  await updateDoc(ref, {
-    status: 'cancelled' satisfies TradeStatus,
-    updatedAt: serverTimestamp(),
-    events: arrayUnion({
-      type: 'cancelled',
-      by: uid,
-      at: Timestamp.now(),
-    }),
-  });
-
-  // Release the sender's locked bug
-  try {
-    await unlockOfferedBug(data.fromUid, data.fromBugId, tradeId);
-  } catch (err) {
-    console.warn('[tradeService] Failed to unlock fromBug after cancel:', err);
-  }
-
-  // Release the recipient's locked bug (if they had chosen one)
-  if (data.toBugId) {
-    try {
-      await unlockOfferedBug(data.toUid, data.toBugId, tradeId);
-    } catch (err) {
-      console.warn('[tradeService] Failed to unlock toBug after cancel:', err);
-    }
-  }
+  const data = await endTrade(tradeId, uid, 'cancelled');
+  await releaseTradeLocks(data, tradeId, 'cancel');
 }
 
 // ── Recipient sets their offered bug ─────────────────────────────────
@@ -332,65 +326,76 @@ export function subscribeTrade(
 
 /**
  * Set the accept flag for a participant in a trade session.
- * When both fromAccepted and toAccepted are true, the Cloud Function
- * handles the final swap.
+ * The flag is written in a transaction; if that write leaves both flags set,
+ * the acceptTrade Cloud Function performs the swap. The function re-checks
+ * both flags itself, so a partner who un-readies or cancels in the meantime
+ * stops the swap.
  */
 export async function setTradeAcceptFlag(
   tradeId: string,
   uid: string,
 ): Promise<void> {
   const ref = doc(db, TRADES, tradeId);
-  const snap = await getDoc(ref);
 
-  if (!snap.exists()) throw new Error('Trade not found');
+  const outcome = await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Trade not found');
 
-  const data = snap.data() as Omit<Trade, 'id'>;
+    const data = snap.data() as Omit<Trade, 'id'>;
 
-  if (data.status !== 'proposed') {
-    throw new Error(`Cannot accept a trade with status "${data.status}"`);
-  }
+    if (data.status !== 'proposed') {
+      throw new Error(`Cannot accept a trade with status "${data.status}"`);
+    }
 
-  // Check expiry
-  if (data.expiresAt && data.expiresAt.toMillis() < Date.now()) {
-    await updateDoc(ref, {
-      status: 'expired' satisfies TradeStatus,
-      updatedAt: serverTimestamp(),
-    });
+    // Expire instead of accepting. Returning (not throwing) lets the
+    // status write commit before we report the error below.
+    if (data.expiresAt && data.expiresAt.toMillis() < Date.now()) {
+      tx.update(ref, {
+        status: 'expired' satisfies TradeStatus,
+        updatedAt: serverTimestamp(),
+      });
+      return { expired: true, data, bothAccepted: false };
+    }
+
+    // Both bugs must be selected before either side can accept
+    if (!data.toBugId) {
+      throw new Error('The recipient hasn\'t selected a bug yet');
+    }
+
+    const isFrom = data.fromUid === uid;
+    const isTo = data.toUid === uid;
+
+    if (!isFrom && !isTo) {
+      throw new Error('You are not a participant in this trade');
+    }
+
+    const event = { type: 'accepted_flag', by: uid, at: Timestamp.now() };
+    if (isFrom) {
+      tx.update(ref, {
+        fromAccepted: true,
+        fromAcceptedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        events: arrayUnion(event),
+      });
+    } else {
+      tx.update(ref, {
+        toAccepted: true,
+        toAcceptedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        events: arrayUnion(event),
+      });
+    }
+
+    const bothAccepted = isFrom ? data.toAccepted === true : data.fromAccepted === true;
+    return { expired: false, data, bothAccepted };
+  });
+
+  if (outcome.expired) {
+    await releaseTradeLocks(outcome.data, tradeId, 'expiry');
     throw new Error('This trade has expired');
   }
 
-  // Both bugs must be selected before either side can accept
-  if (!data.toBugId) {
-    throw new Error('The recipient hasn\'t selected a bug yet');
-  }
-
-  const isFrom = data.fromUid === uid;
-  const isTo = data.toUid === uid;
-
-  if (!isFrom && !isTo) {
-    throw new Error('You are not a participant in this trade');
-  }
-
-  const updateData: Record<string, any> = {
-    updatedAt: serverTimestamp(),
-  };
-
-  if (isFrom) {
-    updateData.fromAccepted = true;
-    updateData.fromAcceptedAt = serverTimestamp();
-  } else {
-    updateData.toAccepted = true;
-    updateData.toAcceptedAt = serverTimestamp();
-  }
-
-  await updateDoc(ref, updateData);
-  await appendTradeEvent(ref, { type: 'accepted_flag', by: uid });
-
-  // If both have now accepted, trigger the Cloud Function for final swap
-  const updatedSnap = await getDoc(ref);
-  const updatedData = updatedSnap.data() as Omit<Trade, 'id'>;
-
-  if (updatedData.fromAccepted && updatedData.toAccepted) {
+  if (outcome.bothAccepted) {
     await acceptTrade(tradeId);
   }
 }
@@ -403,30 +408,39 @@ export async function unsetTradeAcceptFlag(
   uid: string,
 ): Promise<void> {
   const ref = doc(db, TRADES, tradeId);
-  const snap = await getDoc(ref);
 
-  if (!snap.exists()) throw new Error('Trade not found');
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('Trade not found');
 
-  const data = snap.data() as Omit<Trade, 'id'>;
+    const data = snap.data() as Omit<Trade, 'id'>;
 
-  if (data.status !== 'proposed') {
-    throw new Error(`Cannot modify a trade with status "${data.status}"`);
-  }
+    if (data.status !== 'proposed') {
+      throw new Error(`Cannot modify a trade with status "${data.status}"`);
+    }
 
-  const isFrom = data.fromUid === uid;
+    const isFrom = data.fromUid === uid;
+    const isTo = data.toUid === uid;
 
-  const updateData: Record<string, any> = {
-    updatedAt: serverTimestamp(),
-  };
+    if (!isFrom && !isTo) {
+      throw new Error('You are not a participant in this trade');
+    }
 
-  if (isFrom) {
-    updateData.fromAccepted = false;
-    updateData.fromAcceptedAt = null;
-  } else {
-    updateData.toAccepted = false;
-    updateData.toAcceptedAt = null;
-  }
-
-  await updateDoc(ref, updateData);
-  await appendTradeEvent(ref, { type: 'revoked_flag', by: uid });
+    const event = { type: 'revoked_flag', by: uid, at: Timestamp.now() };
+    if (isFrom) {
+      tx.update(ref, {
+        fromAccepted: false,
+        fromAcceptedAt: null,
+        updatedAt: serverTimestamp(),
+        events: arrayUnion(event),
+      });
+    } else {
+      tx.update(ref, {
+        toAccepted: false,
+        toAcceptedAt: null,
+        updatedAt: serverTimestamp(),
+        events: arrayUnion(event),
+      });
+    }
+  });
 }
