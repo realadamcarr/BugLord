@@ -15,7 +15,7 @@ import { ThemedText } from '@/components/ThemedText';
 import { BUG_SPRITE } from '@/constants/bugSprites';
 import { useBugCollection } from '@/contexts/BugCollectionContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { getNativeStepStatus } from '@/services/NativeStepHistory';
+import { getNativeStepStatus, NativeStepStatus, requestNativeStepPermissions } from '@/services/NativeStepHistory';
 import { useWalkMode } from '@/services/useWalkMode';
 import { Bug, RARITY_CONFIG } from '@/types/Bug';
 import { router } from 'expo-router';
@@ -54,7 +54,7 @@ export default function WalkModeScreen() {
   const [selectedBug, setSelectedBug] = useState<Bug | null>(null);
   const [showBugSelector, setShowBugSelector] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<'checking' | 'granted' | 'denied' | 'na'>('checking');
-  const [healthConnectStatus, setHealthConnectStatus] = useState<'checking' | 'available' | 'unavailable' | 'not_installed'>('checking');
+  const [healthConnectStatus, setHealthConnectStatus] = useState<'checking' | NativeStepStatus>('checking');
 
   // Check physical activity permission and Health Connect status on screen open
   useEffect(() => {
@@ -105,6 +105,21 @@ export default function WalkModeScreen() {
       }
     } catch {
       // Some devices grant implicitly
+    }
+  };
+
+  // Ask Health Connect for step read access (user-initiated, so the
+  // permission launcher is ready), then recover any steps it now exposes.
+  const handleRequestHealthConnect = async () => {
+    try {
+      const granted = await requestNativeStepPermissions();
+      setHealthConnectStatus(await getNativeStepStatus());
+      if (granted && walkModeActive) {
+        const { walkModeService } = require('@/services/WalkModeService');
+        await walkModeService.recoverMissedSteps();
+      }
+    } catch (e) {
+      console.warn('[WalkMode] Health Connect permission request failed:', e);
     }
   };
 
@@ -482,6 +497,22 @@ export default function WalkModeScreen() {
               <Text style={styles.permissionBannerTitle}>Health Connect Not Found</Text>
               <Text style={styles.permissionBannerSubtitle}>
                 Tap to install — required for background step tracking
+              </Text>
+            </View>
+            <Text style={styles.permissionBannerArrow}>→</Text>
+          </TouchableOpacity>
+        )}
+        {Platform.OS === 'android' && healthConnectStatus === 'needs_permission' && (
+          <TouchableOpacity
+            style={styles.healthConnectBanner}
+            onPress={handleRequestHealthConnect}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.permissionBannerIcon}>📱</Text>
+            <View style={styles.permissionBannerTextContainer}>
+              <Text style={styles.permissionBannerTitle}>Allow Step History</Text>
+              <Text style={styles.permissionBannerSubtitle}>
+                Tap to let BugLord read steps from Health Connect while the app is closed
               </Text>
             </View>
             <Text style={styles.permissionBannerArrow}>→</Text>
