@@ -1,4 +1,6 @@
 package com.realadamcarr.buglord
+
+import dev.matinzd.healthconnect.permissions.HealthConnectPermissionDelegate
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
@@ -21,6 +23,9 @@ class MainActivity : ReactActivity() {
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
+// @generated begin health-connect-permission-delegate - expo prebuild (DO NOT MODIFY) sync-4b22d470511470692199e9fd53cbc527aad4c8ce
+    HealthConnectPermissionDelegate.setPermissionDelegate(this)
+// @generated end health-connect-permission-delegate
   }
 
   /**

@@ -125,6 +125,12 @@ export interface WalkModeState {
   isActive: boolean;               // Whether walk mode is currently active
   activeBugId: string | null;      // ID of the bug currently training in walk mode
   activeBugName: string | null;    // Name of the bug currently training in walk mode
+  /** Start of a closed-app window no step source could read yet (e.g. Health
+   *  Connect permission not granted). Retried on the next recovery. */
+  unrecoveredSince?: number | null;
+  /** Steps counted live since unrecoveredSince, subtracted from the eventual
+   *  native total so they aren't counted twice. */
+  unrecoveredLiveSteps?: number;
 }
 
 // Default Walk Mode State
@@ -343,6 +349,8 @@ class WalkModeService {
       this.state.activeBugId = activeBugId || null;
       this.state.activeBugName = activeBugName || null;
       this.state.lastUpdateTimestamp = Date.now();
+      this.state.unrecoveredSince = null;
+      this.state.unrecoveredLiveSteps = 0;
       
       // Reset subscription baseline for fresh delta tracking
       this._subscriptionBaseline = 0;
@@ -486,11 +494,19 @@ class WalkModeService {
    */
   async recoverMissedSteps(): Promise<void> {
     try {
-      const lastUpdate = new Date(this.state.lastUpdateTimestamp);
+      // Resume from an earlier unread window if there is one
+      const lastUpdate = new Date(this.state.unrecoveredSince ?? this.state.lastUpdateTimestamp);
+      const liveStepsInWindow = this.state.unrecoveredSince != null
+        ? (this.state.unrecoveredLiveSteps ?? 0)
+        : 0;
       const now = new Date();
       const elapsed = now.getTime() - lastUpdate.getTime();
 
       let recoveredSteps = 0;
+      // Whether any source actually answered for this window. If none did
+      // (e.g. Health Connect permission not granted yet), the window is kept
+      // so a later attempt can still recover those steps.
+      let windowRead = false;
 
       // ── 1. Consume steps accumulated by the background fetch task ──
       //    These were tracked while the app was fully killed.
@@ -511,9 +527,14 @@ class WalkModeService {
       if (elapsed >= 5000 && elapsed <= 30 * 24 * 60 * 60 * 1000) {
         try {
           const nativeSteps = await queryNativeStepHistory(lastUpdate, now);
-          if (nativeSteps > 0 && nativeSteps > recoveredSteps) {
-            this.log(`🔄 Native health API reported ${nativeSteps} steps (more than bg: ${recoveredSteps}), using native value`);
-            recoveredSteps = nativeSteps;
+          if (nativeSteps !== null) windowRead = true;
+          // Health stores also contain steps we already counted live
+          const nativeUncounted = nativeSteps === null
+            ? null
+            : Math.max(0, nativeSteps - liveStepsInWindow);
+          if (nativeUncounted !== null && nativeUncounted > recoveredSteps) {
+            this.log(`🔄 Native health API reported ${nativeUncounted} uncounted steps (more than bg: ${recoveredSteps}), using native value`);
+            recoveredSteps = nativeUncounted;
           }
         } catch (nativeError) {
           this.log('⚠️ Native step history query failed:', nativeError);
@@ -524,9 +545,11 @@ class WalkModeService {
       if (elapsed >= 5000 && elapsed <= 7 * 24 * 60 * 60 * 1000) {
         try {
           const result = await PedometerAPI.getStepCountAsync(lastUpdate, now);
-          if (result && result.steps > 0 && result.steps > recoveredSteps) {
-            this.log(`🔄 Pedometer reported ${result.steps} steps (more than current: ${recoveredSteps}), using pedometer value`);
-            recoveredSteps = result.steps;
+          if (result) windowRead = true;
+          const pedometerUncounted = result ? Math.max(0, result.steps - liveStepsInWindow) : 0;
+          if (pedometerUncounted > recoveredSteps) {
+            this.log(`🔄 Pedometer reported ${pedometerUncounted} uncounted steps (more than current: ${recoveredSteps}), using pedometer value`);
+            recoveredSteps = pedometerUncounted;
           }
         } catch (pedometerError) {
           this.log('⚠️ Pedometer.getStepCountAsync failed:', pedometerError);
@@ -535,9 +558,18 @@ class WalkModeService {
         this.log('⏭️ Skipping pedometer recovery (gap too short or too long):', Math.round(elapsed / 1000), 's');
       }
 
-      // Always advance the timestamp so the next recovery attempt
-      // starts from now, regardless of whether we recovered steps.
+      // Keep the window if no source could read it. Previously it was always
+      // dropped, so a failed Health Connect read (e.g. permission not granted
+      // yet) threw those steps away for good.
       this.state.lastUpdateTimestamp = now.getTime();
+      if (windowRead || recoveredSteps > 0 || elapsed < 5000 || elapsed > 30 * 24 * 60 * 60 * 1000) {
+        this.state.unrecoveredSince = null;
+        this.state.unrecoveredLiveSteps = 0;
+      } else if (this.state.unrecoveredSince == null) {
+        this.log('⏸️ No step source could be read; keeping window for next recovery attempt');
+        this.state.unrecoveredSince = lastUpdate.getTime();
+        this.state.unrecoveredLiveSteps = 0;
+      }
 
       if (recoveredSteps > 0) {
         this.log(`🔄 Recovered ${recoveredSteps} total steps taken while app was closed`);
@@ -584,6 +616,9 @@ class WalkModeService {
     this.state.sessionSteps += deltaFromSubscription;
     this.state.totalSteps += deltaFromSubscription;
     this.state.lastUpdateTimestamp = Date.now();
+    if (this.state.unrecoveredSince != null) {
+      this.state.unrecoveredLiveSteps = (this.state.unrecoveredLiveSteps ?? 0) + deltaFromSubscription;
+    }
     
     this.log(`📊 Steps delta: +${deltaFromSubscription}, session: ${this.state.sessionSteps}, total: ${this.state.totalSteps}`);
 

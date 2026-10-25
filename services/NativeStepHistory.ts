@@ -78,25 +78,30 @@ async function requestAndroidPermissions(): Promise<boolean> {
   }
 }
 
-async function queryAndroidSteps(from: Date, to: Date): Promise<number> {
+/**
+ * Total steps between two dates, or null if Health Connect couldn't be read
+ * (not installed, permission not granted, query error). Uses aggregateRecord
+ * so steps written by several apps (e.g. Samsung Health + Google Fit) are
+ * de-duplicated by Health Connect instead of being summed twice.
+ */
+async function queryAndroidSteps(from: Date, to: Date): Promise<number | null> {
   try {
-    if (!(await initHealthConnect())) return 0;
+    if (!(await initHealthConnect())) return null;
+    if (!(await hasAndroidStepsPermission())) return null;
     const mod = require('react-native-health-connect');
-    if (typeof mod.readRecords !== 'function') return 0;
-    const result = await mod.readRecords('Steps', {
+    if (typeof mod.aggregateRecord !== 'function') return null;
+    const result = await mod.aggregateRecord({
+      recordType: 'Steps',
       timeRangeFilter: {
         operator: 'between',
         startTime: from.toISOString(),
         endTime: to.toISOString(),
       },
     });
-    return (result.records as { count: number }[]).reduce(
-      (sum: number, r: { count: number }) => sum + r.count,
-      0,
-    );
+    return typeof result?.COUNT_TOTAL === 'number' ? result.COUNT_TOTAL : 0;
   } catch (e) {
     console.warn('[NativeStepHistory] Android step query failed:', e);
-    return 0;
+    return null;
   }
 }
 
@@ -116,7 +121,7 @@ async function requestIOSPermissions(): Promise<boolean> {
   }
 }
 
-async function queryIOSSteps(from: Date, to: Date): Promise<number> {
+async function queryIOSSteps(from: Date, to: Date): Promise<number | null> {
   try {
     const Healthkit = require('@kingstinct/react-native-healthkit');
     const samples: { quantity: number }[] =
@@ -137,7 +142,7 @@ async function queryIOSSteps(from: Date, to: Date): Promise<number> {
     return samples.reduce((sum, s) => sum + s.quantity, 0);
   } catch (e) {
     console.warn('[NativeStepHistory] HealthKit step query failed:', e);
-    return 0;
+    return null;
   }
 }
 
@@ -145,17 +150,21 @@ async function queryIOSSteps(from: Date, to: Date): Promise<number> {
 
 /**
  * Check whether the native health platform is available and can provide steps.
- * Returns a status string: 'available', 'unavailable', or 'not_installed'.
+ * Returns 'available', 'needs_permission' (Android: installed but step read
+ * access not granted yet), 'unavailable', or 'not_installed'.
  * On Android, Health Connect must be installed (built-in on Android 14+).
  */
-export async function getNativeStepStatus(): Promise<'available' | 'unavailable' | 'not_installed'> {
+export type NativeStepStatus = 'available' | 'needs_permission' | 'unavailable' | 'not_installed';
+
+export async function getNativeStepStatus(): Promise<NativeStepStatus> {
   if (Platform.OS === 'android') {
     if (!isHealthConnectModuleAvailable()) return 'unavailable';
     try {
       // Try initializing — this is safer than getSdkStatus which can
       // crash natively on devices without Health Connect installed.
       const ok = await initHealthConnect();
-      return ok ? 'available' : 'not_installed';
+      if (!ok) return 'not_installed';
+      return (await hasAndroidStepsPermission()) ? 'available' : 'needs_permission';
     } catch {
       return 'not_installed';
     }
@@ -186,12 +195,14 @@ export async function requestNativeStepPermissions(): Promise<boolean> {
 /**
  * Query historical step count between two dates using the device's native
  * health data store. Works even if the app was fully killed in the interim.
+ * Returns null when the store couldn't be read, so callers can tell
+ * "no steps" apart from "don't know yet".
  */
 export async function queryNativeStepHistory(
   from: Date,
   to: Date,
-): Promise<number> {
+): Promise<number | null> {
   if (Platform.OS === 'android') return queryAndroidSteps(from, to);
   if (Platform.OS === 'ios') return queryIOSSteps(from, to);
-  return 0;
+  return null;
 }
