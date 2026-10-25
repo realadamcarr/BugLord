@@ -133,24 +133,29 @@ def make_transforms(input_size):
     return train_tf, eval_tf
 
 
+class ImageList:
+    """(path, label) list as a torch Dataset. Module level so DataLoader
+    workers can pickle it on Windows, where they're spawned processes."""
+
+    def __init__(self, items, tf):
+        self.items, self.tf = items, tf
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, i):
+        from PIL import Image
+
+        path, label = self.items[i]
+        with Image.open(path) as img:
+            return self.tf(img.convert("RGB")), label
+
+
 def make_loaders(samples, input_size, batch_size, workers):
     import torch
-    from PIL import Image
-    from torch.utils.data import DataLoader, Dataset
+    from torch.utils.data import DataLoader
 
     train_tf, eval_tf = make_transforms(input_size)
-
-    class ImageList(Dataset):
-        def __init__(self, items, tf):
-            self.items, self.tf = items, tf
-
-        def __len__(self):
-            return len(self.items)
-
-        def __getitem__(self, i):
-            path, label = self.items[i]
-            with Image.open(path) as img:
-                return self.tf(img.convert("RGB")), label
 
     def loader(split, tf, shuffle):
         return DataLoader(ImageList(samples.get(split, []), tf), batch_size=batch_size,
